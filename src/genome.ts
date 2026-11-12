@@ -178,7 +178,8 @@ export function deriveBody(g: Genome): BodyDims {
     shoulderR,
     waistR,
     hipR,
-    hipJointX: Math.min(hipR * 0.55, hipR - thighR * 0.6),
+    // wider feminine hips are padding, not wider-set legs
+    hipJointX: Math.min(hipR * lerp(0.55, 0.46, F), hipR - thighR * 0.6),
     shoulderX,
     shoulderY: torsoLen - upperArmR * 1.3,
     upperArmLen: armLen * 0.5,

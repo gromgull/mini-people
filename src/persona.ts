@@ -85,7 +85,8 @@ export function styleFor(base: GaitParams, p: Persona, amount: number): Style {
     armSwing: Math.min(0.85, base.armSwing * ex(-0.4 * W + 0.35 * E - 0.6 * D + 0.45 * S)),
     lean: base.lean + 0.08 * E - 0.05 * W,
     crouch: base.crouch + 0.04 * pos(-P) + 0.008 * pos(W) + 0.008 * pos(-E),
-    stance: base.stance * ex(0.5 * W + 0.3 * S - 0.8 * D),
+    // feet apart reads fast as cowboy/sumo: keep it subtle and bounded
+    stance: base.stance * clamp(ex(0.3 * W + 0.15 * S - 0.3 * D), 0.75, 1.3),
     footRoll: base.footRoll * ex(-0.6 * W + 0.5 * D + 0.3 * E),
   };
 
