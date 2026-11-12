@@ -80,7 +80,7 @@ const sky = createSky(fog);
 scene.add(sky);
 const clouds = new Clouds(cloudToon, cloudOutline);
 scene.add(clouds.group);
-let horizonFar = 12;
+let horizonFar = 30;
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
 const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: false, transparent: true });
 
@@ -799,13 +799,13 @@ function updateEnvironment(dt: number) {
   let extent = 0;
   for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
   // keep everyone well inside the clear zone; ease so the horizon doesn't jump
-  const want = Math.max(9, extent * 1.5 + 4);
+  const want = Math.max(24, extent * 4 + 14);
   horizonFar += (want - horizonFar) * Math.min(1, dt * 2);
   _fwd.subVectors(tgt, camera.position).setY(0).normalize();
   fog.uFogC.value.set(tgt.x, tgt.z);
   fog.uFogDir.value.set(_fwd.x, _fwd.z);
   fog.uFogFar.value = horizonFar;
-  fog.uFogNear.value = horizonFar * 0.55;
+  fog.uFogNear.value = horizonFar * 0.4;
   clouds.update(camera, tgt, horizonFar, dt);
   _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
   sky.material.uniforms.uHorizon.value = _hz.y;
