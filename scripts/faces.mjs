@@ -5,6 +5,8 @@ import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 const [ids = '2,6,12,13', seed = '1'] = process.argv.slice(2);
+const GENE = process.env.GENE || 'beard'; // which genome field the columns sweep
+const COLS = Number(process.env.COLS || 6);
 mkdirSync('screenshots/frames', { recursive: true });
 const server = await createServer({ server: { port: 5193, strictPort: true }, logLevel: 'error' });
 await server.listen();
@@ -16,14 +18,14 @@ const files = [];
 for (const i of ids.split(',').map(Number)) {
   await pg.goto(`http://localhost:5193/?seed=${seed}&count=24&mode=stand&paused&nogui&t=1&look=camera&select=${i}&focus&zoom=11&az=${process.env.AZ||25}&el=6&fy=0.86`);
   await pg.waitForFunction(() => window.__mini?.ready);
-  for (let style = 0; style < 6; style++) {
-    await pg.evaluate(([i, style]) => {
+  for (let style = 0; style < COLS; style++) {
+    await pg.evaluate(([i, style, gene]) => {
       const m = window.__mini;
-      m.people[i].genome.beard = style;
+      m.people[i].genome[gene] = style;
       m.rebuild(i);
       // hide everyone else so the face is clear
       m.people.forEach((p, j) => (p.root.visible = j === i));
-    }, [i, style]);
+    }, [i, style, GENE]);
     await pg.waitForTimeout(150);
     const f = `screenshots/frames/face-${i}-${style}.png`;
     await pg.screenshot({ path: f });
@@ -31,5 +33,5 @@ for (const i of ids.split(',').map(Number)) {
   }
 }
 await b.close(); await server.close();
-execFileSync('montage', [...files, '-tile', '6x', '-geometry', '+2+2', '-background', '#222', 'screenshots/faces.png']);
+execFileSync('montage', [...files, '-tile', `${COLS}x`, '-geometry', '+2+2', '-background', '#222', 'screenshots/faces.png']);
 console.log(errors.length ? `✗ ${errors.join('\n')}` : '✓ screenshots/faces.png');

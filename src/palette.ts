@@ -13,6 +13,7 @@ export const PALETTE = {
   shoes: ['#3a2418', '#202022', '#784420', '#a8a8a8'],
   eye: ['#121218'],
   eyeWhite: ['#f7f5ee'],
+  lips: ['#4a2420', '#6a2a28', '#8a3236', '#b0343e', '#c8404c', '#d86070', '#e88090'],
   ground: ['#7fae4c'],
 } as const;
 

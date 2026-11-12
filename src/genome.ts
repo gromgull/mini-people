@@ -35,6 +35,8 @@ export interface Genome {
   shorts: boolean;
   skirt: boolean;
   beard: number; // index into BEARD_STYLES
+  mouth: number; // index into MOUTH_STYLES
+  lips: number; // palette index
   // personality (drives animation, not geometry)
   persona: Persona;
 }
@@ -42,6 +44,8 @@ export interface Genome {
 export const SHAPE_GENES = [
   'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'noseWidth', 'noseLength', 'eyeSize', 'fem', 'bust',
 ] as const;
+
+export const MOUTH_STYLES = ['line', 'smile', 'frown', 'smirk', 'O'] as const;
 
 export const BEARD_STYLES = ['none', 'full', 'wizard', 'goatee', 'sideburns', 'moustache'] as const;
 
@@ -80,6 +84,8 @@ export function randomGenome(seed: number): Genome {
     noseWidth: 0.5,
     noseLength: 0.5,
     beard: 0,
+    mouth: 1,
+    lips: 0,
     persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
   // about half the crowd reads as female; a few in-between builds
@@ -94,6 +100,7 @@ export function randomGenome(seed: number): Genome {
   g.skirt = g.fem > 0.5 && r() < 0.4;
   g.noseWidth = bell(r);
   g.noseLength = bell(r);
+  // mouths: mostly content, some deadpan, a few grumpy, smug or startled
   // beards: mostly on masculine builds; grey/white hair leans wizard
   const beardR = r();
   const beardPick = r();
@@ -102,6 +109,9 @@ export function randomGenome(seed: number): Genome {
     const pool = grey ? [1, 2, 2, 2, 3, 4, 5] : [1, 1, 1, 2, 3, 3, 3, 4, 4, 5, 5];
     g.beard = pool[pickIndex(() => beardPick, pool.length)];
   }
+  g.mouth = [1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 3, 3, 4][pickIndex(r, 13)];
+  const lipR = r();
+  g.lips = g.fem > 0.5 ? (lipR < 0.6 ? 3 + Math.floor(r() * 2) : 2) : Math.floor(lipR * 3); // 0–2 muted, 3–4 red
   // separate stream so adding personality doesn't reshuffle existing bodies
   g.persona = derivePersona(g, mulberry32(seed ^ 0x5bd1e995));
   return g;
@@ -205,7 +215,7 @@ export function deriveBody(g: Genome): BodyDims {
     upperArmR,
     foreArmR,
     handR,
-    noseR: headR * lerp(0.12, 0.3, g.nose),
+    noseR: headR * lerp(0.09, 0.22, g.nose),
     eyeR: headR * lerp(0.22, 0.34, g.eyeSize),
     bustR: torsoR * lerp(0, 0.52, g.bust),
     armOut,

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
-import { BEARD_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
+import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createOutlineMaterial, createToonMaterial } from './materials';
 import { mulberry32 } from './rng';
@@ -427,6 +427,12 @@ function simulate(dt: number) {
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
     a.post(dt, m, st);
     gazes[i].update(dt, simTime);
+    if (p.mouth) {
+      // gasp while falling or while staring at someone else's drama
+      const gasp = gazes[i].surprised || (a.kind === 'fall' && a.rootLocked);
+      p.mouth.rest.visible = !gasp;
+      p.mouth.o.visible = gasp;
+    }
     if (a.impact && a.hammerHead) {
       p.root.updateMatrixWorld(true);
       sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
@@ -551,6 +557,8 @@ function select(i: number) {
   looks.add(g, 'skin', idx(PALETTE.skin.length)).onChange(rebuild);
   looks.add(g, 'hair', idx(PALETTE.hair.length)).onChange(rebuild);
   looks.add(g, 'hairStyle', Object.fromEntries(HAIR_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
+  looks.add(g, 'mouth', Object.fromEntries(MOUTH_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
+  looks.add(g, 'lips', idx(PALETTE.lips.length)).onChange(rebuild);
   looks.add(g, 'beard', Object.fromEntries(BEARD_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
   looks.add(g, 'shirt', idx(PALETTE.shirt.length)).onChange(rebuild);
   looks.add(g, 'pants', idx(PALETTE.pants.length)).onChange(rebuild);

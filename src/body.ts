@@ -33,6 +33,8 @@ export interface Person {
   eyes: Eye[];
   /** Ponytail pivot (child of the head) that the animator swings, if any. */
   tail: THREE.Object3D | null;
+  /** Resting mouth and a startled 'O' (swapped in by the gaze system). */
+  mouth: { rest: THREE.Object3D; o: THREE.Object3D } | null;
   dims: BodyDims;
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
@@ -258,12 +260,13 @@ export function buildPerson(
   headGeo.translate(0, hc, 0);
   part(head, headGeo);
 
+  let noseBottom = hc; // lowest point of the nose, for placing the mouth
   // nose: a slim bridge sloping out from between the eyes, ending in a wider
   // flattened tip; size, width (tip) and length (bridge) vary independently
   {
     const nr = d.noseR;
     const wk = lerpN(0.75, 1.45, genome.noseWidth);
-    const lk = lerpN(0.75, 1.6, genome.noseLength);
+    const lk = lerpN(0.75, 1.4, genome.noseLength);
     const ns = Math.max(6, segs - 2);
     const top = hc + d.headR * 0.05; // root of the nose, between the eyes
     const tipY = top - nr * 1.5 * lk;
@@ -275,7 +278,63 @@ export function buildPerson(
     const tip = ball(1, ns, skin);
     tip.scale(nr * 0.62 * wk, nr * 0.55, nr * 0.6);
     tip.translate(0, tipY, tipZ);
+    noseBottom = tipY - nr * 0.55;
     part(head, merge([bridge, tip]));
+  }
+
+  // mouth: a small dark shape on the face, in a lip colour; full beards push
+  // it out to sit on the beard. A hidden 'O' is kept for surprises.
+  let mouth: Person['mouth'] = null;
+  {
+    const hr0 = d.headR;
+    const nl = ROWS.lips.length;
+    // darker skin gets lighter lips so the mouth still reads
+    const lipRow = ROWS.lips[Math.min(nl - 1, (genome.lips % nl) + (genome.skin >= 3 ? 2 : 0))];
+    const tube = 0.055 * hr0;
+    const arcShape = (R: number, arc: number, up: boolean) => {
+      const g = withRow(new THREE.TorusGeometry(R, tube, 4, 10, arc), lipRow);
+      g.rotateZ(up ? -Math.PI / 2 - arc / 2 : Math.PI / 2 - arc / 2); // centre the arc at bottom/top
+      g.translate(0, up ? R * 0.8 : -R * 0.8, 0);
+      return g;
+    };
+    const shapeFor = (style: number): THREE.BufferGeometry => {
+      switch (style) {
+        case 1: return arcShape(0.34 * hr0, 1.8, true); // smile
+        case 2: return arcShape(0.32 * hr0, 1.4, false); // frown
+        case 3: {
+          const g = arcShape(0.28 * hr0, 1.5, true); // smirk: a lopsided smile
+          g.rotateZ(0.45);
+          g.translate(0.05 * hr0, 0, 0);
+          return g;
+        }
+        case 4: {
+          const ring = withRow(new THREE.TorusGeometry(0.11 * hr0, tube, 4, 12), lipRow);
+          ring.scale(1, 1.25, 1);
+          const hole = ball(1, 8, ROWS.eye[0]);
+          hole.scale(0.1 * hr0, 0.13 * hr0, 0.02 * hr0);
+          return merge([ring, hole]);
+        }
+        default: {
+          const g = ball(1, 8, lipRow); // neutral straight line
+          g.scale(0.26 * hr0, tube, tube * 1.2);
+          return g;
+        }
+      }
+    };
+    // a clear gap below the nose, but never off the chin
+    const y = Math.max(-0.72, Math.min(-0.36, (noseBottom - hc) / hr0 - 0.14));
+    const bearded = genome.beard === 1 || genome.beard === 2;
+    const z = bearded ? 1.05 : Math.sqrt(1 - y * y) + 0.015;
+    const place = (g: THREE.BufferGeometry) => {
+      g.scale(1, 1, 0.6);
+      g.rotateX(-Math.asin(y)); // follow the face as it curves under
+      g.translate(0, hc + y * hr0, z * hr0);
+      return g;
+    };
+    const rest = part(head, place(shapeFor(genome.mouth)));
+    const o = part(head, place(shapeFor(4)));
+    o.visible = false;
+    mouth = { rest, o };
   }
 
   // facial hair (in the hair colour; on the head, so it follows nods and turns)
@@ -408,6 +467,7 @@ export function buildPerson(
     genome,
     eyes,
     tail,
+    mouth,
     dims: d,
     root,
     joints,

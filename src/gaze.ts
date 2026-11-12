@@ -47,6 +47,8 @@ export class Gaze {
   private blinkT = -1;
   private springs: Spring[][] = [];
   readonly hint: LookHint = { yaw: 0, pitch: 0 };
+  /** Startled: staring at someone doing something dramatic. */
+  surprised = false;
   /** Conversation partner: overrides everything in auto mode. */
   partner = -1;
 
@@ -125,6 +127,8 @@ export class Gaze {
       this.hasTarget = !!s && w.selected !== this.self;
       if (this.hasTarget) headCentre(s, this.target);
     }
+
+    this.surprised = w.mode === 'auto' && this.who >= 0 && this.who !== this.partner && w.busy(this.who) && this.hasTarget;
 
     // head turn: part of the way toward the target, in the root's frame
     if (this.hasTarget) {
