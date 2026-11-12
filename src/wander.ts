@@ -13,6 +13,7 @@ export interface WanderState {
   tx: number; // current walk target
   tz: number;
   walking: boolean;
+  face: number | null; // turn to this heading while standing (e.g. a conversation)
   until: number; // idle until this sim time
 }
 
@@ -28,7 +29,7 @@ const TURN_RATE = 3.2; // rad/s
 const TURN_FIRST = 0.6; // further off than this → turn on the spot before walking
 const PERSONAL = 0.55;
 const MIN_GAP = 0.36; // hard minimum distance a walker keeps from anyone // neighbours closer than this push us away
-const ACTIONS: ActionKind[] = ['wave', 'wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall'];
+const ACTIONS: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall', 'talk', 'talk', 'talk', 'saw', 'saw'];
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -47,7 +48,7 @@ export function scatter(count: number, rnd: () => number): WanderState[] {
       z = Math.sin(a) * r;
       if (out.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > 0.45 ** 2)) break;
     }
-    out.push({ x, z, yaw: rnd() * Math.PI * 2, tx: x, tz: z, walking: false, until: rnd() * 3 });
+    out.push({ x, z, yaw: rnd() * Math.PI * 2, tx: x, tz: z, walking: false, face: null, until: rnd() * 3 });
   }
   return out;
 }
@@ -90,6 +91,7 @@ export class Wander {
     s.tx = bx;
     s.tz = bz;
     s.walking = true;
+    s.face = null;
   }
 
   /**
@@ -101,6 +103,13 @@ export class Wander {
     const R = wanderRadius(all.length);
     let act: ActionKind | null = null;
 
+    // turning to face someone while standing
+    if (!s.walking && s.face !== null) {
+      const err = wrap(s.face - s.yaw);
+      const step = TURN_RATE * 0.7 * dt;
+      s.yaw = wrap(s.yaw + Math.max(-step, Math.min(step, err)));
+      if (!b.busy) s.face = null;
+    }
     if (b.holdSpeed) return { speed: 0, act };
 
     if (!s.walking) {

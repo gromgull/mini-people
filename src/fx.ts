@@ -5,9 +5,9 @@ export class Sparks {
   private pool: { m: THREE.Mesh; v: THREE.Vector3; life: number }[] = [];
   private next = 0;
 
-  constructor(scene: THREE.Scene, count = 64) {
+  constructor(scene: THREE.Scene, count = 64, colors = ['#fff6c0', '#ffd24a', '#ffffff'], private gravity = 12) {
     const geo = new THREE.OctahedronGeometry(0.014, 0);
-    const mats = ['#fff6c0', '#ffd24a', '#ffffff'].map((c) => new THREE.MeshBasicMaterial({ color: c }));
+    const mats = colors.map((c) => new THREE.MeshBasicMaterial({ color: c }));
     for (let i = 0; i < count; i++) {
       const m = new THREE.Mesh(geo, mats[i % mats.length]);
       m.visible = false;
@@ -33,7 +33,7 @@ export class Sparks {
     for (const s of this.pool) {
       if (s.life <= 0) continue;
       s.life -= dt;
-      s.v.y -= 12 * dt;
+      s.v.y -= this.gravity * dt;
       s.m.position.addScaledVector(s.v, dt);
       s.m.scale.setScalar(Math.max(0.01, s.life * 3));
       if (s.life <= 0 || s.m.position.y < 0) s.m.visible = false;

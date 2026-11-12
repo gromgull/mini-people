@@ -165,6 +165,7 @@ let simTime = 0;
 let spinAngle = 0;
 const kit = { toon, outline };
 const sparks = new Sparks(scene);
+const sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
 // deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
 let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
   ACTIONS.includes(q.get('act') as ActionKind)
@@ -256,7 +257,7 @@ function setMode(mode: Mode) {
   if (mode === 'compare' && settings.mode !== 'compare') compareBase = structuredClone(people[selected]?.genome ?? randomGenome(1));
   if (mode === 'wander') {
     // start from wherever everyone is standing now
-    wanders = people.map((p) => ({ x: p.root.position.x, z: p.root.position.z, yaw: p.root.rotation.y, tx: 0, tz: 0, walking: false, until: simTime + Math.random() * 2 }));
+    wanders = people.map((p) => ({ x: p.root.position.x, z: p.root.position.z, yaw: p.root.rotation.y, tx: 0, tz: 0, walking: false, face: null, until: simTime + Math.random() * 2 }));
     offsets.forEach((o) => (o.x = o.z = o.yaw = 0));
   }
   settings.mode = mode;
@@ -322,7 +323,7 @@ const gazeWorld: GazeWorld = {
   people: [],
   busy: (i) => {
     const k = actors[i]?.kind;
-    return k === 'fall' || k === 'jump' || k === 'hammer';
+    return k === 'fall' || k === 'jump' || k === 'hammer' || k === 'saw';
   },
   camera: new THREE.Vector3(),
   cursor: null,
@@ -330,12 +331,41 @@ const gazeWorld: GazeWorld = {
   time: 0,
 };
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit'];
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if (kind === 'hammer' && settings.mode === 'parade') kind = 'wave';
-  actors[i]?.start(kind, { push });
+  if ((kind === 'hammer' || kind === 'saw') && settings.mode === 'parade') kind = 'wave';
+  const a = actors[i];
+  if (!a) return;
+  if (kind === 'talk') return startTalk(i);
+  a.start(kind, { push });
+}
+
+/** Talk to the nearest free neighbour (who talks back), or to nobody. */
+function startTalk(i: number) {
+  const me = people[i].root.position;
+  let best = -1;
+  let bestD = 1.6;
+  people.forEach((o, j) => {
+    if (j === i || actors[j].busy || (settings.mode === 'wander' && wanders[j]?.walking)) return;
+    const d = o.root.position.distanceTo(me);
+    if (d < bestD) {
+      bestD = d;
+      best = j;
+    }
+  });
+  for (const [a, b] of best >= 0 ? [[i, best], [best, i]] : [[i, -1]]) {
+    actors[a].start('talk');
+    actors[a].partner = b;
+    if (settings.mode === 'parade') actors[a].holdSpeed = false; // chat on the move
+    if (settings.mode === 'wander' && b >= 0) {
+      const w = wanders[a];
+      const o = people[b].root.position;
+      w.walking = false;
+      w.face = Math.atan2(o.x - w.x, o.z - w.z);
+    }
+  }
 }
 
 /** One simulation step: actions, locomotion, animation, effects. */
@@ -392,6 +422,7 @@ function simulate(dt: number) {
       }
     }
     placeOne(i, pose?.lift ?? 0);
+    gazes[i].partner = a.kind === 'talk' ? a.partner : -1;
     gazes[i].aim(gazeWorld);
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
     a.post(dt, m, st);
@@ -400,8 +431,13 @@ function simulate(dt: number) {
       p.root.updateMatrixWorld(true);
       sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
     }
+    if (a.dust && a.sawTip) {
+      p.root.updateMatrixWorld(true);
+      sawdust.burst(a.sawTip.getWorldPosition(new THREE.Vector3()), 4, 0.35);
+    }
   });
   sparks.update(dt);
+  sawdust.update(dt);
 }
 
 // ---------------------------------------------------------------- labels (compare mode)
@@ -486,7 +522,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -494,7 +530,7 @@ actF.add(settings, 'autoActions').name('random crowd actions');
 actF.add(settings, 'lookAt', LOOK_MODES).name('👀 look at');
 
 window.addEventListener('keydown', (e) => {
-  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit' } as const)[e.key as '1'];
+  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw' } as const)[e.key as '1'];
   if (k) act(selected, k);
 });
 

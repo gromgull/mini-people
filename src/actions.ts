@@ -5,7 +5,7 @@ import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /** Arm override blended into the animator's targets *before* the springs. */
@@ -39,6 +39,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t / tin) * smooth((dur - t) / tout);
 
 const JUMP_G = 14;
+const SAW_CROUCH = 0.1;
 const _target = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _pos = new THREE.Vector3();
@@ -81,6 +82,28 @@ function boxGeo() {
   return boxGeos;
 }
 
+let sawGeos: { handle: THREE.BufferGeometry; blade: THREE.BufferGeometry; log: THREE.BufferGeometry; end: THREE.BufferGeometry; trestle: THREE.BufferGeometry } | null = null;
+function sawGeo() {
+  if (sawGeos) return sawGeos;
+  // saw: handle in the fist, blade continuing down the forearm line (hand -Y),
+  // flat in the hand's y-z plane so strokes slide along it
+  const handle = withRow(new THREE.BoxGeometry(0.03, 0.06, 0.05), ROWS.shoes[2]);
+  handle.translate(0, -0.01, 0);
+  const blade = withRow(new THREE.BoxGeometry(0.005, 0.3, 0.06), ROWS.shoes[3]);
+  blade.translate(0, -0.18, 0.012);
+  // half a log (unit length along +x from the cut, radius 1), bark + pale end
+  const log = withRow(new THREE.CylinderGeometry(1, 1, 1, 9), ROWS.shoes[0]);
+  log.rotateZ(Math.PI / 2);
+  log.translate(0.5, 0, 0);
+  const end = withRow(new THREE.CircleGeometry(0.86, 9), ROWS.pants[6]);
+  end.rotateY(-Math.PI / 2);
+  end.translate(-0.002, 0, 0);
+  const trestle = withRow(new THREE.BoxGeometry(1, 1, 1), ROWS.shoes[2]);
+  trestle.translate(0, 0.5, 0);
+  sawGeos = { handle, blade, log, end, trestle };
+  return sawGeos;
+}
+
 function mesh(geo: THREE.BufferGeometry, kit: PropKit) {
   const m = new THREE.Mesh(geo, kit.toon);
   const o = new THREE.Mesh(geo, kit.outline);
@@ -121,6 +144,15 @@ export class Actor {
   private bench: THREE.Object3D | null = null;
   private seat = { h: 0, z: 0, crouch: 0 };
   private benchScale = new THREE.Vector3();
+  /** Talking: who to face (index into the crowd), set by the caller. */
+  partner = -1;
+  dust = false; // set on frames where a saw stroke throws sawdust
+  sawTip: THREE.Object3D | null = null;
+  private saw: THREE.Object3D | null = null;
+  private logSet: THREE.Object3D | null = null;
+  private logHalves: THREE.Object3D[] = [];
+  private beats = { next: 0, L: { x: -0.5, z: 0.2, elbow: 1.2, w: 1 }, R: { x: -0.5, z: 0.2, elbow: 1.2, w: 1 }, head: 0, headUntil: 0, dur: 5 };
+  private lastStroke = 0;
 
   constructor(private p: Person, private kit: PropKit) {}
 
@@ -135,18 +167,28 @@ export class Actor {
     this.t = 0;
     this.side = opts.side ?? (Math.random() < 0.7 ? 'R' : 'L');
     this.push.copy(opts.push ?? new THREE.Vector3());
-    this.holdSpeed = kind === 'hammer' || kind === 'fall' || kind === 'carry' || kind === 'sit';
+    this.holdSpeed = kind !== 'wave' && kind !== 'jump';
     this.stopNow = kind === 'fall';
     this.lastU = 0;
+    this.lastStroke = -1;
     if (kind === 'hammer') this.showHammer(true);
     if (kind === 'carry') this.makeBox();
     if (kind === 'sit') this.makeBench();
+    if (kind === 'talk') {
+      this.beats.next = 0;
+      this.beats.headUntil = 0;
+      this.beats.dur = 4 + Math.random() * 3;
+    }
+    if (kind === 'saw') this.makeSaw();
   }
 
   stop() {
     this.showHammer(false);
     if (this.box) this.box.visible = false;
     if (this.bench) this.bench.visible = false;
+    if (this.saw) this.saw.visible = false;
+    if (this.logSet) this.logSet.visible = false;
+    this.partner = -1;
     this.kind = null;
     this.ragdoll = null;
     this.getup = null;
@@ -160,6 +202,78 @@ export class Actor {
     this.rock?.removeFromParent();
     this.box?.removeFromParent();
     this.bench?.removeFromParent();
+    this.saw?.removeFromParent();
+    this.logSet?.removeFromParent();
+  }
+
+  /** Saw in the right hand; log on a sawhorse where the blade meets it. */
+  private makeSaw() {
+    const p = this.p;
+    const J = p.joints;
+    const d = p.dims;
+    const s = Math.sqrt(d.height);
+    const g = sawGeo();
+    if (!this.saw) {
+      this.saw = new THREE.Group();
+      this.saw.add(mesh(g.handle, this.kit), mesh(g.blade, this.kit));
+      this.sawTip = new THREE.Object3D();
+      this.sawTip.position.set(0, -0.2, 0.04);
+      this.saw.add(this.sawTip);
+      this.saw.scale.setScalar(s);
+      this.saw.position.y = -d.handR * 0.7;
+      J.wristR.add(this.saw);
+      this.logSet = new THREE.Group();
+      this.logHalves = [1, -1].map((side) => {
+        const h = new THREE.Group();
+        h.add(mesh(g.log, this.kit), mesh(g.end, this.kit));
+        h.scale.x = side; // mirrored half
+        this.logSet!.add(h);
+        return h;
+      });
+      for (const x of [-1, 1]) {
+        const t = mesh(g.trestle, this.kit);
+        t.userData.side = x;
+        this.logSet.add(t);
+      }
+      p.root.add(this.logSet);
+    }
+    this.saw.visible = true;
+
+    // FK the mid-stroke pose to find where the blade cuts
+    const joints = [J.spine, J.shoulderR, J.elbowR];
+    const saved = joints.map((j) => j.quaternion.clone());
+    const mid = this.sawStroke(0.5);
+    J.spine.rotation.set(0.45, 0, 0);
+    J.shoulderR.rotation.set(mid.x, 0, -mid.z, 'ZYX');
+    J.elbowR.rotation.set(-mid.elbow, 0, 0);
+    p.root.updateMatrixWorld(true);
+    const cut = p.root.worldToLocal(this.saw.localToWorld(new THREE.Vector3(0, -0.2, 0.012)));
+    joints.forEach((j, i) => j.quaternion.copy(saved[i]));
+    p.root.updateMatrixWorld(true);
+    cut.y -= SAW_CROUCH * d.legLen; // the crouch lowers everything
+
+    const r = 0.055 * s;
+    const len = 0.24 * s; // per half
+    const y = Math.max(r, cut.y - r * 0.5);
+    this.logSet!.position.set(cut.x, 0, cut.z);
+    this.logHalves.forEach((h, i) => {
+      h.position.set(0, y, 0);
+      h.rotation.set(0, 0, 0);
+      // the cut sits near the right-hand end; the long piece runs under the left hand
+      h.scale.set(i === 0 ? len * 1.45 : -len * 0.6, r, r);
+    });
+    this.logSet!.children.forEach((c) => {
+      if (c.userData.side === undefined) return;
+      c.position.set(c.userData.side > 0 ? len * 1.15 : -len * 0.4, 0, 0);
+      c.scale.set(0.025 * s, Math.max(0.001, y - r * 0.6), r * 2.6);
+      c.visible = y > r * 1.5;
+    });
+    this.logSet!.visible = true;
+  }
+
+  /** Arm angles for a saw stroke, u = 0 (pulled back) … 1 (pushed through). */
+  private sawStroke(u: number) {
+    return { x: lerp(-0.2, -0.85, u), z: 0.05, elbow: lerp(1.5, 0.45, u) };
   }
 
   /** The carry pose's arm angles (shared by the FK fit and the animation). */
@@ -279,6 +393,7 @@ export class Actor {
   /** Before the animator: returns overrides (or null when idle). */
   pre(dt: number, m: Motion, st: Style): ActionPose | null {
     this.impact = false;
+    this.dust = false;
     m.lockPhase = false;
     if (!this.kind) return null;
     if (this.stopNow) {
@@ -441,6 +556,77 @@ export class Actor {
           // hands rest on the thighs; push off them when moving
           Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
         }
+        return P;
+      }
+
+      case 'talk': {
+        const B = this.beats;
+        const dur = B.dur;
+        if (t >= dur) return this.finish();
+        const e = envelope(t, dur, 0.35, 0.5);
+        // a new gesture beat every so often: one or both hands
+        if (t >= B.next) {
+          B.next = t + (0.45 + Math.random() * 0.6) / tempo;
+          const which = Math.random();
+          for (const sd of ['L', 'R'] as const) {
+            const go = which < 0.4 || (which < 0.7 ? sd === 'R' : sd === 'L');
+            const b = B[sd];
+            if (go) {
+              b.x = -0.25 - Math.random() * 0.7;
+              b.z = 0.15 + Math.random() * 0.55;
+              b.elbow = 0.9 + Math.random() * 1.0;
+              b.w = 1;
+            } else if (Math.random() < 0.5) b.w = 0.35; // let it drop a bit
+          }
+          // head: nod, shake, or tilt for a moment
+          if (t > B.headUntil && Math.random() < 0.6) {
+            B.head = Math.floor(Math.random() * 3) + 1;
+            B.headUntil = t + 0.5 + Math.random() * 0.5;
+          }
+        }
+        const ph = t * Math.PI * 2;
+        for (const sd of ['L', 'R'] as const) {
+          const b = B[sd];
+          const flick = 0.12 * Math.sin(ph * 2.3 * tempo + (sd === 'L' ? 0 : 1.7));
+          Object.assign(P.arms[sd], { w: e * b.w, x: b.x + flick * 0.5, z: b.z, elbow: b.elbow + flick, stiff: 1.6 });
+        }
+        const headOn = t < B.headUntil ? Math.sin(Math.PI * (1 - (B.headUntil - t) / 0.9)) : 0;
+        const hk = Math.max(0, headOn) * e;
+        if (B.head === 1) P.headX = 0.2 * Math.sin(ph * 2.6) * hk; // nod
+        if (B.head === 2) P.headY = 0.35 * Math.sin(ph * 2.2) * hk; // shake
+        if (B.head === 3) P.headZ = 0.18 * hk; // tilt
+        P.spineX = 0.04 * Math.sin(ph * 0.7) * e; // lean in a little now and then
+        return P;
+      }
+
+      case 'saw': {
+        const lead = 0.4;
+        const strokes = 7;
+        const T = 0.62 / tempo;
+        const dur = lead + strokes * T + 0.9;
+        if (t >= dur) return this.finish();
+        const e = envelope(t, dur, lead, 0.4);
+        const raw = Math.max(0, t - lead) / T;
+        const u = raw < strokes ? 0.5 - 0.5 * Math.cos(Math.PI * 2 * raw) : 0; // back → through → back
+        const a = this.sawStroke(u);
+        Object.assign(P.arms.R, { w: e, ...a, stiff: 2.6 });
+        Object.assign(P.arms.L, { w: e, x: -0.85, z: 0.0, elbow: 0.15, stiff: 1.4 }); // steadies the log
+        P.crouch = SAW_CROUCH * e;
+        P.spineX = (0.45 + 0.05 * u) * e;
+        P.headX = 0.3 * e;
+        P.headZ = 0.05 * e;
+        // sawdust on each push
+        const stroke = Math.floor(raw);
+        this.dust = raw < strokes && raw % 1 > 0.45 && stroke !== this.lastStroke;
+        if (this.dust) this.lastStroke = stroke;
+        // the last stroke cuts through: halves drop apart
+        const split = smooth((raw - strokes) / 0.4);
+        this.logHalves.forEach((h, i) => {
+          const sgn = i === 0 ? 1 : -1;
+          h.position.x = sgn * split * 0.03;
+          h.rotation.z = -sgn * split * 0.25;
+        });
+        if (this.logSet) this.logSet.visible = t < dur - 0.15;
         return P;
       }
 

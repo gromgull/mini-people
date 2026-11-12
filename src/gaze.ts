@@ -47,6 +47,8 @@ export class Gaze {
   private blinkT = -1;
   private springs: Spring[][] = [];
   readonly hint: LookHint = { yaw: 0, pitch: 0 };
+  /** Conversation partner: overrides everything in auto mode. */
+  partner = -1;
 
   constructor(private p: Person, private self: number, private rnd: () => number) {
     this.springs = p.eyes.map(() => [new Spring(), new Spring()]);
@@ -94,7 +96,11 @@ export class Gaze {
   /** Decide where to look. Call before the animator so the head can turn. */
   aim(w: GazeWorld) {
     const p = this.p;
-    if (w.mode === 'auto') {
+    if (w.mode === 'auto' && this.partner >= 0 && w.people[this.partner]) {
+      headCentre(w.people[this.partner], this.target);
+      this.hasTarget = true;
+      this.who = this.partner;
+    } else if (w.mode === 'auto') {
       if (w.time >= this.nextPick || (this.who >= 0 && !w.people[this.who])) this.pick(w);
       // interrupt a dull glance if someone nearby starts doing something
       if (this.who < 0 || !w.busy(this.who)) {
