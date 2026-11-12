@@ -23,10 +23,11 @@ export interface AudioSettings {
   steps: number;
   voices: number;
   tools: number;
+  music: number;
   crunch: boolean;
 }
 
-export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, crunch: false };
+export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, music: 0.7, crunch: false };
 
 const VOWELS: [number, number][] = [
   [800, 1200], // a
@@ -43,11 +44,11 @@ export class Sound {
   ctx: BaseAudioContext | null = null;
   private offline = false;
   private master!: GainNode;
-  private bus!: { steps: GainNode; voices: GainNode; tools: GainNode };
+  private bus!: { steps: GainNode; voices: GainNode; tools: GainNode; music: GainNode };
   private crusher!: WaveShaperNode;
   private dry!: GainNode;
   private noise!: AudioBuffer;
-  private tokens = { steps: 0, voices: 0, tools: 0 };
+  private tokens = { steps: 0, voices: 0, tools: 0, music: 0 };
   private lastRefill = 0;
   private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode; touched: boolean; biteLfo: OscillatorNode; biteBp: BiquadFilterNode }>();
   private talking = new Map<number, number>(); // person → end of current phrase (ctx time)
@@ -76,7 +77,7 @@ export class Sound {
     mix.connect(this.dry).connect(this.master);
     mix.connect(this.crusher).connect(this.master);
     this.master.connect(comp).connect(ctx.destination);
-    this.bus = { steps: ctx.createGain(), voices: ctx.createGain(), tools: ctx.createGain() };
+    this.bus = { steps: ctx.createGain(), voices: ctx.createGain(), tools: ctx.createGain(), music: ctx.createGain() };
     Object.values(this.bus).forEach((g) => g.connect(mix));
     // one second of white noise, shared by every noisy recipe
     this.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
@@ -93,6 +94,7 @@ export class Sound {
     this.bus.steps.gain.value = s.steps;
     this.bus.voices.gain.value = s.voices;
     this.bus.tools.gain.value = s.tools;
+    this.bus.music.gain.value = s.music;
     this.dry.gain.value = s.crunch ? 0 : 1;
     this.crusher.disconnect();
     if (s.crunch) this.crusher.connect(this.master);
@@ -116,7 +118,7 @@ export class Sound {
     const now = this.ctx!.currentTime;
     const dt = now - this.lastRefill;
     this.lastRefill = now;
-    const caps = { steps: 8, voices: 12, tools: 6 }; // events per second
+    const caps = { steps: 8, voices: 12, tools: 6, music: 40 }; // events per second
     for (const k of Object.keys(this.tokens) as (keyof Sound['tokens'])[]) this.tokens[k] = Math.min(caps[k] * 0.5, this.tokens[k] + dt * caps[k]);
     if (this.tokens[kind] < 1) return false;
     this.tokens[kind] -= 1;
@@ -212,6 +214,55 @@ export class Sound {
     this.tone('sine', t, 120 * pitch, 48 * pitch, 0.15).connect(this.env(t, 0.75, 0.002, 0.13)).connect(o);
     this.tone('triangle', t, 230 * pitch, 205 * pitch, 0.07).connect(this.env(t, 0.12, 0.001, 0.06)).connect(o);
     this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 380 * pitch, 1.5)).connect(this.env(t, 0.3, 0.001, 0.05)).connect(o);
+  }
+
+  /** A hand clap: two quick noise bursts a hair apart. */
+  clap(w: Where) {
+    if (!this.live || !this.allow('tools')) return;
+    const t = this.ctx!.currentTime + 0.003;
+    const o = this.out('tools', w);
+    for (const [dt, a] of [[0, 1.0], [0.008, 1.4]] as const) {
+      this.noiseSrc(t + dt, 0.06).connect(this.filter('bandpass', rand(1000, 1400), 1.2)).connect(this.filter('lowpass', 3000, 0.5)).connect(this.env(t + dt, a, 0.001, 0.05)).connect(o);
+    }
+  }
+
+  /**
+   * One bowed fiddle note: two slightly detuned saws, darkened, with a wooden
+   * body resonance, a delayed vibrato and a little bow scratch at the start.
+   */
+  fiddleNote(f: number, dur: number, w: Where) {
+    if (!this.live || !this.allow('music')) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005;
+    const o = this.out('music', w);
+    const env = ctx.createGain();
+    const end = t + Math.max(0.08, dur);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.linearRampToValueAtTime(0.22, t + 0.035);
+    env.gain.setValueAtTime(0.2, end - 0.05);
+    env.gain.exponentialRampToValueAtTime(0.0001, end + 0.06);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 5.6;
+    const vibAmt = ctx.createGain();
+    vibAmt.gain.setValueAtTime(0, t);
+    vibAmt.gain.linearRampToValueAtTime(f * 0.007, t + Math.min(0.25, dur)); // vibrato blooms in
+    vib.connect(vibAmt);
+    vib.start(t);
+    vib.stop(end + 0.1);
+    const tone = this.filter('lowpass', 2600, 0.6);
+    for (const det of [0.998, 1.003]) {
+      const s = this.tone('sawtooth', t, f * det, f * det, end - t + 0.06);
+      vibAmt.connect(s.frequency);
+      s.connect(tone);
+    }
+    // body: a couple of wooden resonances on top of the plain tone
+    const body1 = this.filter('peaking', 450, 1.5);
+    body1.gain.value = 6;
+    const body2 = this.filter('peaking', 1100, 2);
+    body2.gain.value = 4;
+    tone.connect(body1).connect(body2).connect(env).connect(o);
+    // bow scratch at the attack
+    this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 2400, 1.5)).connect(this.env(t, 0.035, 0.003, 0.04)).connect(o);
   }
 
   /** A short wooden creak (sitting down on the bench). */

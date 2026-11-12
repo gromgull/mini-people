@@ -10,7 +10,7 @@ import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
 import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
-import { ACTIONS, type ActionKind, Actor } from './actions';
+import { ACTIONS, type ActionKind, Actor, BPM } from './actions';
 import { Sparks } from './fx';
 import { Sound, type Voice, type Where, defaultAudio } from './audio';
 import { Wander, type WanderState, scatter, wanderRadius } from './wander';
@@ -275,7 +275,7 @@ function baseTransform(i: number) {
  * root (ragdoll, getting up) we leave it alone; when it lets go we capture the
  * difference as an offset and ease it away, so nobody snaps back to the path.
  */
-function placeOne(i: number, lift = 0) {
+function placeOne(i: number, lift = 0, spin = 0) {
   const p = people[i];
   const a = actors[i];
   const o = offsets[i];
@@ -302,7 +302,7 @@ function placeOne(i: number, lift = 0) {
     o.yaw = Math.atan2(Math.sin(p.root.rotation.y - b.yaw), Math.cos(p.root.rotation.y - b.yaw));
   }
   p.root.position.set(b.x + o.x, lift, b.z + o.z);
-  p.root.rotation.y = b.yaw + o.yaw;
+  p.root.rotation.y = b.yaw + o.yaw + spin;
 }
 
 function placeAll() {
@@ -399,15 +399,25 @@ const gazeWorld: GazeWorld = {
   time: 0,
 };
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw'];
+
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if ((kind === 'hammer' || kind === 'saw') && settings.mode === 'parade') kind = 'wave';
+  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance') && settings.mode === 'parade') kind = 'wave';
   const a = actors[i];
   if (!a) return;
   if (kind === 'talk') return startTalk(i);
   a.start(kind, { push });
+  if (kind === 'fiddle' && settings.mode === 'wander') {
+    // music! some idle folk nearby get up and dance
+    const me = people[i].root.position;
+    people.forEach((o, j) => {
+      if (j !== i && !actors[j].busy && !wanders[j]?.walking && o.root.position.distanceTo(me) < 2.6 && Math.random() < 0.6) {
+        setTimeout(() => !actors[j].busy && actors[j].start('dance'), 300 + Math.random() * 1500);
+      }
+    });
+  }
 }
 
 /** Talk to the nearest free neighbour (who talks back), or to nobody. */
@@ -457,10 +467,12 @@ function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
   sound.saw(i, !!w && a.kind === 'saw' && a.sawSpeed > 0, a.sawSpeed, a.sawPush, w ?? { pan: 0, gain: 0 });
   if (!w) return;
   if (a.impact) sound.hammer(w);
+  if (a.note) sound.fiddleNote(a.note.f, a.note.dur, w);
   if (a.beat && Math.random() < (a.partner >= 0 ? 0.55 : 0.2) && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
   if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
   for (const e of a.events) {
-    if (e === 'thunk') sound.thunk(w, 1);
+    if (e === 'clap') sound.clap(w);
+    else if (e === 'thunk') sound.thunk(w, 1);
     else if (e === 'log') sound.thunk(w, 0.8);
     else if (e === 'creak') sound.creak(w);
     else sound.exclaim(e, v, w);
@@ -495,6 +507,7 @@ function simulate(dt: number) {
       act(i, k === 'sit' && settings.mode === 'parade' ? 'carry' : k); // no benches in the stream
       nextAuto[i] = simTime + 3 + Math.random() * 10;
     }
+    a.beatTime = (simTime * BPM) / 60; // shared beat: dancers and fiddlers keep time together
     let pose = a.pre(dt, m, st);
     const o = offsets[i];
     if (settings.mode === 'wander') {
@@ -522,7 +535,7 @@ function simulate(dt: number) {
         o.z -= o.z * k;
       }
     }
-    placeOne(i, pose?.lift ?? 0);
+    placeOne(i, pose?.lift ?? 0, pose?.spin ?? 0);
     gazes[i].partner = a.kind === 'talk' ? a.partner : -1;
     gazes[i].aim(gazeWorld);
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
@@ -639,7 +652,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -653,6 +666,7 @@ sndF.add(sound.settings, 'volume', 0, 1, 0.01).onChange(applySound);
 sndF.add(sound.settings, 'steps', 0, 1.5, 0.01).name('footsteps').onChange(applySound);
 sndF.add(sound.settings, 'voices', 0, 1.5, 0.01).onChange(applySound);
 sndF.add(sound.settings, 'tools', 0, 1.5, 0.01).name('tools & props').onChange(applySound);
+sndF.add(sound.settings, 'music', 0, 1.5, 0.01).onChange(applySound);
 sndF.add(sound.settings, 'crunch').name('retro crunch').onChange(applySound);
 // sound lab: audition each recipe on its own, with the selected person's voice
 const lab = sndF.addFolder('Sound lab').close();
@@ -684,9 +698,14 @@ labBtn('saw (3 strokes)', () => {
 for (const k of ['oof', 'hup', 'grunt', 'gasp', 'hey'] as const) labBtn(k, () => sound.exclaim(k, labV(), C));
 labBtn('box down (thunk)', () => sound.thunk(C, 1));
 labBtn('bench creak', () => sound.creak(C));
+labBtn('clap', () => sound.clap(C));
+labBtn('fiddle tune', () => {
+  const eighth = 30 / BPM;
+  [0, 2, 4, 7, 9, 7, 4, 2, 0, 4, 7, 12, 9, 7, 4, 0].forEach((s, k) => setTimeout(() => sound.fiddleNote(293.66 * 2 ** (s / 12), eighth * (k === 15 ? 2 : 1), C), k * eighth * 1000));
+});
 
 window.addEventListener('keydown', (e) => {
-  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw' } as const)[e.key as '1'];
+  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
   if (k) act(selected, k);
 });
 

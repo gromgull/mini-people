@@ -28,6 +28,8 @@ const RECIPES = {
   hammer: [2.6, `for (let k = 0; k < 3; k++) at(0.1 + k * 0.85, () => s.hammer(C));`],
   saw: [2.2, `for (let f = 0; f < 120; f++) { const u = f / 60 / 0.62; at(f / 60, () => s.saw(9, u < 3, Math.abs(Math.sin(Math.PI * 2 * u)), u % 1 < 0.5, C)); } at(2.05, () => s.saw(9, false, 0, false, C));`],
   'vocal-reactions': [3.6, `['oof', 'hup', 'grunt', 'gasp', 'hey'].forEach((k, i) => at(0.1 + i * 0.7, () => s.exclaim(k, V.mid, C)));`],
+  'fiddle': [4.4, `const e = 30 / 112; [0,2,4,7,9,7,4,2,0,4,7,12,9,7,4,0].forEach((d, k) => at(0.05 + k * e, () => s.fiddleNote(293.66 * 2 ** (d / 12), e * (k === 15 ? 2 : 1), C)));`],
+  'claps': [2.4, `for (let k = 0; k < 8; k++) at(0.05 + k * 60 / 112, () => s.clap({ pan: k % 2 ? 0.2 : -0.2, gain: 1 }));`],
   'props': [1.6, `at(0.1, () => s.thunk(C, 1)); at(0.6, () => s.thunk(C, 0.8)); at(1.0, () => s.creak(C));`],
 };
 

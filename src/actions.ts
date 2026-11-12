@@ -1,11 +1,12 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { JOINTS, type JointName, type Person, withRow } from './body';
 import type { Motion } from './gait';
 import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /** Arm override blended into the animator's targets *before* the springs. */
@@ -26,6 +27,9 @@ export interface ActionPose {
   headX: number;
   headY: number;
   headZ: number;
+  spineY: number; // chest twist
+  spineZ: number; // side bend
+  spin: number; // extra facing (rad) on top of wherever the person faces
   arms: { L: ArmOverride; R: ArmOverride };
 }
 
@@ -39,9 +43,19 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t / tin) * smooth((dur - t) / tout);
 
 const JUMP_G = 14;
+export const BPM = 112; // shared tempo for music and dancing
 const SAW_CROUCH = 0.1;
 const SAW_STROKE = 0.22; // half-stroke, × arm length
 const _target = new THREE.Quaternion();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+const _z = new THREE.Vector3();
+const mergeAll = (g: THREE.BufferGeometry[]) => {
+  const out = mergeGeometries(g)!;
+  g.forEach((x) => x.dispose());
+  return out;
+};
 const _m = new THREE.Matrix4();
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -129,7 +143,7 @@ export class Actor {
   impact = false; // set on the frame a hammer blow lands
   hammerHead: THREE.Object3D | null = null;
 
-  private pose: ActionPose = { crouch: 0, sitZ: 0, lift: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
+  private pose: ActionPose = { crouch: 0, sitZ: 0, lift: 0, spineY: 0, spineZ: 0, spin: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
   private side: 'L' | 'R' = 'R';
   private push = new THREE.Vector3();
   private stopNow = false;
@@ -149,7 +163,16 @@ export class Actor {
   partner = -1;
   dust = false; // set on frames where a saw stroke throws sawdust
   /** Sound cues raised this frame (consumed by the audio layer). */
-  events: ('oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log')[] = [];
+  events: ('oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log' | 'clap')[] = [];
+  /** Shared beat clock (beats since start), set by the caller every frame. */
+  beatTime = 0;
+  /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
+  note: { f: number; dur: number } | null = null;
+  private tune: { deg: number; hold: number }[] = [];
+  private bow = { dir: 1, start: 0, len: 0.25, lastSlot: -1 };
+  private fiddle: THREE.Object3D | null = null;
+  private bowMesh: THREE.Object3D | null = null;
+  private dance = { move: 0, lastBar: -1, lastBeat: -1 };
   beat = false; // a talk gesture beat started this frame
   sawSpeed = 0; // 0…1 stroke speed while sawing
   sawPush = false;
@@ -190,6 +213,12 @@ export class Actor {
       this.beats.dur = 4 + Math.random() * 3;
     }
     if (kind === 'saw') this.makeSaw();
+    if (kind === 'fiddle') this.makeFiddle();
+    if (kind === 'dance') {
+      this.dance.lastBar = -1;
+      this.dance.lastBeat = -1;
+      this.beats.dur = 9 + Math.random() * 5; // (reuses the talk duration slot)
+    }
   }
 
   stop() {
@@ -201,6 +230,8 @@ export class Actor {
       this.saw.rotation.x = 0;
     }
     if (this.logSet) this.logSet.visible = false;
+    if (this.fiddle) this.fiddle.visible = false;
+    if (this.bowMesh) this.bowMesh.visible = false;
     this.partner = -1;
     this.kind = null;
     this.ragdoll = null;
@@ -217,6 +248,79 @@ export class Actor {
     this.bench?.removeFromParent();
     this.saw?.removeFromParent();
     this.logSet?.removeFromParent();
+    this.fiddle?.removeFromParent();
+    this.bowMesh?.removeFromParent();
+  }
+
+  /** A fiddle (placed every frame between chin and left hand), a bow in the right hand, and a tune. */
+  private makeFiddle() {
+    const p = this.p;
+    const s = Math.sqrt(p.dims.height);
+    if (!this.fiddle) {
+      const wood = ROWS.shoes[2];
+      const dark = ROWS.shoes[1];
+      // body: two overlapping flattened balls (an hourglass), neck + scroll toward +z
+      const lower = withRow(new THREE.SphereGeometry(0.06, 10, 6), wood);
+      lower.scale(1, 0.38, 1.1);
+      const upper = withRow(new THREE.SphereGeometry(0.048, 10, 6), wood);
+      upper.scale(1, 0.38, 1.1);
+      upper.translate(0, 0, 0.075);
+      const neck = withRow(new THREE.BoxGeometry(0.016, 0.014, 0.11), dark);
+      neck.translate(0, 0.012, 0.16);
+      const scroll = withRow(new THREE.SphereGeometry(0.014, 6, 4), dark);
+      scroll.translate(0, 0.012, 0.22);
+      const geo = mergeAll([lower, upper, neck, scroll]);
+      this.fiddle = new THREE.Group();
+      const body = mesh(geo, this.kit);
+      this.fiddle.add(body);
+      this.fiddle.scale.setScalar(s * 1.6);
+      p.root.add(this.fiddle);
+      // bow: a long thin stick held across the hand
+      const stick = withRow(new THREE.CylinderGeometry(0.004, 0.004, 0.34, 4), dark);
+      stick.rotateZ(Math.PI / 2);
+      stick.translate(0.13, 0, 0);
+      const hair = withRow(new THREE.BoxGeometry(0.3, 0.003, 0.008), ROWS.cloud[0]);
+      hair.translate(0.13, -0.012, 0);
+      this.bowMesh = new THREE.Group();
+      this.bowMesh.add(mesh(mergeAll([stick, hair]), this.kit));
+      this.bowMesh.scale.setScalar(s);
+      this.bowMesh.position.y = -p.dims.handR * 0.7;
+      p.joints.wristR.add(this.bowMesh);
+    }
+    this.fiddle.visible = this.bowMesh!.visible = true;
+    // a tune: a random walk on D major pentatonic, in eighth notes, some held
+    const len = 16;
+    this.tune = [];
+    let deg = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < len; i++) {
+      const r = Math.random();
+      if (r < 0.6) deg += Math.random() < 0.5 ? 1 : -1;
+      else if (r < 0.75) deg += Math.random() < 0.5 ? 2 : -2;
+      deg = Math.max(0, Math.min(9, deg));
+      const hold = Math.random() < 0.25 && i % 2 === 0 ? 2 : 1;
+      this.tune.push({ deg, hold });
+      if (hold === 2) {
+        this.tune.push({ deg, hold: 0 }); // tied: no new bow stroke
+        i++;
+      }
+    }
+    this.tune[len - 1] = { deg: 0, hold: 1 }; // land home on D
+    this.bow.lastSlot = -1;
+  }
+
+  /** Put the fiddle between the chin and the left hand (after posing). */
+  private placeFiddle() {
+    const p = this.p;
+    const J = p.joints;
+    const d = p.dims;
+    p.root.updateMatrixWorld(true);
+    const chin = p.root.worldToLocal(J.head.localToWorld(_a.set(d.headR * 0.35, d.headR * 0.1, d.headR * 0.35)));
+    const hand = p.root.worldToLocal(J.wristL.localToWorld(_b.set(0, -d.handR * 0.6, 0)));
+    const dir = _c.subVectors(hand, chin).normalize();
+    this.fiddle!.position.copy(chin).addScaledVector(dir, -0.02);
+    // neck along chin→hand; top face roughly up and a little toward the player
+    this.fiddle!.quaternion.setFromUnitVectors(_z.set(0, 0, 1), dir);
+    this.fiddle!.rotateZ(0.5);
   }
 
   /** Saw in the right hand; log on a sawhorse where the blade meets it. */
@@ -425,6 +529,7 @@ export class Actor {
     this.impact = false;
     this.dust = false;
     this.beat = false;
+    this.note = null;
     this.sawSpeed = 0;
     this.events.length = 0;
     m.lockPhase = false;
@@ -436,7 +541,7 @@ export class Actor {
     this.prevT = this.t;
     this.t += dt;
     const P = this.pose;
-    P.crouch = P.sitZ = P.lift = P.spineX = P.headX = P.headY = P.headZ = 0;
+    P.crouch = P.sitZ = P.lift = P.spineY = P.spineZ = P.spin = P.spineX = P.headX = P.headY = P.headZ = 0;
     Object.assign(P.arms.L, arm());
     Object.assign(P.arms.R, arm());
     const d = this.p.dims;
@@ -673,6 +778,94 @@ export class Actor {
         return P;
       }
 
+      case 'fiddle': {
+        const dur = 10;
+        if (t >= dur) return this.finish();
+        const e = envelope(t, dur, 0.5, 0.5);
+        // play along the shared beat in eighth notes
+        const slot = Math.floor(this.beatTime * 2);
+        const eighth = 30 / BPM; // seconds per eighth note at the shared tempo
+        if (t > 0.5 && t < dur - 0.4 && slot !== this.bow.lastSlot) {
+          this.bow.lastSlot = slot;
+          const n = this.tune[slot % this.tune.length];
+          if (n.hold > 0) {
+            const semis = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21][n.deg];
+            this.note = { f: 293.66 * 2 ** (semis / 12), dur: eighth * n.hold };
+            this.bow.dir = -this.bow.dir; // change bow direction on every new note
+            this.bow.start = t;
+            this.bow.len = eighth * n.hold;
+          }
+        }
+        // bow arm: the hand travels across with each stroke
+        const k = Math.min(1, (t - this.bow.start) / this.bow.len);
+        const sd = this.bow.dir * (2 * k - 1);
+        Object.assign(P.arms.R, { w: e, x: -0.95 - 0.1 * sd, z: 0.15 + 0.4 * sd, elbow: 1.5 - 0.5 * sd, stiff: 3 });
+        Object.assign(P.arms.L, { w: e, x: -1.2, z: 0.85, elbow: 0.55, stiff: 2 }); // holding the fiddle out to the side
+        const sway = Math.sin(this.beatTime * Math.PI);
+        P.headZ = 0.3 * e; // chin on the fiddle
+        P.headY = 0.2 * e;
+        P.headX = 0.12 * e;
+        P.spineZ = 0.06 * sway * e;
+        P.spineY = 0.08 * sway * e;
+        P.crouch = 0.02 * (1 - Math.abs(Math.cos(this.beatTime * Math.PI))) * e; // a little bounce on the beat
+        return P;
+      }
+
+      case 'dance': {
+        const dur = this.beats.dur;
+        if (t >= dur) return this.finish();
+        const e = envelope(t, dur, 0.4, 0.6);
+        const b = this.beatTime;
+        const beat = Math.floor(b);
+        const bf = b - beat; // 0 at the beat
+        const bar = Math.floor(b / 8); // a move lasts two bars
+        if (bar !== this.dance.lastBar) {
+          this.dance.lastBar = bar;
+          let mv = Math.floor(Math.random() * 4);
+          if (mv === this.dance.move) mv = (mv + 1) % 4;
+          this.dance.move = mv;
+        }
+        const onBeat = beat !== this.dance.lastBeat;
+        this.dance.lastBeat = beat;
+        const dip = Math.pow(1 - bf, 3); // sharp dip right on the beat
+        const side = beat % 2 === 0 ? 1 : -1;
+        P.crouch = (0.05 + 0.07 * dip) * e;
+        P.headX = -0.05 * e + 0.1 * dip * e;
+        switch (this.dance.move) {
+          case 0: { // bounce, arms up taking turns
+            const up = { w: e, x: -0.25, z: 2.95, elbow: 0.25, stiff: 2.5 };
+            const low = { w: e, x: -0.5, z: 0.5, elbow: 1.3, stiff: 2.5 };
+            Object.assign(P.arms.L, side > 0 ? up : low);
+            Object.assign(P.arms.R, side > 0 ? low : up);
+            P.spineZ = 0.12 * side * e;
+            P.headZ = -0.12 * side * e;
+            break;
+          }
+          case 1: { // clap on every beat
+            const open = Math.min(1, bf * 3); // hands meet at the beat, then open
+            for (const sd of ['L', 'R'] as const) Object.assign(P.arms[sd], { w: e, x: -1.2, z: 0.05 + 0.45 * open, elbow: 0.9, stiff: 4 });
+            if (onBeat && t > 0.4) this.events.push('clap');
+            P.spineX = 0.08 * dip * e;
+            break;
+          }
+          case 2: { // hands on hips, hip sway
+            for (const sd of ['L', 'R'] as const) Object.assign(P.arms[sd], { w: e, x: 0.25, z: 0.75, elbow: 1.7, stiff: 2 });
+            P.spineZ = 0.18 * Math.sin(b * Math.PI) * e;
+            P.spineY = 0.25 * Math.sin(b * Math.PI) * e;
+            P.headZ = -0.1 * Math.sin(b * Math.PI) * e;
+            break;
+          }
+          default: { // a hopping spin: one turn per bar (4 beats), arms out
+            for (const sd of ['L', 'R'] as const) Object.assign(P.arms[sd], { w: e, x: -0.2, z: 1.3, elbow: 0.3, stiff: 2 });
+            P.spin = ((b % 4) / 4) * Math.PI * 2 * e;
+            P.lift = 0.05 * Math.sin(bf * Math.PI) * e;
+            m.lockPhase = true;
+            break;
+          }
+        }
+        return P;
+      }
+
       case 'fall': {
         if (this.getup) {
           const k = this.getup.t / this.getup.dur;
@@ -715,6 +908,10 @@ export class Actor {
 
   /** After the animator: pose overrides that replace the animation outright. */
   post(dt: number, m: Motion, st: Style) {
+    if (this.kind === 'fiddle' && this.fiddle) {
+      this.placeFiddle();
+      return;
+    }
     if (this.kind === 'saw' && this.saw) {
       // hold the blade at a constant angle: undo the forearm's swing in the fist
       const J = this.p.joints;
