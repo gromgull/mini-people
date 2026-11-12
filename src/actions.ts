@@ -5,7 +5,7 @@ import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /** Arm override blended into the animator's targets *before* the springs. */
@@ -20,6 +20,7 @@ export interface ArmOverride {
 /** What an action asks of the animator this frame. */
 export interface ActionPose {
   crouch: number; // × leg length
+  sitZ: number; // pelvis pushed back for sitting
   lift: number; // root height (jumps)
   spineX: number;
   headX: number;
@@ -39,6 +40,10 @@ const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t
 
 const JUMP_G = 14;
 const _target = new THREE.Quaternion();
+const _m = new THREE.Matrix4();
+const _pos = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _scl = new THREE.Vector3();
 
 // ---------------------------------------------------------------- props
 
@@ -60,6 +65,20 @@ function geos() {
   rock.translate(0, 0.06, 0);
   hammerGeo = { handle, head, rock };
   return hammerGeo;
+}
+
+let boxGeos: { box: THREE.BufferGeometry; tape: THREE.BufferGeometry; slab: THREE.BufferGeometry; leg: THREE.BufferGeometry } | null = null;
+/** Unit-sized props, scaled per person: a cardboard box and a little bench. */
+function boxGeo() {
+  if (boxGeos) return boxGeos;
+  const box = withRow(new THREE.BoxGeometry(1, 1, 1), ROWS.pants[6]);
+  const tape = withRow(new THREE.BoxGeometry(0.22, 1.02, 1.02), ROWS.pants[3]);
+  const slab = withRow(new THREE.BoxGeometry(1, 0.16, 1), ROWS.shoes[2]);
+  slab.translate(0, 0.92, 0);
+  const leg = withRow(new THREE.BoxGeometry(0.12, 0.86, 0.8), ROWS.shoes[0]);
+  leg.translate(0, 0.43, 0);
+  boxGeos = { box, tape, slab, leg };
+  return boxGeos;
 }
 
 function mesh(geo: THREE.BufferGeometry, kit: PropKit) {
@@ -86,7 +105,7 @@ export class Actor {
   impact = false; // set on the frame a hammer blow lands
   hammerHead: THREE.Object3D | null = null;
 
-  private pose: ActionPose = { crouch: 0, lift: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
+  private pose: ActionPose = { crouch: 0, sitZ: 0, lift: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
   private side: 'L' | 'R' = 'R';
   private push = new THREE.Vector3();
   private stopNow = false;
@@ -95,6 +114,13 @@ export class Actor {
   private hammer: THREE.Object3D | null = null;
   private rock: THREE.Object3D | null = null;
   private lastU = 0;
+  private tempo = 1;
+  private box: THREE.Object3D | null = null;
+  private boxHeld = new THREE.Matrix4(); // box pose in spine space while carried
+  private boxGround = new THREE.Vector3(); // where it sits on the ground (root space)
+  private bench: THREE.Object3D | null = null;
+  private seat = { h: 0, z: 0, crouch: 0 };
+  private benchScale = new THREE.Vector3();
 
   constructor(private p: Person, private kit: PropKit) {}
 
@@ -109,14 +135,18 @@ export class Actor {
     this.t = 0;
     this.side = opts.side ?? (Math.random() < 0.7 ? 'R' : 'L');
     this.push.copy(opts.push ?? new THREE.Vector3());
-    this.holdSpeed = kind === 'hammer' || kind === 'fall';
+    this.holdSpeed = kind === 'hammer' || kind === 'fall' || kind === 'carry' || kind === 'sit';
     this.stopNow = kind === 'fall';
     this.lastU = 0;
     if (kind === 'hammer') this.showHammer(true);
+    if (kind === 'carry') this.makeBox();
+    if (kind === 'sit') this.makeBench();
   }
 
   stop() {
     this.showHammer(false);
+    if (this.box) this.box.visible = false;
+    if (this.bench) this.bench.visible = false;
     this.kind = null;
     this.ragdoll = null;
     this.getup = null;
@@ -128,6 +158,82 @@ export class Actor {
     this.stop();
     this.hammer?.removeFromParent();
     this.rock?.removeFromParent();
+    this.box?.removeFromParent();
+    this.bench?.removeFromParent();
+  }
+
+  /** The carry pose's arm angles (shared by the FK fit and the animation). */
+  private carryArms() {
+    const d = this.p.dims;
+    return { x: -0.7, z: d.armOut * 0.6 + 0.02, elbow: 1.1 };
+  }
+
+  /**
+   * Size a box to fit between the hands: pose the carry arms with plain FK,
+   * read the hands in spine space, then restore the pose.
+   */
+  private makeBox() {
+    const p = this.p;
+    const J = p.joints;
+    const d = p.dims;
+    if (!this.box) {
+      const g = boxGeo();
+      this.box = new THREE.Group();
+      this.box.add(mesh(g.box, this.kit), new THREE.Mesh(g.tape, this.kit.toon)); // tape: no outline of its own
+      p.root.add(this.box);
+    }
+    const joints = [J.spine, J.shoulderL, J.shoulderR, J.elbowL, J.elbowR];
+    const saved = joints.map((j) => j.quaternion.clone());
+    const a = this.carryArms();
+    J.spine.rotation.set(0, 0, 0);
+    J.shoulderL.rotation.set(a.x, 0, a.z, 'ZYX');
+    J.shoulderR.rotation.set(a.x, 0, -a.z, 'ZYX');
+    J.elbowL.rotation.set(-a.elbow, 0, 0);
+    J.elbowR.rotation.set(-a.elbow, 0, 0);
+    p.root.updateMatrixWorld(true);
+    const hand = (w: THREE.Object3D) => J.spine.worldToLocal(w.localToWorld(new THREE.Vector3(0, -d.handR * 0.7, 0)));
+    const hl = hand(J.wristL);
+    const hr = hand(J.wristR);
+    joints.forEach((j, i) => j.quaternion.copy(saved[i]));
+    p.root.updateMatrixWorld(true);
+
+    const w = Math.max(0.08, hl.distanceTo(hr) - d.handR * 0.9);
+    const front = d.shoulderR * d.torsoDepth; // keep the box clear of the chest/belly
+    const mid = hl.add(hr).multiplyScalar(0.5);
+    const depth = Math.min(w * 0.85, Math.max(0.05, (mid.z - front * 1.05) * 2));
+    const h = w * 0.7;
+    this.box.scale.set(w, h, depth);
+    this.boxHeld.compose(mid.setY(mid.y + h * 0.15), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    this.boxGround.set(0, h / 2, d.legLen * 0.36 + depth / 2);
+    this.box.position.copy(this.boxGround);
+    this.box.quaternion.identity();
+    this.box.visible = true;
+  }
+
+  private makeBench() {
+    const p = this.p;
+    const d = p.dims;
+    if (!this.bench) {
+      const g = boxGeo();
+      this.bench = new THREE.Group();
+      const legs = [-0.4, 0.4].map((x) => {
+        const m = mesh(g.leg, this.kit);
+        m.position.x = x;
+        return m;
+      });
+      this.bench.add(mesh(g.slab, this.kit), ...legs);
+      p.root.add(this.bench);
+    }
+    // seat at knee height, far enough back that the thighs lie on it
+    const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
+    const h = d.footH + d.shinLen * 0.92;
+    this.seat.h = h;
+    this.seat.z = d.thighLen * 0.85;
+    this.seat.crouch = (standY - (h + d.hipBelow * 0.9)) / d.legLen;
+    this.benchScale.set(d.hipR * 3.2, h, d.thighLen * 1.1);
+    this.bench.scale.setScalar(1e-3);
+    this.bench.position.set(0, 0, -this.seat.z - d.thighLen * 0.05);
+    this.bench.visible = true;
   }
 
   private showHammer(on: boolean) {
@@ -181,11 +287,12 @@ export class Actor {
     }
     this.t += dt;
     const P = this.pose;
-    P.crouch = P.lift = P.spineX = P.headX = P.headY = P.headZ = 0;
+    P.crouch = P.sitZ = P.lift = P.spineX = P.headX = P.headY = P.headZ = 0;
     Object.assign(P.arms.L, arm());
     Object.assign(P.arms.R, arm());
     const d = this.p.dims;
     const tempo = st.tempo;
+    this.tempo = tempo;
     const t = this.t;
 
     switch (this.kind) {
@@ -279,6 +386,64 @@ export class Actor {
         return P;
       }
 
+      case 'carry': {
+        const tUp = 0.8 / Math.sqrt(tempo);
+        const tCarry = 7;
+        const tDown = 0.8 / Math.sqrt(tempo);
+        const dur = tUp + tCarry + tDown + 0.3;
+        if (t >= dur) return this.finish();
+        const a = this.carryArms();
+        // bend: 0 standing, 1 squatting down at the box
+        let bend = 0;
+        if (t < tUp) bend = Math.sin(Math.PI * (t / tUp));
+        else if (t > tUp + tCarry && t < tUp + tCarry + tDown) bend = Math.sin(Math.PI * ((t - tUp - tCarry) / tDown));
+        const carrying = t >= tUp * 0.5 && t < tUp + tCarry + tDown * 0.5;
+        this.holdSpeed = t < tUp || t > tUp + tCarry;
+        const reachX = -1.0; // arms down toward the box at the bottom of the bend
+        for (const sd of ['L', 'R'] as const) {
+          Object.assign(P.arms[sd], {
+            w: carrying || bend > 0.05 ? 1 : 0,
+            x: lerp(a.x, reachX, bend),
+            z: a.z,
+            elbow: lerp(a.elbow, 0.35, bend),
+            stiff: 2.2,
+          });
+        }
+        if (!carrying && bend < 0.05) P.arms.L.w = P.arms.R.w = smooth(1 - (t - tUp - tCarry - tDown) / 0.3);
+        P.crouch = 0.38 * bend + (carrying ? 0.025 : 0);
+        P.spineX = 1.05 * bend + (carrying ? -0.07 * (1 - bend) : 0); // lean back against the load
+        P.headX = -0.25 * bend + (carrying ? 0.1 : 0);
+        return P;
+      }
+
+      case 'sit': {
+        const tIn = 0.35; // bench appears
+        const tDown = 0.9 / Math.sqrt(tempo);
+        const tSit = 6;
+        const tUp = 0.8 / Math.sqrt(tempo);
+        const dur = tIn + tDown + tSit + tUp + 0.25;
+        if (t >= dur) return this.finish();
+        let k = 0; // 0 standing → 1 seated
+        if (t < tIn) k = 0;
+        else if (t < tIn + tDown) k = smooth((t - tIn) / tDown);
+        else if (t < tIn + tDown + tSit) k = 1;
+        else k = 1 - smooth((t - tIn - tDown - tSit) / tUp);
+        const moving = k > 0 && k < 1 ? Math.sin(Math.PI * k) : 0;
+        // push the hips back first, then drop: reads as lowering onto a seat
+        const back = smooth(Math.min(1, k * 1.6));
+        P.sitZ = this.seat.z * back;
+        P.crouch = this.seat.crouch * smooth(Math.max(0, (k - 0.15) / 0.85));
+        P.spineX = 0.45 * moving - 0.04 * k; // lean forward to balance, then sit up
+        P.headX = -0.2 * moving;
+        const pop = t < tIn ? smooth(t / tIn) : t > dur - 0.25 ? smooth((dur - t) / 0.25) : 1;
+        if (this.bench) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
+        for (const sd of ['L', 'R'] as const) {
+          // hands rest on the thighs; push off them when moving
+          Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
+        }
+        return P;
+      }
+
       case 'fall': {
         if (this.getup) {
           const k = this.getup.t / this.getup.dur;
@@ -297,8 +462,31 @@ export class Actor {
     return null;
   }
 
+  /** Box follows the chest while carried, blending from/to the ground. */
+  private postCarry() {
+    if (!this.box) return;
+    const p = this.p;
+    const tUp = 0.8 / Math.sqrt(this.tempo);
+    const tCarry = 7;
+    const tDown = tUp;
+    const t = this.t;
+    // 0 = on the ground, 1 = in the hands
+    let k = 0;
+    if (t < tUp) k = smooth((t / tUp - 0.5) * 2);
+    else if (t < tUp + tCarry) k = 1;
+    else k = 1 - smooth(((t - tUp - tCarry) / tDown) * 2);
+    p.root.updateMatrixWorld(true);
+    _m.copy(p.root.matrixWorld).invert().multiply(p.joints.spine.matrixWorld).multiply(this.boxHeld);
+    _m.decompose(_pos, _q, _scl);
+    this.box.position.lerpVectors(this.boxGround, _pos, k);
+    this.box.quaternion.identity().slerp(_q, k);
+    const gone = Math.max(0, t - tUp - tCarry - tDown);
+    this.box.visible = gone < 0.25;
+  }
+
   /** After the animator: pose overrides that replace the animation outright. */
   post(dt: number, m: Motion, st: Style) {
+    if (this.kind === 'carry') return this.postCarry();
     if (this.kind !== 'fall') return;
     const p = this.p;
     const J = p.joints;

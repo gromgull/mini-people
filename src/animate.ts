@@ -52,7 +52,7 @@ export class Animator {
   private prevPelvisY: number | null = null;
   private pelvisVel = 0;
   private pelvisAcc = 0;
-  private extras: BodyExtras = { turnLean: 0, shiftX: 0, crouch: 0 };
+  private extras: BodyExtras = { turnLean: 0, shiftX: 0, crouch: 0, sitZ: 0 };
   private sp: SpringParams = { f: 1, z: 1, r: 0 };
 
   constructor(seed: number) {
@@ -93,10 +93,12 @@ export class Animator {
     // lateral acceleration v·ω leans the body into the turn; yawRate < 0 turns toward -X
     const turnTarget = clamp(-m.speed * yawRate * st.turnLean, -0.5, 0.5);
     this.extras.turnLean = this.spring('turnLean', dt, turnTarget, sp);
-    const shiftTarget = idleK * (0.6 * this.noise(0, t, 0.35) + 0.25 * Math.sign(this.noise(2, t, 0.12)));
+    const seated = act && act.sitZ > 0 ? 0 : 1; // no weight shifting on a bench
+    const shiftTarget = seated * idleK * (0.6 * this.noise(0, t, 0.35) + 0.25 * Math.sign(this.noise(2, t, 0.12)));
     this.extras.shiftX = this.spring('shiftX', dt, shiftTarget, sp);
     const accelLean = this.spring('accelLean', dt, clamp(accel * 0.25, -0.35, 0.35), sp);
     this.extras.crouch = act?.crouch ?? 0;
+    this.extras.sitZ = act?.sitZ ?? 0;
 
     // --- gait: legs are posed now, upper body comes back as targets --------
     const u = applyGait(p, m, st.gait, this.extras);

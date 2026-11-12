@@ -305,7 +305,7 @@ const gazeWorld: GazeWorld = {
   time: 0,
 };
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall'];
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
@@ -335,7 +335,8 @@ function simulate(dt: number) {
     const a = actors[i];
     const st = styleOf(p);
     if (settings.autoActions && !a.busy && simTime > nextAuto[i]) {
-      act(i, AUTO_POOL[Math.floor(Math.random() * AUTO_POOL.length)]);
+      const k = AUTO_POOL[Math.floor(Math.random() * AUTO_POOL.length)];
+      act(i, k === 'sit' && settings.mode === 'parade' ? 'carry' : k); // no benches in the stream
       nextAuto[i] = simTime + 3 + Math.random() * 10;
     }
     const pose = a.pre(dt, m, st);
@@ -449,7 +450,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -457,7 +458,7 @@ actF.add(settings, 'autoActions').name('random crowd actions');
 actF.add(settings, 'lookAt', LOOK_MODES).name('👀 look at');
 
 window.addEventListener('keydown', (e) => {
-  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall' } as const)[e.key as '1'];
+  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit' } as const)[e.key as '1'];
   if (k) act(selected, k);
 });
 

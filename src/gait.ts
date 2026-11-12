@@ -51,6 +51,7 @@ export interface BodyExtras {
   turnLean: number; // rad, + leans toward local -X (into a right-hand turn)
   shiftX: number; // idle weight shift, × hip width (+ = onto left foot)
   crouch: number; // extra pelvis drop, × leg length (feet stay planted)
+  sitZ: number; // pelvis pushed back (world units) for sitting; feet stay put
 }
 
 /** Upper-body *targets* from the gait; the animator layers & springs them. */
@@ -162,7 +163,7 @@ export function applyGait(p: Person, m: Motion, g: GaitParams, x: BodyExtras): U
   const vault = 0.5 * (1 - Math.cos(2 * TAU * (ph - mid)));
   pelvisY -= d.legLen * (g.crouch + g.bounce * w * vault + x.crouch);
 
-  J.pelvis.position.set(swayX, pelvisY, 0);
+  J.pelvis.position.set(swayX, pelvisY, -x.sitZ);
   J.pelvis.quaternion.setFromEuler(_euler.set(0, yaw, roll, 'YXZ'));
   J.pelvis.updateMatrix();
   _pelvisInv.copy(J.pelvis.matrix).invert();

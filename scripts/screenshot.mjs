@@ -21,6 +21,8 @@ const shots = process.argv[2]
       ['compare', 'mode=compare&seed=1&select=0&t=4&paused&nogui'],
       ['act-fall', 'mode=stand&count=12&seed=1&select=0&act=fall&actAt=0.3&t=1.2&paused&zoom=2.5&nogui'],
       ['act-hammer', 'mode=stand&count=12&seed=1&select=0&act=hammer&actAt=0.2&t=1.0&paused&focus&zoom=4&nogui'],
+      ['act-carry', 'mode=parade&count=12&seed=1&select=0&act=carry&actAt=0.2&t=3&paused&focus&follow&zoom=4&nogui'],
+      ['act-sit', 'mode=stand&count=12&seed=1&select=0&act=sit&actAt=0.2&t=3&paused&focus&zoom=4&az=40&nogui'],
       ['act-auto', 'mode=stand&seed=2&auto&t=12&nogui'],
       ['parade-auto', 'seed=3&auto&t=10&nogui'],
       ['look-camera', 'mode=stand&count=12&seed=1&zoom=3.2&px=2&look=camera&t=2&paused&nogui'],
