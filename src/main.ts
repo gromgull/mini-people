@@ -483,6 +483,7 @@ function select(i: number) {
   looks.add(g, 'shoes', idx(PALETTE.shoes.length)).onChange(rebuild);
   looks.add(g, 'longSleeves').onChange(rebuild);
   looks.add(g, 'shorts').onChange(rebuild);
+  looks.add(g, 'skirt').onChange(rebuild);
   const pers = selFolder.addFolder('Personality');
   for (const k of PERSONA_KEYS) pers.add(g.persona, k, 0, 1, 0.01).onChange(setTargetSpeeds);
   const refresh = () => pers.controllersRecursive().forEach((c) => c.updateDisplay());

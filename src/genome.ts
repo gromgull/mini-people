@@ -20,24 +20,27 @@ export interface Genome {
   feet: number;
   nose: number;
   eyeSize: number;
+  fem: number; // masculine ↔ feminine build (shoulders, waist, hips)
+  bust: number;
   // looks
   skin: number;
   hair: number;
-  hairStyle: number; // 0 bald, 1 short, 2 long, 3 hat
+  hairStyle: number; // index into HAIR_STYLES
   shirt: number;
   pants: number;
   shoes: number;
   longSleeves: boolean;
   shorts: boolean;
+  skirt: boolean;
   // personality (drives animation, not geometry)
   persona: Persona;
 }
 
 export const SHAPE_GENES = [
-  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'eyeSize',
+  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'eyeSize', 'fem', 'bust',
 ] as const;
 
-export const HAIR_STYLES = ['bald', 'short', 'long', 'hat'] as const;
+export const HAIR_STYLES = ['bald', 'short', 'long', 'hat', 'ponytail', 'bun'] as const;
 
 export function randomGenome(seed: number): Genome {
   const r = mulberry32(seed);
@@ -65,9 +68,22 @@ export function randomGenome(seed: number): Genome {
     shoes: pickIndex(r, PALETTE.shoes.length),
     longSleeves: r() < 0.55,
     shorts: r() < 0.25,
-    eyeSize: r(), // drawn last so older seeds keep their bodies
+    eyeSize: r(), // new genes are drawn last so older seeds keep their bodies
+    fem: 0,
+    bust: 0,
+    skirt: false,
     persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
+  // about half the crowd reads as female; a few in-between builds
+  const femR = r();
+  g.fem = femR < 0.48 ? lerp(0.55, 1, r()) : femR < 0.56 ? lerp(0.3, 0.55, r()) : r() * 0.25;
+  const bustR = r();
+  g.bust = g.fem > 0.5 ? lerp(0.15, 1, bustR) : 0;
+  const hairR = r();
+  const hairPick = r();
+  if (g.fem > 0.5 && g.hairStyle !== 3 && hairR < 0.85) g.hairStyle = [1, 2, 2, 2, 4, 4, 5][pickIndex(() => hairPick, 7)];
+  else if (g.fem <= 0.5 && g.hairStyle === 2 && hairR < 0.6) g.hairStyle = 1;
+  g.skirt = g.fem > 0.5 && r() < 0.4;
   // separate stream so adding personality doesn't reshuffle existing bodies
   g.persona = derivePersona(g, mulberry32(seed ^ 0x5bd1e995));
   return g;
@@ -104,6 +120,7 @@ export interface BodyDims {
   handR: number;
   noseR: number;
   eyeR: number;
+  bustR: number;
   armOut: number; // rest-pose abduction so arms clear the body
 }
 
@@ -111,6 +128,7 @@ export function deriveBody(g: Genome): BodyDims {
   const H = lerp(0.8, 1.3, g.height);
   const sH = Math.sqrt(H);
   const G = lerp(0.75, 1.6, g.girth);
+  const F = g.fem;
 
   const headR = lerp(0.1, 0.155, g.head) * sH;
   const neckLen = lerp(0.015, 0.07, g.neck) * H * (1 - 0.5 * g.girth);
@@ -125,16 +143,16 @@ export function deriveBody(g: Genome): BodyDims {
   const shinLen = legLen - footH - thighLen;
 
   const torsoR = 0.082 * G * sH;
-  const shoulderR = torsoR * lerp(0.92, 1.35, g.shoulders);
-  const waistR = torsoR * (0.9 + 0.5 * g.belly);
-  const hipR = torsoR * (0.95 + 0.2 * g.belly);
+  const shoulderR = torsoR * lerp(0.92, 1.35, g.shoulders) * lerp(1, 0.86, F);
+  const waistR = torsoR * (0.9 + 0.5 * g.belly) * lerp(1, 0.84, F * (1 - 0.6 * g.belly));
+  const hipR = torsoR * (0.95 + 0.2 * g.belly) * lerp(1, 1.14, F);
   const hipAbove = trunk * 0.3;
   const torsoLen = trunk - hipAbove;
 
   const upperArmR = 0.026 * lerp(0.8, 1.6, g.girth) * sH;
   const foreArmR = upperArmR * 0.82;
-  const armLen = H * lerp(0.3, 0.42, g.arms);
-  const handR = lerp(0.036, 0.052, g.hands) * sH * lerp(0.95, 1.15, g.girth);
+  const armLen = H * lerp(0.25, 0.34, g.arms);
+  const handR = lerp(0.036, 0.052, g.hands) * sH * lerp(0.95, 1.15, g.girth) * lerp(1, 0.9, F);
 
   const shoulderX = shoulderR * 0.92;
   const maxR = Math.max(waistR, hipR);
@@ -170,6 +188,7 @@ export function deriveBody(g: Genome): BodyDims {
     handR,
     noseR: headR * lerp(0.12, 0.3, g.nose),
     eyeR: headR * lerp(0.22, 0.34, g.eyeSize),
+    bustR: torsoR * lerp(0, 0.52, g.bust),
     armOut,
   };
 }

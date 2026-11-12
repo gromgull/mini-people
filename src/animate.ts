@@ -29,6 +29,9 @@ const CHANNELS = {
   elL: 0.65,
   elR: 0.65,
 } as const;
+
+// ponytail: a loose pendulum, independent of personality
+const TAIL: SpringParams = { f: 1.6, z: 0.22, r: 0 };
 type Channel = keyof typeof CHANNELS;
 
 /**
@@ -41,6 +44,8 @@ type Channel = keyof typeof CHANNELS;
  */
 export class Animator {
   private springs = {} as Record<Channel, Spring>;
+  private tailX = new Spring();
+  private tailZ = new Spring();
   private seeds: number[];
   private prevHeading: number | null = null;
   private prevSpeed = 0;
@@ -159,5 +164,15 @@ export class Animator {
     J.shoulderR.rotation.set(this.spring('shRX', dt, shRX, sp, stR), 0, -this.spring('shRZ', dt, spR, sp, stR), 'ZYX');
     J.elbowL.rotation.set(-Math.max(0, this.spring('elL', dt, elL, sp, stL)), 0, 0);
     J.elbowR.rotation.set(-Math.max(0, this.spring('elR', dt, elR, sp, stR)), 0, 0);
+
+    // ponytail hangs toward world-down, lags behind head motion and bounces
+    // with the pelvis; the low-damped spring supplies the swing
+    if (p.tail) {
+      const tilt = J.spine.rotation.x + J.neck.rotation.x + J.head.rotation.x;
+      const roll = J.spine.rotation.z + J.head.rotation.z;
+      const tx = -tilt + 0.25 + accelLean * 1.2 + clamp(this.pelvisAcc * 0.004, -0.3, 0.3);
+      const tz = -roll - this.extras.turnLean * 1.5 + J.head.rotation.y * 0.3;
+      p.tail.rotation.set(clamp(this.tailX.update(dt, tx, TAIL), -0.6, 1.4), 0, clamp(this.tailZ.update(dt, tz, TAIL), -0.9, 0.9));
+    }
   }
 }

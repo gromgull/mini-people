@@ -31,6 +31,8 @@ export interface Eye {
 export interface Person {
   genome: Genome;
   eyes: Eye[];
+  /** Ponytail pivot (child of the head) that the animator swings, if any. */
+  tail: THREE.Object3D | null;
   dims: BodyDims;
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
@@ -71,6 +73,8 @@ function lathe(profile: [number, number][], segs: number, row: number) {
   const pts = profile.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-4), y));
   return withRow(new THREE.LatheGeometry(pts, segs), row);
 }
+
+const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
 
 // ---------------------------------------------------------------- builder
 
@@ -138,8 +142,8 @@ export function buildPerson(
     hand.position.y = -d.handR * 0.7;
 
     const kneeR = d.thighR * 0.85;
-    part(hp, limb(d.thighLen, d.thighR, kneeR, segs, pants));
-    part(kn, limb(d.shinLen, kneeR, d.shinR, segs, genome.shorts ? skin : pants));
+    part(hp, limb(d.thighLen, d.thighR, kneeR, segs, genome.skirt ? skin : pants));
+    part(kn, limb(d.shinLen, kneeR, d.shinR, segs, genome.shorts || genome.skirt ? skin : pants));
     const foot = ball(1, segs, shoes);
     foot.scale(d.footW / 2, d.footH * 0.6, d.footLen / 2);
     foot.translate(0, -d.footH * 0.4, d.footLen * 0.2);
@@ -182,6 +186,43 @@ export function buildPerson(
   torsoGeo.scale(1, 1, d.torsoDepth);
   part(spine, torsoGeo);
 
+  if (genome.skirt) {
+    // A-line skirt from the waist to just above the knee, wide enough that
+    // walking legs mostly stay inside it
+    const len = d.hipBelow + d.thighLen * 0.72;
+    const flare = Math.max(d.hipR * 1.3, d.hipJointX + d.thighR + d.thighLen * 0.42);
+    const skirtGeo = lathe(
+      [
+        [0, -len + 0.004],
+        [flare * 0.94, -len],
+        [flare, -len * 0.9],
+        [d.hipR * 1.06, -d.hipBelow * 0.2],
+        [d.hipR * 1.02, d.hipAbove * 0.45],
+        [d.waistR * 1.03, d.hipAbove * 1.02],
+        [0, d.hipAbove * 1.03],
+      ],
+      segs,
+      pants,
+    );
+    skirtGeo.scale(1, 1, lerpN(d.torsoDepth, 1, 0.5));
+    part(pelvis, skirtGeo);
+  }
+
+  if (d.bustR > 0.004) {
+    // where the torso front is at chest height (matches the lathe profile)
+    const y = T * 0.66;
+    const rAt = ((d.waistR * bulge + d.shoulderR) * 0.5 + d.shoulderR) * 0.5;
+    const zFront = rAt * d.torsoDepth;
+    const bx = Math.min(rAt * 0.45, d.bustR * 1.05);
+    const pieces = [1, -1].map((s) => {
+      const g = ball(d.bustR, segs, shirt);
+      g.scale(1, 0.9, 0.9);
+      g.translate(s * bx, y - d.bustR * 0.3, zFront - d.bustR * 0.05);
+      return g;
+    });
+    part(spine, merge(pieces));
+  }
+
   const neckGeo = withRow(new THREE.CylinderGeometry(d.neckR, d.neckR, d.neckLen + d.headR * 0.4, segs, 1, true), skin);
   neckGeo.translate(0, (d.neckLen + d.headR * 0.4) / 2 - d.headR * 0.05, 0);
   part(neck, neckGeo);
@@ -216,16 +257,60 @@ export function buildPerson(
   }
 
   const hairSegs = segs + 2;
-  if (genome.hairStyle === 1 || genome.hairStyle === 2) {
-    const long = genome.hairStyle === 2;
-    const g = withRow(
-      new THREE.SphereGeometry(d.headR * 1.07, hairSegs, hairSegs / 2 + 1, 0, Math.PI * 2, 0, Math.PI * (long ? 0.6 : 0.42)),
+  const hr = d.headR;
+  const style = genome.hairStyle;
+  let tail: THREE.Object3D | null = null;
+  if (style === 1 || style === 2 || style === 4 || style === 5) {
+    // scalp cap: covers the crown and the back, leaves the face free
+    const cap = withRow(
+      new THREE.SphereGeometry(hr * 1.07, hairSegs, hairSegs / 2 + 1, 0, Math.PI * 2, 0, Math.PI * 0.42),
       hair,
     );
-    g.rotateX(long ? -0.65 : -0.4);
-    g.translate(0, hc, 0);
+    cap.rotateX(-0.4);
+    cap.translate(0, hc, 0);
+    part(head, cap);
+  }
+  if (style === 2) {
+    // long hair: a thick open-fronted curtain falling to the shoulders,
+    // lathed as a closed ring profile so it has an inside and an outline
+    const gap = THREE.MathUtils.degToRad(116);
+    const ring: [number, number][] = [
+      [0.95, 0.3],
+      [0.92, -0.5],
+      [0.98, -1.25],
+      [1.22, -1.36],
+      [1.3, -1.1],
+      [1.2, -0.4],
+      [1.11, 0.3],
+      [0.95, 0.3],
+    ];
+    const pts = ring.map(([r, y]) => new THREE.Vector2(r * hr, hc + y * hr));
+    const g = withRow(new THREE.LatheGeometry(pts, hairSegs, gap / 2, Math.PI * 2 - gap), hair);
+    g.scale(1, 1, 0.92);
     part(head, g);
-  } else if (genome.hairStyle === 3) {
+    // a fringe so the front doesn't look bald under the cap edge
+    const fringe = withRow(
+      // phi = π/2 is +z (the face) in three's sphere parametrisation
+      new THREE.SphereGeometry(hr * 1.09, hairSegs, 4, Math.PI * 0.05, Math.PI * 0.9, Math.PI * 0.1, Math.PI * 0.17),
+      hair,
+    );
+    fringe.translate(0, hc, 0);
+    part(head, fringe, false);
+  } else if (style === 4) {
+    // ponytail on a pivot so the animator can swing it
+    tail = new THREE.Object3D();
+    tail.position.set(0, hc + hr * 0.35, -hr * 0.95);
+    head.add(tail);
+    const tie = ball(hr * 0.2, Math.max(6, segs), hair);
+    const tuft = ball(1, segs, hair);
+    tuft.scale(hr * 0.3, hr * 0.75, hr * 0.28);
+    tuft.translate(0, -hr * 0.62, -hr * 0.12);
+    part(tail, merge([tie, tuft]));
+  } else if (style === 5) {
+    const bun = ball(hr * 0.42, segs, hair);
+    bun.translate(0, hc + hr * 0.62, -hr * 0.78);
+    part(head, bun);
+  } else if (style === 3) {
     const hatRow = genome.hair % 2 === 0 ? ROWS.pants[(genome.pants + 3) % ROWS.pants.length] : ROWS.shoes[2];
     const brim = withRow(new THREE.CylinderGeometry(d.headR * 1.35, d.headR * 1.35, d.headR * 0.08, hairSegs), hatRow);
     brim.translate(0, hc + d.headR * 0.56, 0); // sits above the googly eyes
@@ -240,6 +325,7 @@ export function buildPerson(
   return {
     genome,
     eyes,
+    tail,
     dims: d,
     root,
     joints,

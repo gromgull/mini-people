@@ -67,7 +67,10 @@ const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 export function styleFor(base: GaitParams, p: Persona, amount: number): Style {
   // centred, scaled traits in roughly -1..1 (beyond with amount > 1)
   const s = (k: keyof Persona) => (p[k] - 0.5) * 2 * amount;
-  const W = s('weight'), E = s('energy'), D = s('dainty'), P = s('posture'), S = s('swagger'), L = s('sloppy');
+  const W = s('weight'), E = s('energy'), D = s('dainty'), P = s('posture'), L = s('sloppy');
+  // swagger gets theatrical fast: soften the strutting side
+  const S0 = s('swagger');
+  const S = S0 > 0 ? S0 * 0.42 : S0;
   const pos = (x: number) => Math.max(0, x);
 
   const gait: GaitParams = {
