@@ -15,6 +15,7 @@ export const PALETTE = {
   eyeWhite: ['#f7f5ee'],
   lips: ['#4a2420', '#6a2a28', '#8a3236', '#b0343e', '#c8404c', '#d86070', '#e88090'],
   ground: ['#7fae4c'],
+  cloud: ['#fbfaf4'],
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

@@ -4,7 +4,8 @@ import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
 import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
-import { createOutlineMaterial, createToonMaterial } from './materials';
+import { createFog, createOutlineMaterial, createToonMaterial } from './materials';
+import { Clouds, createSky } from './environment';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -48,6 +49,7 @@ const settings = {
   gait: { ...defaultGait },
   personality: num('persona', 1), // global exaggeration of everyone's persona
   autoActions: q.has('auto'),
+  sky: q.get('sky') !== '0',
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
 
@@ -63,26 +65,40 @@ scene.background = new THREE.Color('#1d2a1a');
 
 const atlas = createAtlas();
 fillAtlas(atlas, settings.ramp);
-const toon = createToonMaterial(atlas);
-const outline = createOutlineMaterial();
+// horizon haze: ground and everything on it fades out along the view direction
+const fog = createFog();
+const toon = createToonMaterial(atlas, fog);
+const outline = createOutlineMaterial(fog);
+// clouds live past the horizon, so they get materials without the haze
+// (but share lighting and outline settings with everything else)
+const cloudToon = createToonMaterial(atlas);
+cloudToon.uniforms.uLightView = toon.uniforms.uLightView;
+cloudToon.uniforms.uWrap = toon.uniforms.uWrap;
+const cloudOutline = createOutlineMaterial();
+for (const k of ['uPx', 'uResolution', 'uColor'] as const) cloudOutline.uniforms[k] = outline.uniforms[k];
+const sky = createSky(fog);
+scene.add(sky);
+const clouds = new Clouds(cloudToon, cloudOutline);
+scene.add(clouds.group);
+let horizonFar = 12;
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
 const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: false, transparent: true });
 
 // ground uses the same toon material, just a different atlas row
 {
-  const g = new THREE.PlaneGeometry(400, 400);
+  const g = new THREE.PlaneGeometry(1600, 1600);
   g.rotateX(-Math.PI / 2);
   g.setAttribute('aRow', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(ROWS.ground[0]), 1));
   scene.add(new THREE.Mesh(g, toon));
 }
 
 const VIEW_H = 6;
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 1200);
 camera.zoom = num('zoom', 1);
 {
   const az = THREE.MathUtils.degToRad(num('az', 25));
   const el = THREE.MathUtils.degToRad(num('el', 35));
-  const r = 40;
+  const r = 300; // far back: an ortho view doesn't change, but low angles mustn't start below the ground
   camera.position.set(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r);
 }
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -709,6 +725,7 @@ function select(i: number) {
 const look = gui.addFolder('Look');
 const refill = () => fillAtlas(atlas, settings.ramp);
 look.add(settings, 'pixelSize', 1, 8, 1).name('pixel size').onChange(resize);
+look.add(settings, 'sky').name('sky & horizon');
 look.add(settings.ramp, 'bands', 1, 5, 1).onChange(refill);
 look.add(settings.ramp, 'smooth').onChange(refill);
 look.add(settings.ramp, 'bias', 0.3, 3, 0.05).name('shadow bias').onChange(refill);
@@ -769,6 +786,32 @@ function focusSelected(k = 1) {
   camera.position.copy(controls.target).add(off);
 }
 
+const _fwd = new THREE.Vector3();
+const _hz = new THREE.Vector3();
+/** Horizon distance from the crowd's extent; haze, sky line and clouds follow. */
+function updateEnvironment(dt: number) {
+  const tgt = controls.target;
+  sky.visible = clouds.group.visible = settings.sky;
+  if (!settings.sky) {
+    fog.uFogFar.value = fog.uFogNear.value = 1e9;
+    return;
+  }
+  let extent = 0;
+  for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
+  // keep everyone well inside the clear zone; ease so the horizon doesn't jump
+  const want = Math.max(9, extent * 1.5 + 4);
+  horizonFar += (want - horizonFar) * Math.min(1, dt * 2);
+  _fwd.subVectors(tgt, camera.position).setY(0).normalize();
+  fog.uFogC.value.set(tgt.x, tgt.z);
+  fog.uFogDir.value.set(_fwd.x, _fwd.z);
+  fog.uFogFar.value = horizonFar;
+  fog.uFogNear.value = horizonFar * 0.55;
+  clouds.update(camera, tgt, horizonFar, dt);
+  _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
+  sky.material.uniforms.uHorizon.value = _hz.y;
+  sky.material.uniforms.uRes.value.set(rt.width, rt.height);
+}
+
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
   let simulated = false;
@@ -798,7 +841,9 @@ function frame() {
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
   toon.uniforms.uWrap.value = settings.wrap;
+  updateEnvironment(dt);
   outline.visible = settings.outline;
+  cloudOutline.visible = settings.outline;
   outline.uniforms.uPx.value = settings.outlinePx;
   outline.uniforms.uColor.value.set(settings.outlineColor);
 
