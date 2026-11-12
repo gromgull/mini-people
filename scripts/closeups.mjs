@@ -22,7 +22,7 @@ const list = idx.length ? idx.map(Number) : genes.map((g, i) => i).filter((i) =>
 const files = [];
 for (const i of list) {
   console.log(i, JSON.stringify(genes[i]));
-  await page.goto(`http://localhost:5199/?${base}&select=${i}&focus&zoom=5&az=0&el=8`);
+  await page.goto(`http://localhost:5199/?${base}&select=${i}&focus&zoom=${process.env.Z||5}&az=0&el=8`);
   await page.waitForFunction(() => window.__mini?.ready);
   const f = `screenshots/frames/${name}-${i}.png`;
   await page.screenshot({ path: f });

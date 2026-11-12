@@ -74,6 +74,30 @@ function lathe(profile: [number, number][], segs: number, row: number) {
   return withRow(new THREE.LatheGeometry(pts, segs), row);
 }
 
+/**
+ * Sphere cap (crown at +y) whose rim alternates between short and long
+ * vertices, giving a ring of little spikes. `spike` is extra angle (radians)
+ * for the tips; tip lengths jitter per vertex from `seed`.
+ */
+function hairCap(r: number, wSegs: number, hSegs: number, thetaLen: number, spike: number, seed: number) {
+  const g = new THREE.SphereGeometry(r, wSegs, hSegs, 0, Math.PI * 2, 0, thetaLen);
+  if (spike <= 0) return g;
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const nrm = g.getAttribute('normal') as THREE.BufferAttribute;
+  const row0 = hSegs * (wSegs + 1); // first vertex of the rim row
+  const v = new THREE.Vector3();
+  for (let i = 0; i <= wSegs; i++) {
+    const k = i % wSegs; // seam vertices must match
+    const jit = 0.6 + 0.8 * (((Math.sin((k + 1) * 12.9898 + seed * 78.233) * 43758.5453) % 1 + 1) % 1);
+    const theta = thetaLen + (k % 2 === 0 ? spike * jit : -spike * 0.25);
+    const phi = (k / wSegs) * Math.PI * 2;
+    v.set(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta));
+    pos.setXYZ(row0 + i, v.x * r, v.y * r, v.z * r);
+    nrm.setXYZ(row0 + i, v.x, v.y, v.z);
+  }
+  return g;
+}
+
 const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
 
 // ---------------------------------------------------------------- builder
@@ -262,10 +286,8 @@ export function buildPerson(
   let tail: THREE.Object3D | null = null;
   if (style === 1 || style === 2 || style === 4 || style === 5) {
     // scalp cap: covers the crown and the back, leaves the face free
-    const cap = withRow(
-      new THREE.SphereGeometry(hr * 1.07, hairSegs, hairSegs / 2 + 1, 0, Math.PI * 2, 0, Math.PI * 0.42),
-      hair,
-    );
+    // short hair gets a tufty zigzag edge so it doesn't read as a beanie
+    const cap = withRow(hairCap(hr * 1.07, 18, hairSegs / 2 + 1, Math.PI * 0.42, style === 1 ? 0.24 : 0, genome.hair), hair);
     cap.rotateX(-0.4);
     cap.translate(0, hc, 0);
     part(head, cap);
