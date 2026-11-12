@@ -236,12 +236,13 @@ export function buildPerson(
     // where the torso front is at chest height (matches the lathe profile)
     const y = T * 0.66;
     const rAt = ((d.waistR * bulge + d.shoulderR) * 0.5 + d.shoulderR) * 0.5;
-    const zFront = rAt * d.torsoDepth;
-    const bx = Math.min(rAt * 0.45, d.bustR * 1.05);
+    // spacing follows the chest, not the bust size, so small ones stay apart
+    const bx = rAt * lerpN(0.4, 0.47, genome.bust);
+    const zSurf = d.torsoDepth * Math.sqrt(Math.max(0, rAt * rAt - bx * bx));
     const pieces = [1, -1].map((s) => {
       const g = ball(d.bustR, segs, shirt);
       g.scale(1, 0.9, 0.9);
-      g.translate(s * bx, y - d.bustR * 0.3, zFront - d.bustR * 0.05);
+      g.translate(s * bx, y - d.bustR * 0.3, zSurf - d.bustR * 0.02);
       return g;
     });
     part(spine, merge(pieces));
