@@ -19,6 +19,10 @@ const shots = process.argv[2]
       ['parade-follow', 'seed=2&t=3&paused&select=3&focus&zoom=3.5&nogui'],
       ['parade-stepped', 'seed=1&fps=10&t=1.5&nogui'],
       ['compare', 'mode=compare&seed=1&select=0&t=4&paused&nogui'],
+      ['act-fall', 'mode=stand&count=12&seed=1&select=0&act=fall&actAt=0.3&t=1.2&paused&zoom=2.5&nogui'],
+      ['act-hammer', 'mode=stand&count=12&seed=1&select=0&act=hammer&actAt=0.2&t=1.0&paused&focus&zoom=4&nogui'],
+      ['act-auto', 'mode=stand&seed=2&auto&t=12&nogui'],
+      ['parade-auto', 'seed=3&auto&t=10&nogui'],
       ['stand-idle', 'mode=stand&seed=1&count=12&zoom=3&t=6&paused&nogui'],
     ];
 

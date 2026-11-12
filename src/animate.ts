@@ -1,6 +1,7 @@
 import type { Person } from './body';
 import { type Motion, type BodyExtras, applyGait } from './gait';
 import type { Style } from './persona';
+import type { ActionPose } from './actions';
 import { Spring, type SpringParams } from './springs';
 import { mulberry32 } from './rng';
 
@@ -45,7 +46,7 @@ export class Animator {
   private prevPelvisY: number | null = null;
   private pelvisVel = 0;
   private pelvisAcc = 0;
-  private extras: BodyExtras = { turnLean: 0, shiftX: 0 };
+  private extras: BodyExtras = { turnLean: 0, shiftX: 0, crouch: 0 };
   private sp: SpringParams = { f: 1, z: 1, r: 0 };
 
   constructor(seed: number) {
@@ -63,14 +64,14 @@ export class Animator {
     );
   }
 
-  private spring(ch: Channel, dt: number, x: number, base: SpringParams) {
-    this.sp.f = base.f * CHANNELS[ch];
+  private spring(ch: Channel, dt: number, x: number, base: SpringParams, stiff = 1) {
+    this.sp.f = base.f * CHANNELS[ch] * stiff;
     this.sp.z = base.z;
     this.sp.r = base.r;
     return this.springs[ch].update(dt, x, this.sp);
   }
 
-  update(dt: number, p: Person, m: Motion, st: Style, heading: number) {
+  update(dt: number, p: Person, m: Motion, st: Style, heading: number, act: ActionPose | null = null) {
     const J = p.joints;
     const d = p.dims;
     const sp = st.spring;
@@ -89,6 +90,7 @@ export class Animator {
     const shiftTarget = idleK * (0.6 * this.noise(0, t, 0.35) + 0.25 * Math.sign(this.noise(2, t, 0.12)));
     this.extras.shiftX = this.spring('shiftX', dt, shiftTarget, sp);
     const accelLean = this.spring('accelLean', dt, clamp(accel * 0.25, -0.35, 0.35), sp);
+    this.extras.crouch = act?.crouch ?? 0;
 
     // --- gait: legs are posed now, upper body comes back as targets --------
     const u = applyGait(p, m, st.gait, this.extras);
@@ -109,22 +111,34 @@ export class Animator {
     const breathe = Math.sin(t * TAU * 0.28) * 0.025 * (0.4 + idleK);
     const glance = idleK * (0.55 * this.noise(4, t, 0.5) + 0.35 * Math.sign(this.noise(6, t, 0.2)) * Math.abs(this.noise(8, t, 0.3)));
 
-    const spineX = u.spineX - 0.14 * P + accelLean + breathe + nz * 0.04 * this.noise(10, t, 2.1);
+    const spineX = (act?.spineX ?? 0) + u.spineX - 0.14 * P + accelLean + breathe + nz * 0.04 * this.noise(10, t, 2.1);
     const spineY = u.spineY + nz * 0.08 * this.noise(12, t, 1.4) + glance * 0.25;
     const spineZ = u.spineZ + nz * 0.07 * this.noise(14, t, 1.7);
     const neckX = 0.28 * Math.max(0, -P) - 0.04 * Math.max(0, P); // slouch: head juts forward
-    const headX = u.headX - 0.24 * Math.max(0, -P) - 0.06 * Math.max(0, P) - accelLean * 0.6 - bobK + nz * 0.08 * this.noise(16, t, 2.6);
-    const headY = u.headY + glance * 0.7 + nz * 0.15 * this.noise(18, t, 1.2);
-    const headZ = u.headZ + nz * 0.12 * this.noise(20, t, 1.9);
+    const headX = (act?.headX ?? 0) + u.headX - 0.24 * Math.max(0, -P) - 0.06 * Math.max(0, P) - accelLean * 0.6 - bobK + nz * 0.08 * this.noise(16, t, 2.6);
+    const headY = (act?.headY ?? 0) + u.headY + glance * 0.7 + nz * 0.15 * this.noise(18, t, 1.2);
+    const headZ = (act?.headZ ?? 0) + u.headZ + nz * 0.12 * this.noise(20, t, 1.9);
 
     const asymL = 1 + st.asym;
     const asymR = 1 - st.asym;
     const armFwd = 0.12 * P - 0.18 * Math.max(0, -P); // slouch rounds the shoulders
-    const shLX = u.shoulderLX * asymL + armFwd + nz * 0.1 * this.noise(3, t, 2.2);
-    const shRX = u.shoulderRX * asymR + armFwd + nz * 0.1 * this.noise(5, t, 2.4);
+    let shLX = u.shoulderLX * asymL + armFwd + nz * 0.1 * this.noise(3, t, 2.2);
+    let shRX = u.shoulderRX * asymR + armFwd + nz * 0.1 * this.noise(5, t, 2.4);
     const spread = d.armOut + st.armOut + bobK * 0.4 + idleK * 0.03 * breathe;
-    const elL = 0.14 + st.elbow + u.elbowL * asymL + bobK * 0.5;
-    const elR = 0.14 + st.elbow + u.elbowR * asymR + bobK * 0.5;
+    let spL = spread;
+    let spR = spread;
+    let elL = 0.14 + st.elbow + u.elbowL * asymL + bobK * 0.5;
+    let elR = 0.14 + st.elbow + u.elbowR * asymR + bobK * 0.5;
+
+    // action arm overrides blend in *before* the springs, so they inherit personality
+    let stL = 1;
+    let stR = 1;
+    if (act) {
+      const L = act.arms.L;
+      const R = act.arms.R;
+      shLX += (L.x - shLX) * L.w; spL += (L.z - spL) * L.w; elL += (L.elbow - elL) * L.w; stL += (L.stiff - 1) * L.w;
+      shRX += (R.x - shRX) * R.w; spR += (R.z - spR) * R.w; elR += (R.elbow - elR) * R.w; stR += (R.stiff - 1) * R.w;
+    }
 
     // --- springs → joints ---------------------------------------------------
     J.spine.rotation.set(
@@ -140,9 +154,9 @@ export class Animator {
       this.spring('headZ', dt, headZ, sp),
       'YXZ',
     );
-    J.shoulderL.rotation.set(this.spring('shLX', dt, shLX, sp), 0, this.spring('shLZ', dt, spread, sp), 'ZYX');
-    J.shoulderR.rotation.set(this.spring('shRX', dt, shRX, sp), 0, -this.spring('shRZ', dt, spread, sp), 'ZYX');
-    J.elbowL.rotation.set(-Math.max(0, this.spring('elL', dt, elL, sp)), 0, 0);
-    J.elbowR.rotation.set(-Math.max(0, this.spring('elR', dt, elR, sp)), 0, 0);
+    J.shoulderL.rotation.set(this.spring('shLX', dt, shLX, sp, stL), 0, this.spring('shLZ', dt, spL, sp, stL), 'ZYX');
+    J.shoulderR.rotation.set(this.spring('shRX', dt, shRX, sp, stR), 0, -this.spring('shRZ', dt, spR, sp, stR), 'ZYX');
+    J.elbowL.rotation.set(-Math.max(0, this.spring('elL', dt, elL, sp, stL)), 0, 0);
+    J.elbowR.rotation.set(-Math.max(0, this.spring('elR', dt, elR, sp, stR)), 0, 0);
   }
 }

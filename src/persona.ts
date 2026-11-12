@@ -57,6 +57,8 @@ export interface Style {
   asym: number; // left/right asymmetry
   turnLean: number; // how much they lean into turns
   idle: number; // amount of idle weight shifting / looking around
+  tempo: number; // action speed multiplier
+  hop: number; // jump height multiplier
 }
 
 const ex = Math.exp;
@@ -99,5 +101,7 @@ export function styleFor(base: GaitParams, p: Persona, amount: number): Style {
     asym: 0.35 * pos(L),
     turnLean: 0.5 * ex(0.4 * W + 0.3 * E),
     idle: clamp(0.5 + 0.4 * E + 0.3 * L, 0.1, 1.5),
+    tempo: ex(0.35 * E - 0.3 * W + 0.15 * D),
+    hop: ex(0.5 * E - 0.55 * W + 0.15 * D),
   };
 }

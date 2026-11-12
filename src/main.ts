@@ -9,6 +9,8 @@ import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
 import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
+import { ACTIONS, type ActionKind, Actor } from './actions';
+import { Sparks } from './fx';
 
 const MODES = ['stand', 'parade', 'compare'] as const;
 type Mode = (typeof MODES)[number];
@@ -42,6 +44,7 @@ const settings = {
   paused: q.has('paused'),
   gait: { ...defaultGait },
   personality: num('persona', 1), // global exaggeration of everyone's persona
+  autoActions: q.has('auto'),
 };
 
 // ---------------------------------------------------------------- renderer / scene
@@ -150,6 +153,18 @@ function removePerson(p: Person) {
 // motion state lives beside the person so rebuilding a body keeps its stride
 let motions: Motion[] = [];
 let anims: Animator[] = [];
+let actors: Actor[] = [];
+let offsets: { x: number; z: number; yaw: number; locked: boolean }[] = [];
+let nextAuto: number[] = [];
+let simTime = 0;
+let spinAngle = 0;
+const kit = { toon, outline };
+const sparks = new Sparks(scene);
+// deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
+let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
+  ACTIONS.includes(q.get('act') as ActionKind)
+    ? { at: num('actAt', 0), who: num('select', 0), kind: q.get('act') as ActionKind }
+    : null;
 let along: number[] = []; // distance travelled along the parade ring / lane
 let compareBase: Genome | null = null; // the body every lane shares in compare mode
 const COMPARE = q.get('lanes')?.split(',').filter((k) => PRESETS[k]) ?? Object.keys(PRESETS);
@@ -159,25 +174,49 @@ const LANE_GAP = 0.85;
 const ringRadius = () => Math.max(1.2, (settings.count * 0.72) / (Math.PI * 2));
 const styleOf = (p: Person) => styleFor(settings.gait, p.genome.persona, settings.personality);
 
+/** Where the mode wants person i to be (before action offsets). */
+function baseTransform(i: number) {
+  if (settings.mode === 'stand') {
+    const t = slotTransform(i);
+    return { x: t.x, z: t.z, yaw: t.rot + spinAngle };
+  }
+  if (settings.mode === 'parade') {
+    const R = ringRadius();
+    const th = along[i] / R;
+    // counter-clockwise: velocity = (-sin, 0, cos)
+    return { x: Math.cos(th) * R, z: Math.sin(th) * R, yaw: Math.atan2(-Math.sin(th), Math.cos(th)) };
+  }
+  // straight lanes toward the camera, wrapping off-screen
+  const z = (((along[i] + LANE_LEN / 2) % LANE_LEN) + LANE_LEN) % LANE_LEN - LANE_LEN / 2;
+  return { x: (i - (people.length - 1) / 2) * LANE_GAP, z, yaw: 0 };
+}
+
+/**
+ * Place a person: path position + a decaying offset. While an action owns the
+ * root (ragdoll, getting up) we leave it alone; when it lets go we capture the
+ * difference as an offset and ease it away, so nobody snaps back to the path.
+ */
+function placeOne(i: number, lift = 0) {
+  const p = people[i];
+  const a = actors[i];
+  const o = offsets[i];
+  const b = baseTransform(i);
+  if (a?.rootLocked) {
+    o.locked = true;
+    return;
+  }
+  if (o.locked) {
+    o.locked = false;
+    o.x = p.root.position.x - b.x;
+    o.z = p.root.position.z - b.z;
+    o.yaw = Math.atan2(Math.sin(p.root.rotation.y - b.yaw), Math.cos(p.root.rotation.y - b.yaw));
+  }
+  p.root.position.set(b.x + o.x, lift, b.z + o.z);
+  p.root.rotation.y = b.yaw + o.yaw;
+}
+
 function placeAll() {
-  people.forEach((p, i) => {
-    if (settings.mode === 'stand') {
-      const t = slotTransform(i);
-      p.root.position.set(t.x, 0, t.z);
-      p.root.rotation.y = t.rot;
-    } else if (settings.mode === 'parade') {
-      const R = ringRadius();
-      const th = along[i] / R;
-      p.root.position.set(Math.cos(th) * R, 0, Math.sin(th) * R);
-      // counter-clockwise: velocity = (-sin, 0, cos)
-      p.root.rotation.y = Math.atan2(-Math.sin(th), Math.cos(th));
-    } else {
-      // straight lanes toward the camera, wrapping off-screen
-      const z = (((along[i] + LANE_LEN / 2) % LANE_LEN) + LANE_LEN) % LANE_LEN - LANE_LEN / 2;
-      p.root.position.set((i - (people.length - 1) / 2) * LANE_GAP, 0, z);
-      p.root.rotation.y = 0;
-    }
-  });
+  people.forEach((_, i) => placeOne(i));
 }
 
 function setTargetSpeeds() {
@@ -214,6 +253,10 @@ function rebuildAll() {
   const r = mulberry32(settings.seed * 31 + 7);
   motions = people.map(() => newMotion(r()));
   anims = people.map((_, i) => new Animator(settings.seed * 977 + i));
+  actors.forEach((a) => a.dispose());
+  actors = people.map((p) => new Actor(p, kit));
+  offsets = people.map(() => ({ x: 0, z: 0, yaw: 0, locked: false }));
+  nextAuto = people.map(() => simTime + 1 + Math.random() * 6);
   const gap = settings.mode === 'compare' ? 0 : (Math.PI * 2 * ringRadius()) / n;
   along = people.map((_, i) => (settings.mode === 'compare' ? -1.5 + r() * 0.3 : i * gap));
   setTargetSpeeds();
@@ -225,24 +268,64 @@ function rebuildAll() {
 
 function rebuildOne(i: number) {
   const g = people[i].genome;
+  actors[i]?.dispose();
   removePerson(people[i]);
   people[i] = makePerson(i, g);
+  actors[i] = new Actor(people[i], kit);
   placeAll();
   attachRing();
 }
 
-/** One simulation step: move along paths, advance gait phase, animate. */
+function modeSpeed(i: number) {
+  if (actors[i]?.holdSpeed || settings.mode === 'stand') return 0;
+  if (settings.mode === 'parade') return settings.speed; // same speed or they'd collide
+  return settings.speed * styleOf(people[i]).speedK;
+}
+
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall'];
+
+function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
+  // hammering mid-parade would leave people standing in the stream
+  if (kind === 'hammer' && settings.mode === 'parade') kind = 'wave';
+  actors[i]?.start(kind, { push });
+}
+
+/** One simulation step: actions, locomotion, animation, effects. */
 function simulate(dt: number) {
+  simTime += dt;
+  if (settings.mode === 'stand' && settings.spin) spinAngle += dt * 0.8;
+  if (scheduled && simTime >= scheduled.at) {
+    act(scheduled.who, scheduled.kind, scheduled.push);
+    scheduled = null;
+  }
+  const decay = 1 - Math.exp(-dt * 1.5);
   people.forEach((p, i) => {
     const m = motions[i];
+    const a = actors[i];
     const st = styleOf(p);
-    if (settings.mode === 'compare') m.targetSpeed = settings.speed * st.speedK;
+    if (settings.autoActions && !a.busy && simTime > nextAuto[i]) {
+      act(i, AUTO_POOL[Math.floor(Math.random() * AUTO_POOL.length)]);
+      nextAuto[i] = simTime + 3 + Math.random() * 10;
+    }
+    const pose = a.pre(dt, m, st);
+    m.targetSpeed = modeSpeed(i);
     advance(m, p, st.gait, dt);
     if (settings.mode !== 'stand') along[i] += m.speed * dt;
-    else if (settings.spin) p.root.rotation.y += dt * 0.8;
+    const o = offsets[i];
+    if (!o.locked) {
+      o.x -= o.x * decay;
+      o.z -= o.z * decay;
+      o.yaw -= o.yaw * decay;
+    }
+    placeOne(i, pose?.lift ?? 0);
+    anims[i].update(dt, p, m, st, p.root.rotation.y, pose);
+    a.post(dt, m, st);
+    if (a.impact && a.hammerHead) {
+      p.root.updateMatrixWorld(true);
+      sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
+    }
   });
-  if (settings.mode !== 'stand') placeAll();
-  people.forEach((p, i) => anims[i].update(dt, p, motions[i], styleOf(p), p.root.rotation.y));
+  sparks.update(dt);
 }
 
 // ---------------------------------------------------------------- labels (compare mode)
@@ -326,6 +409,18 @@ gaitF.add(G, 'stance', 0, 2, 0.01).name('stance width');
 gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
+const actF = gui.addFolder('Actions');
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]']] as const)
+  actF.add({ go: () => act(selected, k) }, 'go').name(label);
+actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
+actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
+actF.add(settings, 'autoActions').name('random crowd actions');
+
+window.addEventListener('keydown', (e) => {
+  const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall' } as const)[e.key as '1'];
+  if (k) act(selected, k);
+});
+
 let selFolder: GUI | null = null;
 function select(i: number) {
   selected = i;
@@ -395,7 +490,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hit = ray.intersectObjects(people.map((p) => p.root), true)[0];
   let o: THREE.Object3D | null = hit?.object ?? null;
   while (o && o.userData.index === undefined) o = o.parent;
-  if (o) select(o.userData.index);
+  if (!o) return;
+  if (e.shiftKey) {
+    // shove away from the camera, slightly upward
+    const dir = ray.ray.direction.clone().setY(0).normalize().multiplyScalar(2.2).setY(0.6);
+    act(o.userData.index, 'fall', dir);
+  } else select(o.userData.index);
 });
 
 // ---------------------------------------------------------------- loop

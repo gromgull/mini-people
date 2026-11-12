@@ -1,12 +1,12 @@
 // Render a paused walker at successive times and tile them into one image.
-//   node scripts/filmstrip.mjs "<query>" [frames=10] [dt=0.1] [name=strip]
+//   node scripts/filmstrip.mjs "<query>" [frames=10] [dt=0.1] [name=strip] [t0=0]
 // The query should select + focus someone, e.g. "count=6&select=0&focus&zoom=6&az=90&el=8"
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 
-const [query = 'count=6&select=0&focus&zoom=6&az=90&el=8', frames = '10', dt = '0.1', name = 'strip'] = process.argv.slice(2);
+const [query = 'count=6&select=0&focus&zoom=6&az=90&el=8', frames = '10', dt = '0.1', name = 'strip', t0 = '0'] = process.argv.slice(2);
 mkdirSync('screenshots/frames', { recursive: true });
 
 const server = await createServer({ server: { port: 5198, strictPort: true }, logLevel: 'error' });
@@ -19,7 +19,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 const files = [];
 for (let i = 0; i < Number(frames); i++) {
-  const t = (i * Number(dt)).toFixed(3);
+  const t = (Number(t0) + i * Number(dt)).toFixed(3);
   await page.goto(`http://localhost:5198/?${query}&t=${t}&paused&nogui`);
   await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
   const f = `screenshots/frames/${name}-${String(i).padStart(2, '0')}.png`;

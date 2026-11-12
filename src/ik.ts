@@ -14,7 +14,7 @@ const _qShin = new THREE.Quaternion();
  * Orientation whose local -Y points along `dir` and whose local +Z leans
  * toward `pole` (our limbs hang down -Y, and +Z is "front of the limb").
  */
-function aimDown(dir: THREE.Vector3, pole: THREE.Vector3, out: THREE.Quaternion) {
+export function aimDown(dir: THREE.Vector3, pole: THREE.Vector3, out: THREE.Quaternion) {
   _y.copy(dir).negate();
   _z.copy(pole).addScaledVector(_y, -pole.dot(_y));
   if (_z.lengthSq() < 1e-10) _z.set(0, 0, 1).addScaledVector(_y, -_y.z);
@@ -59,4 +59,26 @@ export function twoBoneIK(
   aimDown(_a, _p, outUpper);
   aimDown(_b, _p, _qShin);
   outMiddle.copy(outUpper).invert().multiply(_qShin);
+}
+
+/** Orientation with local +Y along `y` and local +X as close to `xHint` as possible. */
+export function frameYX(y: THREE.Vector3, xHint: THREE.Vector3, out: THREE.Quaternion) {
+  _y.copy(y).normalize();
+  _x.copy(xHint).addScaledVector(_y, -xHint.dot(_y));
+  if (_x.lengthSq() < 1e-10) _x.set(1, 0, 0).addScaledVector(_y, -_y.x);
+  _x.normalize();
+  _z.crossVectors(_x, _y);
+  _m.makeBasis(_x, _y, _z);
+  return out.setFromRotationMatrix(_m);
+}
+
+/** Orientation with local +Z along `z` and local +Y as close to `yHint` as possible. */
+export function frameZY(z: THREE.Vector3, yHint: THREE.Vector3, out: THREE.Quaternion) {
+  _z.copy(z).normalize();
+  _y.copy(yHint).addScaledVector(_z, -yHint.dot(_z));
+  if (_y.lengthSq() < 1e-10) _y.set(0, 1, 0).addScaledVector(_z, -_z.y);
+  _y.normalize();
+  _x.crossVectors(_y, _z);
+  _m.makeBasis(_x, _y, _z);
+  return out.setFromRotationMatrix(_m);
 }

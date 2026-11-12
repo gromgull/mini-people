@@ -41,14 +41,16 @@ export interface Motion {
   speed: number; // current ground speed (units/s), smoothed
   targetSpeed: number;
   time: number; // seconds alive, for idle/noise
+  lockPhase: boolean; // freeze the stride (e.g. airborne)
 }
 
-export const newMotion = (phase = 0): Motion => ({ phase, speed: 0, targetSpeed: 0, time: phase * 100 });
+export const newMotion = (phase = 0): Motion => ({ phase, speed: 0, targetSpeed: 0, time: phase * 100, lockPhase: false });
 
 /** Whole-body influences computed by the animator (already spring-smoothed). */
 export interface BodyExtras {
   turnLean: number; // rad, + leans toward local -X (into a right-hand turn)
   shiftX: number; // idle weight shift, × hip width (+ = onto left foot)
+  crouch: number; // extra pelvis drop, × leg length (feet stay planted)
 }
 
 /** Upper-body *targets* from the gait; the animator layers & springs them. */
@@ -96,7 +98,7 @@ export function cycleLength(p: Person, g: GaitParams, speed: number) {
 export function advance(m: Motion, p: Person, g: GaitParams, dt: number) {
   m.time += dt;
   m.speed += (m.targetSpeed - m.speed) * (1 - Math.exp(-dt * 4));
-  if (m.speed < 1e-4) return;
+  if (m.speed < 1e-4 || m.lockPhase) return;
   m.phase = (m.phase + (m.speed * dt) / cycleLength(p, g, m.speed)) % 1;
 }
 
@@ -158,7 +160,7 @@ export function applyGait(p: Person, m: Motion, g: GaitParams, x: BodyExtras): U
   }
   // optional extra springiness on top, lowest around heel strike
   const vault = 0.5 * (1 - Math.cos(2 * TAU * (ph - mid)));
-  pelvisY -= d.legLen * (g.crouch + g.bounce * w * vault);
+  pelvisY -= d.legLen * (g.crouch + g.bounce * w * vault + x.crouch);
 
   J.pelvis.position.set(swayX, pelvisY, 0);
   J.pelvis.quaternion.setFromEuler(_euler.set(0, yaw, roll, 'YXZ'));

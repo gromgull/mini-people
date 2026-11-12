@@ -31,7 +31,7 @@ export interface Person {
 
 // ---------------------------------------------------------------- geometry helpers
 
-function withRow(geo: THREE.BufferGeometry, row: number): THREE.BufferGeometry {
+export function withRow(geo: THREE.BufferGeometry, row: number): THREE.BufferGeometry {
   // drop uv: we don't use it and it lets us merge freely
   geo.deleteAttribute('uv');
   const n = geo.getAttribute('position').count;
