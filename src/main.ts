@@ -805,7 +805,7 @@ function updateEnvironment(dt: number) {
   fog.uFogC.value.set(tgt.x, tgt.z);
   fog.uFogDir.value.set(_fwd.x, _fwd.z);
   fog.uFogFar.value = horizonFar;
-  fog.uFogNear.value = horizonFar * 0.4;
+  fog.uFogNear.value = horizonFar * 0.8;
   clouds.update(camera, tgt, horizonFar, dt);
   _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
   sky.material.uniforms.uHorizon.value = _hz.y;

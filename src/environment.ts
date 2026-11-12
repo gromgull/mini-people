@@ -14,7 +14,6 @@ import { mulberry32 } from './rng';
  * meshes kept in the sky band, sliding past as the camera orbits.
  */
 
-const SKY_TOP = new THREE.Color('#4f93d8');
 
 export function createSky(fog: FogUniforms) {
   const mat = new THREE.ShaderMaterial({
@@ -22,7 +21,8 @@ export function createSky(fog: FogUniforms) {
     depthWrite: false,
     uniforms: {
       uHaze: fog.uHaze,
-      uTop: { value: SKY_TOP },
+      // (created here, not at module load: main turns colour management off first)
+      uTop: { value: new THREE.Color('#5aa0e2') },
       uHorizon: { value: 0 }, // NDC y of the horizon line
       uRes: { value: new THREE.Vector2(1, 1) },
     },
@@ -36,8 +36,9 @@ export function createSky(fog: FogUniforms) {
       uniform vec2 uRes;
       void main() {
         float y = gl_FragCoord.y / uRes.y * 2.0 - 1.0;
-        float t = clamp((y - uHorizon) / 1.1, 0.0, 1.0);
-        t = floor(pow(t, 0.7) * 6.0) / 6.0; // a few flat bands, pixel-art style
+        // a quick haze band at the horizon, then plain blue
+        float t = clamp((y - uHorizon) / 0.3, 0.0, 1.0);
+        t = floor(t * 4.0 + 0.5) / 4.0; // a few flat bands, pixel-art style
         gl_FragColor = vec4(mix(uHaze, uTop, t), 1.0);
       }
     `,
