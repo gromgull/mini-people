@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "shot": "node scripts/screenshot.mjs"
+    "shot": "node scripts/screenshot.mjs",
+    "strip": "node scripts/filmstrip.mjs",
+    "probe": "node scripts/probe-gait.mjs"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",

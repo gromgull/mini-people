@@ -10,11 +10,14 @@ import { mkdirSync } from 'node:fs';
 const shots = process.argv[2]
   ? [[process.argv[3] ?? 'custom', process.argv[2]]]
   : [
-      ['crowd', 'seed=1&nogui'],
-      ['crowd-gui', 'seed=1&select=0'],
-      ['closeup', 'seed=1&zoom=3.5&px=1&count=12&nogui'],
-      ['closeup-pixel', 'seed=1&zoom=3.5&px=3&count=12&nogui'],
-      ['smooth-nooutline', 'seed=1&zoom=2&px=2&smooth=1&outline=0&count=20&nogui'],
+      ['crowd', 'mode=stand&seed=1&nogui'],
+      ['crowd-gui', 'mode=stand&seed=1&select=0'],
+      ['closeup', 'mode=stand&seed=1&zoom=3.5&px=1&count=12&nogui'],
+      ['closeup-pixel', 'mode=stand&seed=1&zoom=3.5&px=3&count=12&nogui'],
+      ['smooth-nooutline', 'mode=stand&seed=1&zoom=2&px=2&smooth=1&outline=0&count=20&nogui'],
+      ['parade', 'seed=1&t=2&paused&nogui'],
+      ['parade-follow', 'seed=2&t=3&paused&select=3&focus&zoom=3.5&nogui'],
+      ['parade-stepped', 'seed=1&fps=10&t=1.5&nogui'],
     ];
 
 mkdirSync('screenshots', { recursive: true });

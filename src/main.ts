@@ -6,6 +6,10 @@ import { HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createOutlineMaterial, createToonMaterial } from './materials';
 import { mulberry32 } from './rng';
+import { type Motion, WALK_SPEED, advance, applyGait, defaultGait, newMotion } from './gait';
+
+const MODES = ['stand', 'parade'] as const;
+type Mode = (typeof MODES)[number];
 
 // Colours are authored as display values and the atlas does all the shading,
 // so skip colour management entirely: what's in the atlas is what hits the screen.
@@ -29,6 +33,12 @@ const settings = {
   lightEl: 50,
   wrap: 0.35,
   ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
+  mode: (MODES.includes(q.get('mode') as Mode) ? q.get('mode') : 'parade') as Mode,
+  speed: num('speed', WALK_SPEED),
+  animFps: num('fps', 0), // 0 = smooth; 8–12 = classic sprite feel
+  follow: q.has('follow'),
+  paused: q.has('paused'),
+  gait: { ...defaultGait },
 };
 
 // ---------------------------------------------------------------- renderer / scene
@@ -60,8 +70,8 @@ const VIEW_H = 6;
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
 camera.zoom = num('zoom', 1);
 {
-  const az = THREE.MathUtils.degToRad(25);
-  const el = THREE.MathUtils.degToRad(35);
+  const az = THREE.MathUtils.degToRad(num('az', 25));
+  const el = THREE.MathUtils.degToRad(num('el', 35));
   const r = 40;
   camera.position.set(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r);
 }
@@ -134,19 +144,65 @@ function removePerson(p: Person) {
   p.dispose();
 }
 
+// motion state lives beside the person so rebuilding a body keeps its stride
+let motions: Motion[] = [];
+let along: number[] = []; // distance travelled along the parade ring
+
+const ringRadius = () => Math.max(1.2, (settings.count * 0.72) / (Math.PI * 2));
+
+function placeAll() {
+  people.forEach((p, i) => {
+    if (settings.mode === 'stand') {
+      const t = slotTransform(i);
+      p.root.position.set(t.x, 0, t.z);
+      p.root.rotation.y = t.rot;
+    } else {
+      const R = ringRadius();
+      const th = along[i] / R;
+      p.root.position.set(Math.cos(th) * R, 0, Math.sin(th) * R);
+      // counter-clockwise: velocity = (-sin, 0, cos)
+      p.root.rotation.y = Math.atan2(-Math.sin(th), Math.cos(th));
+    }
+  });
+}
+
+function setMode(mode: Mode) {
+  settings.mode = mode;
+  const v = mode === 'parade' ? settings.speed : 0;
+  motions.forEach((m) => (m.targetSpeed = v));
+  placeAll();
+}
+
 function rebuildAll() {
   people.forEach(removePerson);
   people = Array.from({ length: settings.count }, (_, i) => makePerson(i));
+  const r = mulberry32(settings.seed * 31 + 7);
+  motions = people.map(() => newMotion(r()));
+  const gap = (Math.PI * 2 * ringRadius()) / settings.count;
+  along = people.map((_, i) => i * gap);
+  setMode(settings.mode);
+  motions.forEach((m) => (m.speed = m.targetSpeed)); // start already walking
   select(Math.min(selected, people.length - 1));
 }
 
 function rebuildOne(i: number) {
   const g = people[i].genome;
-  const rot = people[i].root.rotation.y;
   removePerson(people[i]);
   people[i] = makePerson(i, g);
-  people[i].root.rotation.y = rot;
+  placeAll();
   attachRing();
+}
+
+/** One simulation step: move along paths, advance gait phase, pose. */
+function simulate(dt: number) {
+  people.forEach((p, i) => {
+    const m = motions[i];
+    advance(m, p, settings.gait, dt);
+    if (settings.mode === 'parade') along[i] += m.speed * dt;
+    else if (settings.spin) p.root.rotation.y += dt * 0.8;
+    applyGait(p, m, settings.gait);
+  });
+  if (settings.mode === 'parade') placeAll();
 }
 
 function attachRing() {
@@ -159,17 +215,40 @@ function attachRing() {
 // ---------------------------------------------------------------- GUI
 
 const gui = new GUI({ title: 'Mini People' });
-if (q.has('nogui')) gui.hide();
+if (q.has('nogui')) {
+  gui.hide();
+  document.getElementById('hint')?.remove();
+}
 
 const pop = gui.addFolder('Population');
 pop.add(settings, 'seed', 1, 9999, 1).onFinishChange(rebuildAll);
 pop.add(settings, 'count', 1, 200, 1).onFinishChange(rebuildAll);
-pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(() => people.forEach((p, i) => {
-  const t = slotTransform(i);
-  p.root.position.set(t.x, 0, t.z);
-}));
+pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(placeAll);
 pop.add({ reroll: () => { settings.seed = Math.floor(Math.random() * 9999) + 1; pop.controllersRecursive().forEach((c) => c.updateDisplay()); rebuildAll(); } }, 'reroll').name('🎲 new crowd');
-pop.add(settings, 'spin');
+pop.add(settings, 'spin').name('spin (stand mode)');
+
+const motion = gui.addFolder('Motion');
+motion.add(settings, 'mode', MODES).onChange(setMode);
+motion.add(settings, 'speed', 0, 1.5, 0.01).onChange(() => setMode(settings.mode));
+motion.add(settings, 'animFps', 0, 30, 1).name('anim fps (0=smooth)');
+motion.add(settings, 'paused');
+motion.add(settings, 'follow').name('camera follows selected');
+const gaitF = motion.addFolder('Gait').close();
+const G = settings.gait;
+gaitF.add(G, 'stride', 0.6, 2.5, 0.01);
+gaitF.add(G, 'duty', 0.5, 0.75, 0.01).name('duty (ground time)');
+gaitF.add(G, 'stepHeight', 0, 0.4, 0.005).name('step height');
+gaitF.add(G, 'bounce', 0, 0.15, 0.001);
+gaitF.add(G, 'sway', 0, 1.5, 0.01);
+gaitF.add(G, 'hipYaw', 0, 0.6, 0.01).name('hip yaw');
+gaitF.add(G, 'hipRoll', 0, 0.3, 0.005).name('hip roll');
+gaitF.add(G, 'shoulderTwist', 0, 3, 0.05).name('shoulder twist');
+gaitF.add(G, 'armSwing', 0, 1.4, 0.01).name('arm swing');
+gaitF.add(G, 'lean', -0.2, 0.5, 0.01);
+gaitF.add(G, 'crouch', 0, 0.25, 0.005);
+gaitF.add(G, 'stance', 0, 2, 0.01).name('stance width');
+gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
+gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 let selFolder: GUI | null = null;
 function select(i: number) {
@@ -239,11 +318,34 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 const lightWorld = new THREE.Vector3();
 const clock = new THREE.Clock();
 let frames = 0;
+let simAcc = 0;
+
+/** Move camera + orbit target so the selected person is centred. */
+function focusSelected(k = 1) {
+  const p = people[selected];
+  if (!p) return;
+  const off = camera.position.clone().sub(controls.target);
+  controls.target.lerp(new THREE.Vector3(p.root.position.x, p.dims.height * 0.5, p.root.position.z), k);
+  camera.position.copy(controls.target).add(off);
+}
 
 function frame() {
-  const dt = clock.getDelta();
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (!settings.paused) {
+    if (settings.animFps > 0) {
+      // "animating on twos": pose & position only update at a low fixed rate
+      const step = 1 / settings.animFps;
+      simAcc += dt;
+      while (simAcc >= step) {
+        simulate(step);
+        simAcc -= step;
+      }
+    } else {
+      simulate(dt);
+    }
+  }
+  if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
   controls.update();
-  if (settings.spin) people.forEach((p) => (p.root.rotation.y += dt * 0.8));
 
   const az = THREE.MathUtils.degToRad(settings.lightAz);
   const el = THREE.MathUtils.degToRad(settings.lightEl);
@@ -266,13 +368,16 @@ function frame() {
 
 resize();
 rebuildAll();
+// fit the parade ring in view unless a zoom was asked for
+if (!q.has('zoom') && settings.mode === 'parade') {
+  camera.zoom = Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6));
+  camera.updateProjectionMatrix();
+}
+// deterministic pre-roll for screenshots: ?t=seconds (combine with &paused)
+for (let i = 0, n = Math.round(num('t', 0) * 60); i < n; i++) simulate(1 / 60);
+simulate(0);
 if (q.has('select')) {
   select(num('select', 0));
-  if (q.has('focus')) {
-    const p = people[selected];
-    const off = camera.position.clone().sub(controls.target);
-    controls.target.set(p.root.position.x, p.dims.height * 0.5, p.root.position.z);
-    camera.position.copy(controls.target).add(off);
-  }
+  if (q.has('focus')) focusSelected();
 }
 frame();
