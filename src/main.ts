@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
-import { HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
+import { type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createOutlineMaterial, createToonMaterial } from './materials';
 import { mulberry32 } from './rng';
-import { type Motion, WALK_SPEED, advance, applyGait, defaultGait, newMotion } from './gait';
+import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
+import { Animator } from './animate';
+import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
 
-const MODES = ['stand', 'parade'] as const;
+const MODES = ['stand', 'parade', 'compare'] as const;
 type Mode = (typeof MODES)[number];
 
 // Colours are authored as display values and the atlas does all the shading,
@@ -39,6 +41,7 @@ const settings = {
   follow: q.has('follow'),
   paused: q.has('paused'),
   gait: { ...defaultGait },
+  personality: num('persona', 1), // global exaggeration of everyone's persona
 };
 
 // ---------------------------------------------------------------- renderer / scene
@@ -146,9 +149,15 @@ function removePerson(p: Person) {
 
 // motion state lives beside the person so rebuilding a body keeps its stride
 let motions: Motion[] = [];
-let along: number[] = []; // distance travelled along the parade ring
+let anims: Animator[] = [];
+let along: number[] = []; // distance travelled along the parade ring / lane
+let compareBase: Genome | null = null; // the body every lane shares in compare mode
+const COMPARE = q.get('lanes')?.split(',').filter((k) => PRESETS[k]) ?? Object.keys(PRESETS);
+const LANE_LEN = 9;
+const LANE_GAP = 0.85;
 
 const ringRadius = () => Math.max(1.2, (settings.count * 0.72) / (Math.PI * 2));
+const styleOf = (p: Person) => styleFor(settings.gait, p.genome.persona, settings.personality);
 
 function placeAll() {
   people.forEach((p, i) => {
@@ -156,32 +165,61 @@ function placeAll() {
       const t = slotTransform(i);
       p.root.position.set(t.x, 0, t.z);
       p.root.rotation.y = t.rot;
-    } else {
+    } else if (settings.mode === 'parade') {
       const R = ringRadius();
       const th = along[i] / R;
       p.root.position.set(Math.cos(th) * R, 0, Math.sin(th) * R);
       // counter-clockwise: velocity = (-sin, 0, cos)
       p.root.rotation.y = Math.atan2(-Math.sin(th), Math.cos(th));
+    } else {
+      // straight lanes toward the camera, wrapping off-screen
+      const z = (((along[i] + LANE_LEN / 2) % LANE_LEN) + LANE_LEN) % LANE_LEN - LANE_LEN / 2;
+      p.root.position.set((i - (people.length - 1) / 2) * LANE_GAP, 0, z);
+      p.root.rotation.y = 0;
     }
   });
 }
 
+function setTargetSpeeds() {
+  people.forEach((p, i) => {
+    const m = motions[i];
+    if (!m) return;
+    if (settings.mode === 'stand') m.targetSpeed = 0;
+    else if (settings.mode === 'parade') m.targetSpeed = settings.speed; // same speed or they'd collide
+    else m.targetSpeed = settings.speed * styleOf(p).speedK;
+  });
+}
+
 function setMode(mode: Mode) {
+  const rebuild = (mode === 'compare') !== (settings.mode === 'compare') || mode === 'compare';
+  if (mode === 'compare' && settings.mode !== 'compare') compareBase = structuredClone(people[selected]?.genome ?? randomGenome(1));
   settings.mode = mode;
-  const v = mode === 'parade' ? settings.speed : 0;
-  motions.forEach((m) => (m.targetSpeed = v));
+  if (rebuild) rebuildAll();
+  setTargetSpeeds();
   placeAll();
+  fitCamera();
+}
+
+function genomeFor(i: number): Genome {
+  if (settings.mode !== 'compare') return randomGenome(settings.seed * 100003 + i);
+  const g = structuredClone(compareBase ?? randomGenome(1));
+  g.persona = { ...PRESETS[COMPARE[i]] };
+  return g;
 }
 
 function rebuildAll() {
   people.forEach(removePerson);
-  people = Array.from({ length: settings.count }, (_, i) => makePerson(i));
+  const n = settings.mode === 'compare' ? COMPARE.length : settings.count;
+  people = Array.from({ length: n }, (_, i) => makePerson(i, genomeFor(i)));
   const r = mulberry32(settings.seed * 31 + 7);
   motions = people.map(() => newMotion(r()));
-  const gap = (Math.PI * 2 * ringRadius()) / settings.count;
-  along = people.map((_, i) => i * gap);
-  setMode(settings.mode);
+  anims = people.map((_, i) => new Animator(settings.seed * 977 + i));
+  const gap = settings.mode === 'compare' ? 0 : (Math.PI * 2 * ringRadius()) / n;
+  along = people.map((_, i) => (settings.mode === 'compare' ? -1.5 + r() * 0.3 : i * gap));
+  setTargetSpeeds();
   motions.forEach((m) => (m.speed = m.targetSpeed)); // start already walking
+  placeAll();
+  syncLabels();
   select(Math.min(selected, people.length - 1));
 }
 
@@ -193,16 +231,53 @@ function rebuildOne(i: number) {
   attachRing();
 }
 
-/** One simulation step: move along paths, advance gait phase, pose. */
+/** One simulation step: move along paths, advance gait phase, animate. */
 function simulate(dt: number) {
   people.forEach((p, i) => {
     const m = motions[i];
-    advance(m, p, settings.gait, dt);
-    if (settings.mode === 'parade') along[i] += m.speed * dt;
+    const st = styleOf(p);
+    if (settings.mode === 'compare') m.targetSpeed = settings.speed * st.speedK;
+    advance(m, p, st.gait, dt);
+    if (settings.mode !== 'stand') along[i] += m.speed * dt;
     else if (settings.spin) p.root.rotation.y += dt * 0.8;
-    applyGait(p, m, settings.gait);
   });
-  if (settings.mode === 'parade') placeAll();
+  if (settings.mode !== 'stand') placeAll();
+  people.forEach((p, i) => anims[i].update(dt, p, motions[i], styleOf(p), p.root.rotation.y));
+}
+
+// ---------------------------------------------------------------- labels (compare mode)
+
+const labelLayer = document.createElement('div');
+labelLayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;font:600 12px ui-monospace,monospace;color:#fff;';
+document.body.appendChild(labelLayer);
+let labels: HTMLDivElement[] = [];
+
+function syncLabels() {
+  labels.forEach((l) => l.remove());
+  labels = settings.mode !== 'compare' ? [] : COMPARE.map((name) => {
+    const el = document.createElement('div');
+    el.textContent = name;
+    el.style.cssText = 'position:absolute;transform:translate(-50%,-100%);padding:1px 5px;background:#0008;border-radius:3px;white-space:nowrap;';
+    labelLayer.appendChild(el);
+    return el;
+  });
+}
+
+const _lp = new THREE.Vector3();
+function updateLabels() {
+  labels.forEach((el, i) => {
+    const p = people[i];
+    if (!p) return;
+    _lp.set(0, p.dims.height + 0.12, 0).applyMatrix4(p.root.matrixWorld).project(camera);
+    el.style.left = `${((_lp.x + 1) / 2) * window.innerWidth}px`;
+    el.style.top = `${((1 - _lp.y) / 2) * window.innerHeight}px`;
+  });
+}
+
+function fitCamera() {
+  if (q.has('zoom')) return;
+  camera.zoom = settings.mode === 'parade' ? Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6)) : settings.mode === 'compare' ? 1.25 : 1;
+  camera.updateProjectionMatrix();
 }
 
 function attachRing() {
@@ -228,8 +303,9 @@ pop.add({ reroll: () => { settings.seed = Math.floor(Math.random() * 9999) + 1; 
 pop.add(settings, 'spin').name('spin (stand mode)');
 
 const motion = gui.addFolder('Motion');
-motion.add(settings, 'mode', MODES).onChange(setMode);
-motion.add(settings, 'speed', 0, 1.5, 0.01).onChange(() => setMode(settings.mode));
+motion.add({ mode: settings.mode }, 'mode', MODES).onChange(setMode);
+motion.add(settings, 'speed', 0, 1.5, 0.01).onChange(setTargetSpeeds);
+motion.add(settings, 'personality', 0, 2, 0.01).name('personality amount');
 motion.add(settings, 'animFps', 0, 30, 1).name('anim fps (0=smooth)');
 motion.add(settings, 'paused');
 motion.add(settings, 'follow').name('camera follows selected');
@@ -272,6 +348,15 @@ function select(i: number) {
   looks.add(g, 'shoes', idx(PALETTE.shoes.length)).onChange(rebuild);
   looks.add(g, 'longSleeves').onChange(rebuild);
   looks.add(g, 'shorts').onChange(rebuild);
+  const pers = selFolder.addFolder('Personality');
+  for (const k of PERSONA_KEYS) pers.add(g.persona, k, 0, 1, 0.01).onChange(setTargetSpeeds);
+  const refresh = () => pers.controllersRecursive().forEach((c) => c.updateDisplay());
+  pers.add({ preset: '—' }, 'preset', ['—', ...Object.keys(PRESETS)]).onChange((name: string) => {
+    if (PRESETS[name]) Object.assign(g.persona, PRESETS[name]);
+    refresh();
+    setTargetSpeeds();
+  });
+  pers.add({ derive: () => { Object.assign(g.persona, derivePersona(g, mulberry32(Math.random() * 1e9))); refresh(); setTargetSpeeds(); } }, 'derive').name('🎲 from body');
   selFolder.add({ randomize: () => {
     const ng = randomGenome(Math.floor(Math.random() * 1e9));
     Object.assign(p.genome, ng);
@@ -357,6 +442,7 @@ function frame() {
   outline.uniforms.uPx.value = settings.outlinePx;
   outline.uniforms.uColor.value.set(settings.outlineColor);
 
+  updateLabels();
   renderer.setRenderTarget(rt);
   renderer.render(scene, camera);
   renderer.setRenderTarget(null);
@@ -368,11 +454,7 @@ function frame() {
 
 resize();
 rebuildAll();
-// fit the parade ring in view unless a zoom was asked for
-if (!q.has('zoom') && settings.mode === 'parade') {
-  camera.zoom = Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6));
-  camera.updateProjectionMatrix();
-}
+fitCamera();
 // deterministic pre-roll for screenshots: ?t=seconds (combine with &paused)
 for (let i = 0, n = Math.round(num('t', 0) * 60); i < n; i++) simulate(1 / 60);
 simulate(0);

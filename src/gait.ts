@@ -40,9 +40,35 @@ export interface Motion {
   phase: number; // 0..1 gait cycle; left heel strikes at 0, right at 0.5
   speed: number; // current ground speed (units/s), smoothed
   targetSpeed: number;
+  time: number; // seconds alive, for idle/noise
 }
 
-export const newMotion = (phase = 0): Motion => ({ phase, speed: 0, targetSpeed: 0 });
+export const newMotion = (phase = 0): Motion => ({ phase, speed: 0, targetSpeed: 0, time: phase * 100 });
+
+/** Whole-body influences computed by the animator (already spring-smoothed). */
+export interface BodyExtras {
+  turnLean: number; // rad, + leans toward local -X (into a right-hand turn)
+  shiftX: number; // idle weight shift, × hip width (+ = onto left foot)
+}
+
+/** Upper-body *targets* from the gait; the animator layers & springs them. */
+export interface UpperTargets {
+  w: number; // walk weight 0..1.3
+  spineX: number;
+  spineY: number;
+  spineZ: number;
+  headX: number;
+  headY: number;
+  headZ: number;
+  shoulderLX: number;
+  shoulderRX: number;
+  elbowL: number; // extra bend from swing
+  elbowR: number;
+}
+const upper: UpperTargets = {
+  w: 0, spineX: 0, spineY: 0, spineZ: 0, headX: 0, headY: 0, headZ: 0,
+  shoulderLX: 0, shoulderRX: 0, elbowL: 0, elbowR: 0,
+};
 
 /** Reference speed the gait is tuned for; amplitudes scale with speed / this. */
 export const WALK_SPEED = 0.55;
@@ -68,6 +94,7 @@ export function cycleLength(p: Person, g: GaitParams, speed: number) {
 
 /** Advance the phase so feet stay planted for the distance travelled. */
 export function advance(m: Motion, p: Person, g: GaitParams, dt: number) {
+  m.time += dt;
   m.speed += (m.targetSpeed - m.speed) * (1 - Math.exp(-dt * 4));
   if (m.speed < 1e-4) return;
   m.phase = (m.phase + (m.speed * dt) / cycleLength(p, g, m.speed)) % 1;
@@ -77,7 +104,7 @@ export function advance(m: Motion, p: Person, g: GaitParams, dt: number) {
  * Pose a person from their motion state. Everything is in the root's local
  * frame (root faces +Z, moves along +Z), so world placement is the caller's job.
  */
-export function applyGait(p: Person, m: Motion, g: GaitParams) {
+export function applyGait(p: Person, m: Motion, g: GaitParams, x: BodyExtras): UpperTargets {
   const d = p.dims;
   const J = p.joints;
   const w = Math.min(1.3, m.speed / WALK_SPEED); // 0 = standing, 1 = normal walk
@@ -112,9 +139,10 @@ export function applyGait(p: Person, m: Motion, g: GaitParams) {
   // --- pelvis -------------------------------------------------------------
   const mid = g.duty / 2;
   const lStance = Math.cos(TAU * (ph - mid)); // +1 when left foot is mid-stance
-  const swayX = d.hipJointX * g.sway * w * lStance;
+  // lean into turns from the ankles: shift the pelvis sideways, then roll it
+  const swayX = d.hipJointX * (g.sway * w * lStance + x.shiftX) - Math.sin(x.turnLean) * d.legLen * 0.6;
   const yaw = -g.hipYaw * w * Math.cos(TAU * ph); // left hip forward at left heel strike
-  const roll = g.hipRoll * w * lStance; // swing side drops
+  const roll = g.hipRoll * w * lStance + x.turnLean * 0.5 - x.shiftX * 0.08; // swing side drops
 
   // Inverted pendulum, solved rather than faked: the pelvis rides as high as it
   // can while both feet stay reachable with a near-straight leg. Bob falls out
@@ -153,17 +181,21 @@ export function applyGait(p: Person, m: Motion, g: GaitParams) {
     J[`ankle${f.side}`].quaternion.copy(_qChain).multiply(_qFoot);
   }
 
-  // --- trunk & head ---------------------------------------------------------
+  // --- upper body targets (posed by the animator) ----------------------------
   const spineYaw = -yaw * (1 + g.shoulderTwist); // net chest rotation opposes pelvis
-  J.spine.rotation.set(g.lean * w + 0.02, spineYaw, -roll * 0.6, 'YXZ');
-  J.head.rotation.set(0.05 - g.lean * w * 0.6, -(yaw + spineYaw) * 0.7, roll * 0.3, 'YXZ');
-
-  // --- arms (FK swing, opposite to the legs) ---------------------------------
-  for (const [side, off] of [['L', 0.5], ['R', 0]] as const) {
-    const s = side === 'L' ? 1 : -1;
-    const swing = Math.cos(TAU * (ph - off)); // +1 = this arm fully forward
-    const a = g.armSwing * w;
-    J[`shoulder${side}`].rotation.set(-a * swing * 0.9 + a * 0.15, 0, s * d.armOut, 'ZYX');
-    J[`elbow${side}`].rotation.set(-0.22 - a * 0.5 * Math.max(0, swing) - a * 0.15, 0, 0);
-  }
+  upper.w = w;
+  upper.spineX = g.lean * w + 0.02;
+  upper.spineY = spineYaw;
+  upper.spineZ = -roll * 0.6 + x.turnLean * 0.5;
+  upper.headX = 0.05 - g.lean * w * 0.6;
+  upper.headY = -(yaw + spineYaw) * 0.7;
+  upper.headZ = roll * 0.3 - x.turnLean * 0.6;
+  const a = g.armSwing * w;
+  const swingL = Math.cos(TAU * (ph - 0.5)); // +1 = left arm fully forward
+  const swingR = Math.cos(TAU * ph);
+  upper.shoulderLX = -a * swingL * 0.9 - a * 0.12; // slight forward bias (−X = forward)
+  upper.shoulderRX = -a * swingR * 0.9 - a * 0.12; // slight forward bias (−X = forward)
+  upper.elbowL = a * 0.5 * Math.max(0, swingL) + a * 0.15;
+  upper.elbowR = a * 0.5 * Math.max(0, swingR) + a * 0.15;
+  return upper;
 }

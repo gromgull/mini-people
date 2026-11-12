@@ -18,6 +18,8 @@ const shots = process.argv[2]
       ['parade', 'seed=1&t=2&paused&nogui'],
       ['parade-follow', 'seed=2&t=3&paused&select=3&focus&zoom=3.5&nogui'],
       ['parade-stepped', 'seed=1&fps=10&t=1.5&nogui'],
+      ['compare', 'mode=compare&seed=1&select=0&t=4&paused&nogui'],
+      ['stand-idle', 'mode=stand&seed=1&count=12&zoom=3&t=6&paused&nogui'],
     ];
 
 mkdirSync('screenshots', { recursive: true });

@@ -1,4 +1,5 @@
 import { PALETTE } from './palette';
+import { type Persona, derivePersona } from './persona';
 import { bell, clamp01, lerp, mulberry32, pickIndex } from './rng';
 
 /**
@@ -27,6 +28,8 @@ export interface Genome {
   shoes: number;
   longSleeves: boolean;
   shorts: boolean;
+  // personality (drives animation, not geometry)
+  persona: Persona;
 }
 
 export const SHAPE_GENES = [
@@ -40,7 +43,7 @@ export function randomGenome(seed: number): Genome {
   const height = bell(r);
   // a minority of stocky folks so the crowd has visible "types"
   const girth = r() < 0.18 ? lerp(0.7, 1, r()) : clamp01(bell(r) * 0.9);
-  return {
+  const g: Genome = {
     height,
     girth,
     belly: clamp01(girth * 0.75 + (r() - 0.5) * 0.5),
@@ -61,7 +64,11 @@ export function randomGenome(seed: number): Genome {
     shoes: pickIndex(r, PALETTE.shoes.length),
     longSleeves: r() < 0.55,
     shorts: r() < 0.25,
+    persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
+  // separate stream so adding personality doesn't reshuffle existing bodies
+  g.persona = derivePersona(g, mulberry32(seed ^ 0x5bd1e995));
+  return g;
 }
 
 /** Concrete body dimensions (world units, ~metres but cartoon-proportioned). */
