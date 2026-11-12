@@ -25,6 +25,7 @@ const shots = process.argv[2]
       ['act-sit', 'mode=stand&count=12&seed=1&select=0&act=sit&actAt=0.2&t=3&paused&focus&zoom=4&az=40&nogui'],
       ['act-auto', 'mode=stand&seed=2&auto&t=12&nogui'],
       ['parade-auto', 'seed=3&auto&t=10&nogui'],
+      ['wander', 'mode=wander&seed=1&count=30&t=20&paused&nogui'],
       ['look-camera', 'mode=stand&count=12&seed=1&zoom=3.2&px=2&look=camera&t=2&paused&nogui'],
       ['stand-idle', 'mode=stand&seed=1&count=12&zoom=3&t=6&paused&nogui'],
     ];
