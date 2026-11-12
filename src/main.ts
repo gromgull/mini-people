@@ -188,6 +188,17 @@ const startSound = () => sound.start();
 window.addEventListener('pointerdown', startSound);
 window.addEventListener('keydown', startSound);
 document.addEventListener('visibilitychange', () => sound.setHidden(document.hidden));
+// Watchdog: if frames stop (alt-tab to an occluding window, minimised, …) the
+// per-frame updates that keep continuous sounds honest stop too — so pause the
+// whole engine until frames come back. Timers keep running when rAF doesn't.
+let lastFrameAt = performance.now();
+let stalled = false;
+setInterval(() => {
+  if (!stalled && performance.now() - lastFrameAt > 250) {
+    stalled = true;
+    sound.setHidden(true);
+  }
+}, 100);
 let prevPhase: number[] = [];
 let walkersHeard = 0; // on-screen walkers last frame (footsteps share the space)
 let walkersNow = 0;
@@ -814,6 +825,11 @@ function updateEnvironment(dt: number) {
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
+  lastFrameAt = performance.now();
+  if (stalled) {
+    stalled = false;
+    if (!document.hidden) sound.setHidden(false);
+  }
   let simulated = false;
   if (!settings.paused) {
     if (settings.animFps > 0) {
