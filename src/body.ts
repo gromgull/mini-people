@@ -301,6 +301,8 @@ export function buildPerson(
     if (style === 1 || style === 2) {
       // full: wraps jaw and chin from ear to ear, nose and eyes stay clear
       pieces.push(blob(0.86, 0.58, 0.74, 0, -0.5, 0.3), ...moustache());
+      // sideburns climbing from the jaw to the hairline, so it joins the hair
+      for (const s of [1, -1]) pieces.push(blob(0.2, 0.52, 0.3, s * 0.82, -0.05, 0.2));
       if (style === 2) {
         // wizard: a long tapering point down the chest
         const cone = withRow(new THREE.ConeGeometry(0.5 * hr0, 1.7 * hr0, bs), hair);
@@ -312,7 +314,7 @@ export function buildPerson(
     } else if (style === 3) {
       pieces.push(blob(0.27, 0.32, 0.24, 0, -0.78, 0.6), ...moustache());
     } else if (style === 4) {
-      for (const s of [1, -1]) pieces.push(blob(0.16, 0.42, 0.22, s * 0.84, -0.18, 0.4));
+      for (const s of [1, -1]) pieces.push(blob(0.16, 0.48, 0.22, s * 0.84, -0.08, 0.36));
     } else if (style === 5) {
       pieces.push(...moustache());
     }
