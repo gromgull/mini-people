@@ -5,6 +5,7 @@ import type { Motion } from './gait';
 import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
+import { twoBoneIK } from './ik';
 
 export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
@@ -51,6 +52,10 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _z = new THREE.Vector3();
+const _pole = new THREE.Vector3();
+const _qU = new THREE.Quaternion();
+const _qM = new THREE.Quaternion();
+const BOW_LEN = 0.36;
 const mergeAll = (g: THREE.BufferGeometry[]) => {
   const out = mergeGeometries(g)!;
   g.forEach((x) => x.dispose());
@@ -170,6 +175,8 @@ export class Actor {
   note: { f: number; dur: number } | null = null;
   private tune: { deg: number; hold: number }[] = [];
   private bow = { dir: 1, start: 0, len: 0.25, lastSlot: -1 };
+  private bowStroke = 0; // −1 … 1 along the bow
+  private bowWeight = 0;
   private fiddle: THREE.Object3D | null = null;
   private bowMesh: THREE.Object3D | null = null;
   private dance = { move: 0, lastBar: -1, lastBeat: -1 };
@@ -276,16 +283,17 @@ export class Actor {
       this.fiddle.scale.setScalar(s * 1.6);
       p.root.add(this.fiddle);
       // bow: a long thin stick held across the hand
-      const stick = withRow(new THREE.CylinderGeometry(0.004, 0.004, 0.34, 4), dark);
+      // bow: frog at the origin, stick along +x
+      const stick = withRow(new THREE.CylinderGeometry(0.004, 0.004, BOW_LEN, 4), dark);
       stick.rotateZ(Math.PI / 2);
-      stick.translate(0.13, 0, 0);
-      const hair = withRow(new THREE.BoxGeometry(0.3, 0.003, 0.008), ROWS.cloud[0]);
-      hair.translate(0.13, -0.012, 0);
+      stick.translate(BOW_LEN / 2, 0.01, 0);
+      const hair = withRow(new THREE.BoxGeometry(BOW_LEN * 0.9, 0.003, 0.008), ROWS.cloud[0]);
+      hair.translate(BOW_LEN / 2, 0, 0);
+      const frog = withRow(new THREE.BoxGeometry(0.02, 0.022, 0.012), dark);
       this.bowMesh = new THREE.Group();
-      this.bowMesh.add(mesh(mergeAll([stick, hair]), this.kit));
+      this.bowMesh.add(mesh(mergeAll([stick, hair, frog]), this.kit));
       this.bowMesh.scale.setScalar(s);
-      this.bowMesh.position.y = -p.dims.handR * 0.7;
-      p.joints.wristR.add(this.bowMesh);
+      p.root.add(this.bowMesh); // placed across the strings every frame; the arm follows it
     }
     this.fiddle.visible = this.bowMesh!.visible = true;
     // a tune: a random walk on D major pentatonic, in eighth notes, some held
@@ -308,6 +316,39 @@ export class Actor {
     this.bow.lastSlot = -1;
   }
 
+  /**
+   * The bow crosses the strings just above the fiddle body, square to the
+   * neck, and slides along its own length; the right arm is then solved
+   * (two-bone IK in the chest's frame) so the hand holds the frog.
+   */
+  private placeBow() {
+    const p = this.p;
+    const J = p.joints;
+    const d = p.dims;
+    const f = this.fiddle!;
+    const bow = this.bowMesh!;
+    f.updateMatrix();
+    // contact point (between bridge and fingerboard) and "across the strings"
+    const contact = _a.set(0, 0.03, 0.06).applyMatrix4(f.matrix);
+    const across = _c.set(1, 0, 0).transformDirection(f.matrix);
+    if (across.x < 0) across.negate(); // the frog end is on the player's right (−x)
+    const len = BOW_LEN * Math.sqrt(d.height);
+    const along = 0.5 + 0.38 * this.bowStroke; // where on the bow the strings are
+    const frogPos = _b.copy(contact).addScaledVector(across, -along * len);
+    bow.position.copy(frogPos);
+    bow.quaternion.setFromUnitVectors(_z.set(1, 0, 0), across);
+    bow.visible = true;
+
+    // right arm: wrist to the frog, elbow out and down
+    p.root.updateMatrixWorld(true);
+    const wristTarget = J.spine.worldToLocal(p.root.localToWorld(frogPos.clone()));
+    wristTarget.y += d.handR * 0.4;
+    twoBoneIK(J.shoulderR.position, wristTarget, _pole.set(-1, -0.7, -0.4), d.upperArmLen, d.foreArmLen, _qU, _qM);
+    const w = this.bowWeight;
+    J.shoulderR.quaternion.slerp(_qU, w);
+    J.elbowR.quaternion.slerp(_qM, w);
+  }
+
   /** Put the fiddle between the chin and the left hand (after posing). */
   private placeFiddle() {
     const p = this.p;
@@ -320,7 +361,7 @@ export class Actor {
     this.fiddle!.position.copy(chin).addScaledVector(dir, -0.02);
     // neck along chin→hand; top face roughly up and a little toward the player
     this.fiddle!.quaternion.setFromUnitVectors(_z.set(0, 0, 1), dir);
-    this.fiddle!.rotateZ(0.5);
+    this.fiddle!.rotateZ(0.12); // a slight tilt; more would stand the bow up steeply
   }
 
   /** Saw in the right hand; log on a sawhorse where the blade meets it. */
@@ -798,8 +839,10 @@ export class Actor {
         }
         // bow arm: the hand travels across with each stroke
         const k = Math.min(1, (t - this.bow.start) / this.bow.len);
-        const sd = this.bow.dir * (2 * k - 1);
-        Object.assign(P.arms.R, { w: e, x: -0.95 - 0.1 * sd, z: 0.15 + 0.4 * sd, elbow: 1.5 - 0.5 * sd, stiff: 3 });
+        this.bowStroke = this.bow.dir * (2 * k - 1);
+        this.bowWeight = e;
+        // rough bowing pose for the springs; post() solves the exact arm with IK
+        Object.assign(P.arms.R, { w: e, x: -1.0, z: 0.35, elbow: 1.3, stiff: 2 });
         Object.assign(P.arms.L, { w: e, x: -1.2, z: 0.85, elbow: 0.55, stiff: 2 }); // holding the fiddle out to the side
         const sway = Math.sin(this.beatTime * Math.PI);
         P.headZ = 0.3 * e; // chin on the fiddle
@@ -910,6 +953,7 @@ export class Actor {
   post(dt: number, m: Motion, st: Style) {
     if (this.kind === 'fiddle' && this.fiddle) {
       this.placeFiddle();
+      this.placeBow();
       return;
     }
     if (this.kind === 'saw' && this.saw) {
