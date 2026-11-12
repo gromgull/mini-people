@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
-import { type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
+import { BEARD_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createOutlineMaterial, createToonMaterial } from './materials';
 import { mulberry32 } from './rng';
@@ -551,6 +551,7 @@ function select(i: number) {
   looks.add(g, 'skin', idx(PALETTE.skin.length)).onChange(rebuild);
   looks.add(g, 'hair', idx(PALETTE.hair.length)).onChange(rebuild);
   looks.add(g, 'hairStyle', Object.fromEntries(HAIR_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
+  looks.add(g, 'beard', Object.fromEntries(BEARD_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
   looks.add(g, 'shirt', idx(PALETTE.shirt.length)).onChange(rebuild);
   looks.add(g, 'pants', idx(PALETTE.pants.length)).onChange(rebuild);
   looks.add(g, 'shoes', idx(PALETTE.shoes.length)).onChange(rebuild);
@@ -626,12 +627,14 @@ const clock = new THREE.Clock();
 let frames = 0;
 let simAcc = 0;
 
+const FOCUS_Y = num('fy', 0.5); // focus height as a fraction of body height (0.85 ≈ face)
+
 /** Move camera + orbit target so the selected person is centred. */
 function focusSelected(k = 1) {
   const p = people[selected];
   if (!p) return;
   const off = camera.position.clone().sub(controls.target);
-  controls.target.lerp(new THREE.Vector3(p.root.position.x, p.dims.height * 0.5, p.root.position.z), k);
+  controls.target.lerp(new THREE.Vector3(p.root.position.x, p.dims.height * FOCUS_Y, p.root.position.z), k);
   camera.position.copy(controls.target).add(off);
 }
 
@@ -669,7 +672,7 @@ function frame() {
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
-  if (++frames === 2) (window as any).__mini = { ready: true, people, select, debug: () => ({ offsets, actors, motions, baseTransform }) };
+  if (++frames === 2) (window as any).__mini = { ready: true, people, select, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
   requestAnimationFrame(frame);
 }
 

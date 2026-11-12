@@ -17,7 +17,7 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 const base = `count=24&mode=stand&paused&nogui&t=1&look=camera&${extra}`;
 await page.goto(`http://localhost:5199/?${base}`);
 await page.waitForFunction(() => window.__mini?.ready);
-const genes = await page.evaluate(() => window.__mini.people.map((p) => ({ fem: +p.genome.fem.toFixed(2), bust: +p.genome.bust.toFixed(2), hair: p.genome.hairStyle, skirt: p.genome.skirt })));
+const genes = await page.evaluate(() => window.__mini.people.map((p) => ({ fem: +p.genome.fem.toFixed(2), bust: +p.genome.bust.toFixed(2), hair: p.genome.hairStyle, skirt: p.genome.skirt, beard: p.genome.beard })));
 const list = idx.length ? idx.map(Number) : genes.map((g, i) => i).filter((i) => genes[i].fem > 0.5).slice(0, 10);
 const files = [];
 for (const i of list) {

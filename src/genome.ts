@@ -22,6 +22,8 @@ export interface Genome {
   eyeSize: number;
   fem: number; // masculine ↔ feminine build (shoulders, waist, hips)
   bust: number;
+  noseWidth: number;
+  noseLength: number;
   // looks
   skin: number;
   hair: number;
@@ -32,13 +34,16 @@ export interface Genome {
   longSleeves: boolean;
   shorts: boolean;
   skirt: boolean;
+  beard: number; // index into BEARD_STYLES
   // personality (drives animation, not geometry)
   persona: Persona;
 }
 
 export const SHAPE_GENES = [
-  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'eyeSize', 'fem', 'bust',
+  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'noseWidth', 'noseLength', 'eyeSize', 'fem', 'bust',
 ] as const;
+
+export const BEARD_STYLES = ['none', 'full', 'wizard', 'goatee', 'sideburns', 'moustache'] as const;
 
 export const HAIR_STYLES = ['bald', 'short', 'long', 'hat', 'ponytail', 'bun'] as const;
 
@@ -72,6 +77,9 @@ export function randomGenome(seed: number): Genome {
     fem: 0,
     bust: 0,
     skirt: false,
+    noseWidth: 0.5,
+    noseLength: 0.5,
+    beard: 0,
     persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
   // about half the crowd reads as female; a few in-between builds
@@ -84,6 +92,16 @@ export function randomGenome(seed: number): Genome {
   if (g.fem > 0.5 && g.hairStyle !== 3 && hairR < 0.85) g.hairStyle = [1, 2, 2, 2, 4, 4, 5][pickIndex(() => hairPick, 7)];
   else if (g.fem <= 0.5 && g.hairStyle === 2 && hairR < 0.6) g.hairStyle = 1;
   g.skirt = g.fem > 0.5 && r() < 0.4;
+  g.noseWidth = bell(r);
+  g.noseLength = bell(r);
+  // beards: mostly on masculine builds; grey/white hair leans wizard
+  const beardR = r();
+  const beardPick = r();
+  const grey = g.hair === 5 || g.hair === 6;
+  if (g.fem < 0.4 && beardR < 0.45) {
+    const pool = grey ? [1, 2, 2, 2, 3, 4, 5] : [1, 1, 1, 2, 3, 3, 3, 4, 4, 5, 5];
+    g.beard = pool[pickIndex(() => beardPick, pool.length)];
+  }
   // separate stream so adding personality doesn't reshuffle existing bodies
   g.persona = derivePersona(g, mulberry32(seed ^ 0x5bd1e995));
   return g;

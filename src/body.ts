@@ -258,9 +258,65 @@ export function buildPerson(
   headGeo.translate(0, hc, 0);
   part(head, headGeo);
 
-  const noseGeo = ball(d.noseR, Math.max(6, segs - 2), skin);
-  noseGeo.translate(0, hc - d.headR * 0.12, d.headR * 0.95);
-  part(head, noseGeo);
+  // nose: a bridge plus two nostrils; size, width and length vary independently
+  {
+    const nr = d.noseR;
+    const wk = lerpN(0.7, 1.4, genome.noseWidth);
+    const lk = lerpN(0.7, 1.7, genome.noseLength);
+    const ns = Math.max(6, segs - 2);
+    const cy = hc - d.headR * 0.1;
+    const bridge = ball(1, ns, skin);
+    bridge.scale(nr * 0.62 * Math.sqrt(wk), nr * 1.05 * lk, nr * 0.85);
+    bridge.translate(0, cy, d.headR * 0.93);
+    const tipY = cy - nr * 0.8 * lk;
+    const nostrils = [1, -1].map((s) => {
+      const g = ball(nr * 0.55 * Math.sqrt(wk), ns, skin);
+      g.translate(s * nr * 0.5 * wk, tipY, d.headR * 0.9 + nr * 0.35);
+      return g;
+    });
+    part(head, merge([bridge, ...nostrils]));
+  }
+
+  // facial hair (in the hair colour; on the head, so it follows nods and turns)
+  if (genome.beard > 0) {
+    const hr0 = d.headR;
+    const bs = Math.max(6, segs);
+    const blob = (rx: number, ry: number, rz: number, x: number, y: number, z: number) => {
+      const g = ball(1, bs, hair);
+      g.scale(rx * hr0, ry * hr0, rz * hr0);
+      g.translate(x * hr0, hc + y * hr0, z * hr0);
+      return g;
+    };
+    const moustache = () => [1, -1].map((s) => {
+      // below the nostrils, drooping a little toward the corners
+      const g = ball(1, bs, hair);
+      g.scale(0.3 * hr0, 0.1 * hr0, 0.15 * hr0);
+      g.rotateZ(s * 0.35);
+      g.translate(s * 0.2 * hr0, hc - 0.44 * hr0, 0.88 * hr0);
+      return g;
+    });
+    const pieces: THREE.BufferGeometry[] = [];
+    const style = genome.beard;
+    if (style === 1 || style === 2) {
+      // full: wraps jaw and chin from ear to ear, nose and eyes stay clear
+      pieces.push(blob(0.86, 0.58, 0.74, 0, -0.5, 0.3), ...moustache());
+      if (style === 2) {
+        // wizard: a long tapering point down the chest
+        const cone = withRow(new THREE.ConeGeometry(0.5 * hr0, 1.7 * hr0, bs), hair);
+        cone.rotateX(Math.PI); // tip down
+        cone.rotateX(-0.25); // tip leans forward over the chest
+        cone.translate(0, hc - 1.4 * hr0, 0.62 * hr0);
+        pieces.push(cone);
+      }
+    } else if (style === 3) {
+      pieces.push(blob(0.27, 0.32, 0.24, 0, -0.78, 0.6), ...moustache());
+    } else if (style === 4) {
+      for (const s of [1, -1]) pieces.push(blob(0.16, 0.42, 0.22, s * 0.84, -0.18, 0.4));
+    } else if (style === 5) {
+      pieces.push(...moustache());
+    }
+    if (pieces.length) part(head, merge(pieces));
+  }
 
   // googly eyes: an oversized white ball poking out of the face, with a
   // pupil that rides on its surface (aimed every frame by the Gaze system)
