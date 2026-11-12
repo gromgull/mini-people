@@ -40,6 +40,7 @@ const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t
 
 const JUMP_G = 14;
 const SAW_CROUCH = 0.1;
+const SAW_STROKE = 0.22; // half-stroke, × arm length
 const _target = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _pos = new THREE.Vector3();
@@ -186,7 +187,10 @@ export class Actor {
     this.showHammer(false);
     if (this.box) this.box.visible = false;
     if (this.bench) this.bench.visible = false;
-    if (this.saw) this.saw.visible = false;
+    if (this.saw) {
+      this.saw.visible = false;
+      this.saw.rotation.x = 0;
+    }
     if (this.logSet) this.logSet.visible = false;
     this.partner = -1;
     this.kind = null;
@@ -254,7 +258,7 @@ export class Actor {
 
     const r = 0.055 * s;
     const len = 0.24 * s; // per half
-    const y = Math.max(r, cut.y - r * 0.5);
+    const y = Math.max(r, cut.y - r * 0.1); // blade runs through the log, not over it
     this.logSet!.position.set(cut.x, 0, cut.z);
     this.logHalves.forEach((h, i) => {
       h.position.set(0, y, 0);
@@ -273,7 +277,24 @@ export class Actor {
 
   /** Arm angles for a saw stroke, u = 0 (pulled back) … 1 (pushed through). */
   private sawStroke(u: number) {
-    return { x: lerp(-0.2, -0.85, u), z: 0.05, elbow: lerp(1.5, 0.45, u) };
+    // The hand slides in a straight line along the blade (= the mid-stroke
+    // forearm direction), solved as a planar two-bone chain in the spine's
+    // sagittal plane. Angles: θ = shoulder pitch forward from hanging, e = elbow.
+    const d = this.p.dims;
+    const a = d.upperArmLen;
+    const b = d.foreArmLen + d.handR * 0.7;
+    const th0 = 0.3;
+    const e0 = 1.25;
+    const dir = th0 + e0; // blade / stroke direction, from "down"
+    const f0 = a * Math.sin(th0) + b * Math.sin(dir);
+    const h0 = a * Math.cos(th0) + b * Math.cos(dir);
+    const k = (u - 0.5) * 2 * SAW_STROKE * (a + b);
+    const f = f0 + k * Math.sin(dir);
+    const h = h0 + k * Math.cos(dir);
+    const D = Math.min(Math.hypot(f, h), (a + b) * 0.985);
+    const e = Math.PI - Math.acos(Math.max(-1, Math.min(1, (a * a + b * b - D * D) / (2 * a * b))));
+    const th = Math.atan2(f, h) - Math.atan2(b * Math.sin(e), a + b * Math.cos(e));
+    return { x: -th, z: 0.05, elbow: e, blade: dir };
   }
 
   /** The carry pose's arm angles (shared by the FK fit and the animation). */
@@ -609,7 +630,7 @@ export class Actor {
         const raw = Math.max(0, t - lead) / T;
         const u = raw < strokes ? 0.5 - 0.5 * Math.cos(Math.PI * 2 * raw) : 0; // back → through → back
         const a = this.sawStroke(u);
-        Object.assign(P.arms.R, { w: e, ...a, stiff: 2.6 });
+        Object.assign(P.arms.R, { w: e, x: a.x, z: a.z, elbow: a.elbow, stiff: 2.6 });
         Object.assign(P.arms.L, { w: e, x: -0.85, z: 0.0, elbow: 0.15, stiff: 1.4 }); // steadies the log
         P.crouch = SAW_CROUCH * e;
         P.spineX = (0.45 + 0.05 * u) * e;
@@ -672,6 +693,13 @@ export class Actor {
 
   /** After the animator: pose overrides that replace the animation outright. */
   post(dt: number, m: Motion, st: Style) {
+    if (this.kind === 'saw' && this.saw) {
+      // hold the blade at a constant angle: undo the forearm's swing in the fist
+      const J = this.p.joints;
+      const fore = -(J.shoulderR.rotation.x + J.elbowR.rotation.x);
+      this.saw.rotation.x = fore - this.sawStroke(0.5).blade;
+      return;
+    }
     if (this.kind === 'carry') return this.postCarry();
     if (this.kind !== 'fall') return;
     const p = this.p;
