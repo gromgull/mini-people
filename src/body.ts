@@ -258,23 +258,24 @@ export function buildPerson(
   headGeo.translate(0, hc, 0);
   part(head, headGeo);
 
-  // nose: a bridge plus two nostrils; size, width and length vary independently
+  // nose: a slim bridge sloping out from between the eyes, ending in a wider
+  // flattened tip; size, width (tip) and length (bridge) vary independently
   {
     const nr = d.noseR;
-    const wk = lerpN(0.7, 1.4, genome.noseWidth);
-    const lk = lerpN(0.7, 1.7, genome.noseLength);
+    const wk = lerpN(0.75, 1.45, genome.noseWidth);
+    const lk = lerpN(0.75, 1.6, genome.noseLength);
     const ns = Math.max(6, segs - 2);
-    const cy = hc - d.headR * 0.1;
+    const top = hc + d.headR * 0.05; // root of the nose, between the eyes
+    const tipY = top - nr * 1.5 * lk;
+    const tipZ = d.headR * 0.9 + nr * 0.55;
     const bridge = ball(1, ns, skin);
-    bridge.scale(nr * 0.62 * Math.sqrt(wk), nr * 1.05 * lk, nr * 0.85);
-    bridge.translate(0, cy, d.headR * 0.93);
-    const tipY = cy - nr * 0.8 * lk;
-    const nostrils = [1, -1].map((s) => {
-      const g = ball(nr * 0.55 * Math.sqrt(wk), ns, skin);
-      g.translate(s * nr * 0.5 * wk, tipY, d.headR * 0.9 + nr * 0.35);
-      return g;
-    });
-    part(head, merge([bridge, ...nostrils]));
+    bridge.scale(nr * 0.42, nr * 0.85 * lk, nr * 0.5);
+    bridge.rotateX(-0.35); // lower end further out
+    bridge.translate(0, (top + tipY) / 2, d.headR * 0.9 + nr * 0.25);
+    const tip = ball(1, ns, skin);
+    tip.scale(nr * 0.62 * wk, nr * 0.55, nr * 0.6);
+    tip.translate(0, tipY, tipZ);
+    part(head, merge([bridge, tip]));
   }
 
   // facial hair (in the hair colour; on the head, so it follows nods and turns)
