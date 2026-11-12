@@ -11,6 +11,7 @@ import { Animator } from './animate';
 import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
 import { ACTIONS, type ActionKind, Actor } from './actions';
 import { Sparks } from './fx';
+import { Sound, type Voice, type Where, defaultAudio } from './audio';
 import { Wander, type WanderState, scatter, wanderRadius } from './wander';
 import { Gaze, type GazeWorld, LOOK_MODES, type LookMode } from './gaze';
 
@@ -165,6 +166,40 @@ let simTime = 0;
 let spinAngle = 0;
 const kit = { toon, outline };
 const sparks = new Sparks(scene);
+// ---------------------------------------------------------------- sound
+const sound = new Sound({ ...defaultAudio, enabled: !q.has('mute') });
+const startSound = () => sound.start();
+window.addEventListener('pointerdown', startSound);
+window.addEventListener('keydown', startSound);
+let prevPhase: number[] = [];
+let wasGasping: boolean[] = [];
+const voiceCache = new WeakMap<Person, Voice>();
+const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
+/** A person's voice and tread, from their body and personality. */
+function voiceOf(p: Person): Voice {
+  let v = voiceCache.get(p);
+  if (!v) {
+    const g = p.genome;
+    const small = 1 - g.height;
+    v = {
+      f0: lerpN(100, 235, 0.65 * g.fem + 0.35 * small) * (1.08 - 0.16 * g.girth) * (0.92 + 0.16 * g.persona.energy),
+      formant: lerpN(0.9, 1.22, 0.55 * g.fem + 0.45 * small),
+      rate: 0.8 + 0.5 * g.persona.energy,
+      weight: Math.min(1, 0.55 * g.persona.weight + 0.45 * g.girth + 0.2 * g.height - 0.1),
+    };
+    voiceCache.set(p, v);
+  }
+  return v;
+}
+const _sp = new THREE.Vector3();
+/** Stereo position + loudness from where the person is on screen; null = off-screen. */
+function whereOf(p: Person): Where | null {
+  _sp.set(0, p.dims.height * 0.8, 0).applyMatrix4(p.root.matrixWorld).project(camera);
+  if (Math.abs(_sp.x) > 1.15 || Math.abs(_sp.y) > 1.15) return null;
+  const edge = Math.max(0, Math.max(Math.abs(_sp.x), Math.abs(_sp.y)) - 0.8) / 0.35;
+  return { pan: _sp.x * 0.8, gain: Math.min(1.2, 0.3 + 0.45 * camera.zoom) * (1 - 0.7 * edge) };
+}
+
 const sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
 // deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
 let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
@@ -368,6 +403,34 @@ function startTalk(i: number) {
   }
 }
 
+/** Turn this frame's motion and action cues for person i into sound. */
+function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
+  const prev = prevPhase[i] ?? m.phase;
+  prevPhase[i] = m.phase;
+  if (!sound.live) {
+    if (sound.ctx) sound.saw(i, false, 0, false, { pan: 0, gain: 0 });
+    return;
+  }
+  const w = whereOf(p);
+  const v = voiceOf(p);
+  // heel strikes: left at phase 0, right at 0.5
+  if (w && m.speed > 0.06 && !m.lockPhase && !a.rootLocked) {
+    const crossed = (at: number) => (prev < at && m.phase >= at) || (prev > m.phase && (at === 0 || m.phase >= at));
+    if (crossed(0) || crossed(0.5)) sound.step(v, { pan: w.pan, gain: w.gain * Math.min(1, 0.5 + m.speed) });
+  }
+  sound.saw(i, !!w && a.kind === 'saw' && a.sawSpeed > 0, a.sawSpeed, a.sawPush, w ?? { pan: 0, gain: 0 });
+  if (!w) return;
+  if (a.impact) sound.hammer(w);
+  if (a.beat && Math.random() < 0.8 && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
+  if (gasped && Math.random() < 0.5) sound.exclaim('gasp', v, w);
+  for (const e of a.events) {
+    if (e === 'thunk') sound.thunk(w, 1);
+    else if (e === 'log') sound.thunk(w, 0.8);
+    else if (e === 'creak') sound.creak(w);
+    else sound.exclaim(e, v, w);
+  }
+}
+
 /** One simulation step: actions, locomotion, animation, effects. */
 function simulate(dt: number) {
   simTime += dt;
@@ -427,12 +490,14 @@ function simulate(dt: number) {
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
     a.post(dt, m, st);
     gazes[i].update(dt, simTime);
+    const gasp = gazes[i].surprised || (a.kind === 'fall' && a.rootLocked);
     if (p.mouth) {
       // gasp while falling or while staring at someone else's drama
-      const gasp = gazes[i].surprised || (a.kind === 'fall' && a.rootLocked);
       p.mouth.rest.visible = !gasp;
       p.mouth.o.visible = gasp;
     }
+    soundFor(i, p, m, a, gazes[i].surprised && !wasGasping[i]);
+    wasGasping[i] = gazes[i].surprised;
     if (a.impact && a.hammerHead) {
       p.root.updateMatrixWorld(true);
       sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
@@ -534,6 +599,44 @@ actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), 
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
 actF.add(settings, 'autoActions').name('random crowd actions');
 actF.add(settings, 'lookAt', LOOK_MODES).name('👀 look at');
+
+const sndF = gui.addFolder('Sound');
+const applySound = () => sound.apply();
+sndF.add(sound.settings, 'enabled').name('🔊 on').onChange(applySound);
+sndF.add(sound.settings, 'volume', 0, 1, 0.01).onChange(applySound);
+sndF.add(sound.settings, 'steps', 0, 1.5, 0.01).name('footsteps').onChange(applySound);
+sndF.add(sound.settings, 'voices', 0, 1.5, 0.01).onChange(applySound);
+sndF.add(sound.settings, 'tools', 0, 1.5, 0.01).name('tools & props').onChange(applySound);
+sndF.add(sound.settings, 'crunch').name('retro crunch').onChange(applySound);
+// sound lab: audition each recipe on its own, with the selected person's voice
+const lab = sndF.addFolder('Sound lab').close();
+const labV = () => (people[selected] ? voiceOf(people[selected]) : { f0: 150, formant: 1, rate: 1, weight: 0.5 });
+const C: Where = { pan: 0, gain: 1 };
+const labWalk = (weight: number) => {
+  const v = { ...labV(), weight };
+  for (let k = 0; k < 6; k++) setTimeout(() => sound.step(v, { pan: k % 2 ? 0.15 : -0.15, gain: 1 }), k * 330);
+};
+const labBtn = (name: string, fn: () => void) => lab.add({ go: () => { sound.start(); setTimeout(fn, 30); } }, 'go').name(name);
+labBtn('steps: light', () => labWalk(0.1));
+labBtn('steps: heavy', () => labWalk(0.95));
+labBtn('steps: selected person', () => labWalk(labV().weight));
+labBtn('talk: selected person', () => sound.phrase(-1, labV(), C));
+labBtn('talk: deep voice', () => sound.phrase(-1, { f0: 100, formant: 0.9, rate: 0.85, weight: 0.8 }, C));
+labBtn('talk: high voice', () => sound.phrase(-1, { f0: 235, formant: 1.22, rate: 1.2, weight: 0.2 }, C));
+labBtn('hammer blow', () => sound.hammer(C));
+labBtn('saw (3 strokes)', () => {
+  const t0 = performance.now();
+  const tick = () => {
+    const u = (performance.now() - t0) / 620;
+    const on = u < 3;
+    sound.saw(-1, on, Math.abs(Math.sin(Math.PI * 2 * u)), u % 1 < 0.5, C);
+    if (on) requestAnimationFrame(tick);
+  };
+  tick();
+});
+for (const k of ['oof', 'hup', 'grunt', 'gasp', 'hey'] as const) labBtn(k, () => sound.exclaim(k, labV(), C));
+labBtn('box down (thunk)', () => sound.thunk(C, 1));
+labBtn('bench creak', () => sound.creak(C));
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw' } as const)[e.key as '1'];
@@ -680,7 +783,7 @@ function frame() {
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
-  if (++frames === 2) (window as any).__mini = { ready: true, people, select, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
+  if (++frames === 2) (window as any).__mini = { ready: true, people, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
   requestAnimationFrame(frame);
 }
 

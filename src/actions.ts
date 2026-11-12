@@ -148,6 +148,15 @@ export class Actor {
   /** Talking: who to face (index into the crowd), set by the caller. */
   partner = -1;
   dust = false; // set on frames where a saw stroke throws sawdust
+  /** Sound cues raised this frame (consumed by the audio layer). */
+  events: ('oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log')[] = [];
+  beat = false; // a talk gesture beat started this frame
+  sawSpeed = 0; // 0…1 stroke speed while sawing
+  sawPush = false;
+  private prevT = 0;
+  private crossed(at: number) {
+    return this.prevT < at && this.t >= at;
+  }
   sawTip: THREE.Object3D | null = null;
   private saw: THREE.Object3D | null = null;
   private logSet: THREE.Object3D | null = null;
@@ -415,12 +424,16 @@ export class Actor {
   pre(dt: number, m: Motion, st: Style): ActionPose | null {
     this.impact = false;
     this.dust = false;
+    this.beat = false;
+    this.sawSpeed = 0;
+    this.events.length = 0;
     m.lockPhase = false;
     if (!this.kind) return null;
     if (this.stopNow) {
       m.speed = 0;
       this.stopNow = false;
     }
+    this.prevT = this.t;
     this.t += dt;
     const P = this.pose;
     P.crouch = P.sitZ = P.lift = P.spineX = P.headX = P.headY = P.headZ = 0;
@@ -434,6 +447,7 @@ export class Actor {
     switch (this.kind) {
       case 'wave': {
         const dur = 2.6;
+        if (this.crossed(0.25) && this.side === 'R') this.events.push('hey');
         if (t >= dur) return this.finish();
         const e = envelope(t, dur, 0.3, 0.45);
         const ph = Math.PI * 2 * 2.2 * tempo * t;
@@ -505,6 +519,7 @@ export class Actor {
           P.headX = -0.1 * k;
           for (const s of ['L', 'R'] as const) Object.assign(P.arms[s], { w: k, x: 0.7, z: 0.3, elbow: 0.3, stiff: 2 });
         } else if (t < tA + tAir) {
+          if (this.crossed(tA)) this.events.push('hup');
           const s = t - tA;
           m.lockPhase = true; // stride frozen mid-air
           const tuck = 0.25 * Math.sin((Math.PI * s) / tAir);
@@ -534,6 +549,7 @@ export class Actor {
         if (t < tUp) bend = Math.sin(Math.PI * (t / tUp));
         else if (t > tUp + tCarry && t < tUp + tCarry + tDown) bend = Math.sin(Math.PI * ((t - tUp - tCarry) / tDown));
         const carrying = t >= tUp * 0.5 && t < tUp + tCarry + tDown * 0.5;
+        if (this.crossed(tUp + tCarry + tDown * 0.5)) this.events.push('thunk');
         this.holdSpeed = t < tUp || t > tUp + tCarry;
         const reachX = -1.0; // arms down toward the box at the bottom of the bend
         for (const sd of ['L', 'R'] as const) {
@@ -565,6 +581,7 @@ export class Actor {
         else if (t < tIn + tDown + tSit) k = 1;
         else k = 1 - smooth((t - tIn - tDown - tSit) / tUp);
         const moving = k > 0 && k < 1 ? Math.sin(Math.PI * k) : 0;
+        if (this.crossed(tIn + tDown * 0.85)) this.events.push('creak');
         // push the hips back first, then drop: reads as lowering onto a seat
         const back = smooth(Math.min(1, k * 1.6));
         P.sitZ = this.seat.z * back;
@@ -588,6 +605,7 @@ export class Actor {
         // a new gesture beat every so often: one or both hands
         if (t >= B.next) {
           B.next = t + (0.45 + Math.random() * 0.6) / tempo;
+          this.beat = true;
           const which = Math.random();
           for (const sd of ['L', 'R'] as const) {
             const go = which < 0.4 || (which < 0.7 ? sd === 'R' : sd === 'L');
@@ -629,6 +647,10 @@ export class Actor {
         const e = envelope(t, dur, lead, 0.4);
         const raw = Math.max(0, t - lead) / T;
         const u = raw < strokes ? 0.5 - 0.5 * Math.cos(Math.PI * 2 * raw) : 0; // back → through → back
+        // stroke speed (|du/dt| normalised) drives the saw sound
+        this.sawSpeed = raw < strokes ? Math.abs(Math.sin(Math.PI * 2 * raw)) : 0;
+        this.sawPush = raw % 1 < 0.5;
+        if (this.crossed(lead + (strokes + 0.3) * T)) this.events.push('log');
         const a = this.sawStroke(u);
         Object.assign(P.arms.R, { w: e, x: a.x, z: a.z, elbow: a.elbow, stiff: 2.6 });
         Object.assign(P.arms.L, { w: e, x: -0.85, z: 0.0, elbow: 0.15, stiff: 1.4 }); // steadies the log
@@ -719,6 +741,7 @@ export class Actor {
         // knees buckle (indices 2/6) so the body crumples instead of toppling like a plank
         if (i === 2 || i === 6) vel.addScaledVector(fwd, 0.9).y -= 0.6;
       });
+      this.events.push('oof');
       // reflex: throw the hands out toward where we're falling
       this.ragdoll.reach.copy(push).setY(0).normalize().setY(-0.6);
       this.rootLocked = true;
@@ -738,6 +761,7 @@ export class Actor {
         const q = new Map<JointName, THREE.Quaternion>();
         for (const j of JOINTS) q.set(j, J[j].quaternion.clone());
         this.getup = { t: 0, dur: 1.5 / Math.sqrt(st.tempo), q, pelvis: J.pelvis.position.clone() };
+        this.events.push('grunt');
         this.ragdoll = null;
       }
       return;

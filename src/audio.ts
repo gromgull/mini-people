@@ -1,0 +1,376 @@
+/**
+ * Procedural sound: everything is synthesised with Web Audio, no samples.
+ * The simulation reports events (a heel strike, a hammer blow, a syllable…)
+ * with a stereo position and loudness; recipes below turn them into sound.
+ */
+
+export interface Where {
+  pan: number; // -1 … 1
+  gain: number; // 0 … ~1.2 (distance / zoom)
+}
+
+/** Per-person voice, derived from the body so everyone sounds like themselves. */
+export interface Voice {
+  f0: number; // base pitch (Hz)
+  formant: number; // formant scale (small bodies → higher)
+  rate: number; // syllables per second multiplier
+  weight: number; // 0 light … 1 heavy (footsteps)
+}
+
+export interface AudioSettings {
+  enabled: boolean;
+  volume: number;
+  steps: number;
+  voices: number;
+  tools: number;
+  crunch: boolean;
+}
+
+export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.6, voices: 0.8, tools: 0.8, crunch: false };
+
+const VOWELS: [number, number][] = [
+  [800, 1200], // a
+  [500, 1850], // e
+  [320, 2300], // i
+  [520, 900], // o
+  [340, 780], // u
+];
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+export class Sound {
+  ctx: BaseAudioContext | null = null;
+  private offline = false;
+  private master!: GainNode;
+  private bus!: { steps: GainNode; voices: GainNode; tools: GainNode };
+  private crusher!: WaveShaperNode;
+  private dry!: GainNode;
+  private noise!: AudioBuffer;
+  private tokens = { steps: 0, voices: 0, tools: 0 };
+  private lastRefill = 0;
+  private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode }>();
+  private talking = new Map<number, number>(); // person → end of current phrase (ctx time)
+
+  constructor(public settings: AudioSettings) {}
+
+  /** Browsers only allow audio after a user gesture: call from one. */
+  start(offlineCtx?: OfflineAudioContext) {
+    if (this.ctx && !offlineCtx) {
+      if (this.ctx.state === 'suspended') (this.ctx as AudioContext).resume();
+      return;
+    }
+    this.offline = !!offlineCtx;
+    this.saws.clear();
+    this.talking.clear();
+    const ctx = offlineCtx ?? new AudioContext();
+    this.ctx = ctx;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.ratio.value = 4;
+    this.master = ctx.createGain();
+    this.dry = ctx.createGain();
+    this.crusher = ctx.createWaveShaper();
+    this.crusher.curve = crushCurve(5);
+    const mix = ctx.createGain();
+    mix.connect(this.dry).connect(this.master);
+    mix.connect(this.crusher).connect(this.master);
+    this.master.connect(comp).connect(ctx.destination);
+    this.bus = { steps: ctx.createGain(), voices: ctx.createGain(), tools: ctx.createGain() };
+    Object.values(this.bus).forEach((g) => g.connect(mix));
+    // one second of white noise, shared by every noisy recipe
+    this.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const d = this.noise.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    this.apply();
+  }
+
+  /** Push settings (volume, bus levels, crunch) into the graph. */
+  apply() {
+    if (!this.ctx) return;
+    const s = this.settings;
+    this.master.gain.value = s.enabled ? s.volume : 0;
+    this.bus.steps.gain.value = s.steps;
+    this.bus.voices.gain.value = s.voices;
+    this.bus.tools.gain.value = s.tools;
+    this.dry.gain.value = s.crunch ? 0 : 1;
+    this.crusher.disconnect();
+    if (s.crunch) this.crusher.connect(this.master);
+  }
+
+  get live() {
+    return !!this.ctx && (this.offline || this.ctx.state === 'running') && this.settings.enabled;
+  }
+
+  /** Rate limiting so a big crowd doesn't turn into noise. */
+  private allow(kind: keyof Sound['tokens']) {
+    if (this.offline) return true;
+    const now = this.ctx!.currentTime;
+    const dt = now - this.lastRefill;
+    this.lastRefill = now;
+    const caps = { steps: 14, voices: 30, tools: 10 }; // events per second
+    for (const k of Object.keys(this.tokens) as (keyof Sound['tokens'])[]) this.tokens[k] = Math.min(caps[k] * 0.5, this.tokens[k] + dt * caps[k]);
+    if (this.tokens[kind] < 1) return false;
+    this.tokens[kind] -= 1;
+    return true;
+  }
+
+  // ------------------------------------------------------------ building blocks
+
+  private out(bus: keyof Sound['bus'], w: Where) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.gain.value = w.gain;
+    const p = ctx.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, w.pan));
+    g.connect(p).connect(this.bus[bus]);
+    return g;
+  }
+
+  private noiseSrc(t: number, dur: number) {
+    const s = this.ctx!.createBufferSource();
+    s.buffer = this.noise;
+    s.loop = true;
+    s.start(t, Math.random() * 0.9);
+    s.stop(t + dur + 0.05);
+    return s;
+  }
+
+  /** Exponential-ish percussive envelope on a fresh gain node. */
+  private env(t: number, peak: number, attack: number, decay: number) {
+    const g = this.ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+    return g;
+  }
+
+  private filter(type: BiquadFilterType, freq: number, q = 1) {
+    const f = this.ctx!.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    return f;
+  }
+
+  private tone(type: OscillatorType, t: number, f0: number, f1: number, dur: number) {
+    const o = this.ctx!.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+    return o;
+  }
+
+  // ------------------------------------------------------------ recipes
+
+  /** A light footstep: a filtered scuff plus a small low thump. */
+  step(v: Voice, w: Where) {
+    if (!this.live || !this.allow('steps')) return;
+    const t = this.ctx!.currentTime + 0.005;
+    const o = this.out('steps', w);
+    const W = v.weight;
+    const scuff = this.noiseSrc(t, 0.08);
+    scuff
+      .connect(this.filter('bandpass', rand(0.85, 1.15) * (1300 - 600 * W), 0.8))
+      .connect(this.filter('lowpass', 3200))
+      .connect(this.env(t, 0.22 * rand(0.7, 1), 0.002, 0.035 + 0.03 * W))
+      .connect(o);
+    this.tone('sine', t, (150 - 60 * W) * rand(0.9, 1.1), 50, 0.07)
+      .connect(this.env(t, 0.25 + 0.45 * W, 0.003, 0.06 + 0.05 * W))
+      .connect(o);
+  }
+
+  /** Hammer on rock: click, short metallic ring, dull thud, stone clack. */
+  hammer(w: Where) {
+    if (!this.live || !this.allow('tools')) return;
+    const t = this.ctx!.currentTime + 0.003;
+    const o = this.out('tools', w);
+    this.noiseSrc(t, 0.03).connect(this.filter('highpass', 2500)).connect(this.env(t, 0.5, 0.001, 0.015)).connect(o);
+    const base = rand(1050, 1300);
+    [1, 2.76, 5.4].forEach((k, i) =>
+      this.tone('triangle', t, base * k * rand(0.99, 1.01), base * k * 0.985, 0.2).connect(this.env(t, [0.22, 0.1, 0.05][i], 0.001, [0.14, 0.08, 0.05][i])).connect(o),
+    );
+    this.tone('sine', t, 110, 45, 0.15).connect(this.env(t, 0.7, 0.002, 0.12)).connect(o);
+    this.noiseSrc(t, 0.08).connect(this.filter('bandpass', 1700, 3)).connect(this.env(t, 0.4, 0.001, 0.05)).connect(o);
+  }
+
+  /** Something wooden set down / dropped: box, log halves. */
+  thunk(w: Where, pitch = 1) {
+    if (!this.live || !this.allow('tools')) return;
+    const t = this.ctx!.currentTime + 0.003;
+    const o = this.out('tools', w);
+    this.tone('sine', t, 210 * pitch, 85 * pitch, 0.12).connect(this.env(t, 0.6, 0.002, 0.1)).connect(o);
+    this.tone('triangle', t, 420 * pitch, 380 * pitch, 0.06).connect(this.env(t, 0.12, 0.001, 0.05)).connect(o);
+    this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 700 * pitch, 1.5)).connect(this.env(t, 0.3, 0.001, 0.04)).connect(o);
+  }
+
+  /** A short wooden creak (sitting down on the bench). */
+  creak(w: Where) {
+    if (!this.live || !this.allow('tools')) return;
+    const t = this.ctx!.currentTime + 0.003;
+    const o = this.out('tools', w);
+    const dur = 0.22;
+    const src = this.tone('sawtooth', t, rand(70, 90), rand(95, 120), dur);
+    const f = this.filter('bandpass', 900, 6);
+    f.frequency.setValueAtTime(700, t);
+    f.frequency.linearRampToValueAtTime(1300, t + dur);
+    const g = this.ctx!.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.04);
+    g.gain.setValueAtTime(0.3, t + dur - 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(o);
+  }
+
+  /**
+   * Continuous saw: looping noise through a band-pass, chopped by a "teeth"
+   * oscillator. Drive every frame with stroke speed 0…1 and direction.
+   */
+  saw(id: number, active: boolean, speed: number, push: boolean, w: Where) {
+    if (!this.ctx) return;
+    let s = this.saws.get(id);
+    if (!active || !this.live) {
+      if (s) {
+        const t = this.ctx.currentTime;
+        s.amp.gain.setTargetAtTime(0, t, 0.03);
+        s.src.stop(t + 0.2);
+        s.teeth.stop(t + 0.2);
+        this.saws.delete(id);
+      }
+      return;
+    }
+    const ctx = this.ctx;
+    if (!s) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const filt = this.filter('bandpass', 1500, 2.5);
+      const chop = ctx.createGain();
+      chop.gain.value = 0.55;
+      const teeth = ctx.createOscillator();
+      teeth.type = 'square';
+      const depth = ctx.createGain();
+      depth.gain.value = 0.45;
+      teeth.connect(depth).connect(chop.gain);
+      const amp = ctx.createGain();
+      amp.gain.value = 0;
+      const pan = ctx.createStereoPanner();
+      src.connect(filt).connect(chop).connect(amp).connect(pan).connect(this.bus.tools);
+      src.start();
+      teeth.start();
+      s = { src, filt, amp, teeth, pan };
+      this.saws.set(id, s);
+    }
+    const t = ctx.currentTime;
+    const k = Math.min(1, speed);
+    s.amp.gain.setTargetAtTime(w.gain * 0.8 * k, t, 0.015);
+    s.filt.frequency.setTargetAtTime(900 + 1700 * k + (push ? 500 : 0), t, 0.02);
+    s.teeth.frequency.setTargetAtTime(25 + 90 * k, t, 0.02);
+    s.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, w.pan)), t, 0.05);
+  }
+
+  /** Is this person mid-phrase? (for conversational turn-taking) */
+  speaking(id: number) {
+    return !!this.ctx && (this.talking.get(id) ?? 0) > this.ctx.currentTime;
+  }
+
+  /**
+   * A muttered gibberish phrase: a few vowel syllables on a buzzy source
+   * through two formant filters, with occasional consonant ticks, and a
+   * falling (or, sometimes, questioning) pitch contour.
+   */
+  phrase(id: number, v: Voice, w: Where, syllables = 0) {
+    if (!this.live || !this.allow('voices')) return;
+    const ctx = this.ctx!;
+    const n = syllables || 2 + Math.floor(Math.random() * 4);
+    const question = Math.random() < 0.25;
+    let t = ctx.currentTime + 0.01;
+    const o = this.out('voices', w);
+    for (let i = 0; i < n; i++) {
+      const dur = rand(0.07, 0.15) / v.rate;
+      const u = n > 1 ? i / (n - 1) : 0;
+      let pitch = v.f0 * (1.08 - 0.18 * u) * rand(0.95, 1.06);
+      if (question && i === n - 1) pitch *= 1.3;
+      if (Math.random() < 0.45) this.consonant(t, o, v);
+      this.syllable(t, dur, pitch, VOWELS[Math.floor(Math.random() * VOWELS.length)], v, o, 0.32, question && i === n - 1 ? 1.15 : 0.95);
+      t += dur + rand(0.02, 0.06) / v.rate;
+    }
+    this.talking.set(id, t);
+  }
+
+  private syllable(t: number, dur: number, pitch: number, vowel: [number, number], v: Voice, out: AudioNode, peak: number, glide: number) {
+    const src = this.tone('sawtooth', t, pitch, pitch * glide, dur);
+    const g = this.ctx!.createGain();
+    peak *= Sound.VOICE_GAIN;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.012);
+    g.gain.setValueAtTime(peak * 0.8, t + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const f1 = this.filter('bandpass', vowel[0] * v.formant, 7);
+    const f2 = this.filter('bandpass', vowel[1] * v.formant, 10);
+    const f2g = this.ctx!.createGain();
+    f2g.gain.value = 0.6;
+    const body = this.filter('lowpass', 900 * v.formant, 0.7);
+    const bodyG = this.ctx!.createGain();
+    bodyG.gain.value = 0.12;
+    src.connect(f1).connect(g);
+    src.connect(f2).connect(f2g).connect(g);
+    src.connect(body).connect(bodyG).connect(g);
+    g.connect(out);
+  }
+
+  /** Narrow formant filters eat a lot of energy: make up for it here. */
+  private static VOICE_GAIN = 3.2;
+
+  private consonant(t: number, out: AudioNode, v: Voice) {
+    this.noiseSrc(t, 0.03)
+      .connect(this.filter('bandpass', rand(2500, 5000) * v.formant, 2))
+      .connect(this.env(t, 0.12, 0.002, 0.018))
+      .connect(out);
+  }
+
+  /** Little vocal reactions in the person's own voice. */
+  exclaim(kind: 'oof' | 'hup' | 'grunt' | 'gasp' | 'hey', v: Voice, w: Where) {
+    if (!this.live || !this.allow('voices')) return;
+    const t = this.ctx!.currentTime + 0.01;
+    const o = this.out('voices', w);
+    switch (kind) {
+      case 'oof':
+        this.consonant(t, o, v);
+        this.syllable(t + 0.01, 0.2, v.f0 * 1.15, VOWELS[4], v, o, 0.5, 0.7);
+        break;
+      case 'hup':
+        this.syllable(t, 0.1, v.f0 * 1.1, VOWELS[0], v, o, 0.4, 1.25);
+        break;
+      case 'grunt':
+        this.syllable(t, 0.24, v.f0 * 0.85, VOWELS[3], v, o, 0.35, 0.92);
+        break;
+      case 'hey':
+        this.syllable(t, 0.09, v.f0 * 1.15, VOWELS[1], v, o, 0.35, 1.0);
+        this.syllable(t + 0.1, 0.16, v.f0 * 1.35, VOWELS[2], v, o, 0.38, 0.85);
+        break;
+      case 'gasp': {
+        // a sharp inhale (rising noise) with a hint of "oh"
+        const s = this.noiseSrc(t, 0.25);
+        const f = this.filter('bandpass', 1200 * v.formant, 3);
+        f.frequency.setValueAtTime(900 * v.formant, t);
+        f.frequency.linearRampToValueAtTime(2200 * v.formant, t + 0.2);
+        s.connect(f).connect(this.env(t, 0.25, 0.03, 0.2)).connect(o);
+        this.syllable(t + 0.03, 0.14, v.f0 * 1.4, VOWELS[3], v, o, 0.16, 1.1);
+        break;
+      }
+    }
+  }
+}
+
+/** Bit-depth reduction curve for the optional retro crunch. */
+function crushCurve(bits: number) {
+  const n = 4096;
+  const c = new Float32Array(n);
+  const steps = 2 ** bits;
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = Math.round(x * steps) / steps;
+  }
+  return c;
+}
