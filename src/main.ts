@@ -172,6 +172,8 @@ const startSound = () => sound.start();
 window.addEventListener('pointerdown', startSound);
 window.addEventListener('keydown', startSound);
 let prevPhase: number[] = [];
+let walkersHeard = 0; // on-screen walkers last frame (footsteps share the space)
+let walkersNow = 0;
 let wasGasping: boolean[] = [];
 const voiceCache = new WeakMap<Person, Voice>();
 const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -415,8 +417,11 @@ function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
   const v = voiceOf(p);
   // heel strikes: left at phase 0, right at 0.5
   if (w && m.speed > 0.06 && !m.lockPhase && !a.rootLocked) {
+    walkersNow++;
+    // a crowd's footsteps blend into a patter instead of adding up
+    const crowd = 1 / Math.sqrt(Math.max(1, walkersHeard / 1.5));
     const crossed = (at: number) => (prev < at && m.phase >= at) || (prev > m.phase && (at === 0 || m.phase >= at));
-    if (crossed(0) || crossed(0.5)) sound.step(v, { pan: w.pan, gain: w.gain * Math.min(1, 0.5 + m.speed) });
+    if (crossed(0) || crossed(0.5)) sound.step(v, { pan: w.pan, gain: w.gain * crowd * Math.min(1, 0.5 + m.speed) });
   }
   sound.saw(i, !!w && a.kind === 'saw' && a.sawSpeed > 0, a.sawSpeed, a.sawPush, w ?? { pan: 0, gain: 0 });
   if (!w) return;
@@ -448,6 +453,8 @@ function simulate(dt: number) {
   gazeWorld.selected = selected;
   gazeWorld.time = simTime;
   const turnStep = 3.2 * dt; // rad/s turning on the spot
+  walkersHeard = walkersNow;
+  walkersNow = 0;
   people.forEach((p, i) => {
     const m = motions[i];
     const a = actors[i];
@@ -617,7 +624,8 @@ const labWalk = (weight: number) => {
   for (let k = 0; k < 6; k++) setTimeout(() => sound.step(v, { pan: k % 2 ? 0.15 : -0.15, gain: 1 }), k * 330);
 };
 const labBtn = (name: string, fn: () => void) => lab.add({ go: () => { sound.start(); setTimeout(fn, 30); } }, 'go').name(name);
-labBtn('steps: light', () => labWalk(0.1));
+labBtn('one step', () => sound.step(labV(), C));
+labBtn('steps: light', () => labWalk(0.1)); // (a six-step walk)
 labBtn('steps: heavy', () => labWalk(0.95));
 labBtn('steps: selected person', () => labWalk(labV().weight));
 labBtn('talk: selected person', () => sound.phrase(-1, labV(), C));

@@ -26,7 +26,7 @@ export interface AudioSettings {
   crunch: boolean;
 }
 
-export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.6, voices: 0.8, tools: 0.8, crunch: false };
+export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, crunch: false };
 
 const VOWELS: [number, number][] = [
   [800, 1200], // a
@@ -106,7 +106,7 @@ export class Sound {
     const now = this.ctx!.currentTime;
     const dt = now - this.lastRefill;
     this.lastRefill = now;
-    const caps = { steps: 14, voices: 30, tools: 10 }; // events per second
+    const caps = { steps: 8, voices: 30, tools: 10 }; // events per second
     for (const k of Object.keys(this.tokens) as (keyof Sound['tokens'])[]) this.tokens[k] = Math.min(caps[k] * 0.5, this.tokens[k] + dt * caps[k]);
     if (this.tokens[kind] < 1) return false;
     this.tokens[kind] -= 1;
@@ -185,13 +185,13 @@ export class Sound {
     if (!this.live || !this.allow('tools')) return;
     const t = this.ctx!.currentTime + 0.003;
     const o = this.out('tools', w);
-    this.noiseSrc(t, 0.03).connect(this.filter('highpass', 2500)).connect(this.env(t, 0.5, 0.001, 0.015)).connect(o);
-    const base = rand(1050, 1300);
+    this.noiseSrc(t, 0.03).connect(this.filter('bandpass', 1400, 1)).connect(this.env(t, 0.45, 0.001, 0.015)).connect(o);
+    const base = rand(560, 720);
     [1, 2.76, 5.4].forEach((k, i) =>
       this.tone('triangle', t, base * k * rand(0.99, 1.01), base * k * 0.985, 0.2).connect(this.env(t, [0.22, 0.1, 0.05][i], 0.001, [0.14, 0.08, 0.05][i])).connect(o),
     );
-    this.tone('sine', t, 110, 45, 0.15).connect(this.env(t, 0.7, 0.002, 0.12)).connect(o);
-    this.noiseSrc(t, 0.08).connect(this.filter('bandpass', 1700, 3)).connect(this.env(t, 0.4, 0.001, 0.05)).connect(o);
+    this.tone('sine', t, 75, 32, 0.18).connect(this.env(t, 0.8, 0.002, 0.15)).connect(o);
+    this.noiseSrc(t, 0.08).connect(this.filter('bandpass', 850, 3)).connect(this.env(t, 0.45, 0.001, 0.06)).connect(o);
   }
 
   /** Something wooden set down / dropped: box, log halves. */
@@ -199,9 +199,9 @@ export class Sound {
     if (!this.live || !this.allow('tools')) return;
     const t = this.ctx!.currentTime + 0.003;
     const o = this.out('tools', w);
-    this.tone('sine', t, 210 * pitch, 85 * pitch, 0.12).connect(this.env(t, 0.6, 0.002, 0.1)).connect(o);
-    this.tone('triangle', t, 420 * pitch, 380 * pitch, 0.06).connect(this.env(t, 0.12, 0.001, 0.05)).connect(o);
-    this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 700 * pitch, 1.5)).connect(this.env(t, 0.3, 0.001, 0.04)).connect(o);
+    this.tone('sine', t, 120 * pitch, 48 * pitch, 0.15).connect(this.env(t, 0.75, 0.002, 0.13)).connect(o);
+    this.tone('triangle', t, 230 * pitch, 205 * pitch, 0.07).connect(this.env(t, 0.12, 0.001, 0.06)).connect(o);
+    this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 380 * pitch, 1.5)).connect(this.env(t, 0.3, 0.001, 0.05)).connect(o);
   }
 
   /** A short wooden creak (sitting down on the bench). */
@@ -210,10 +210,10 @@ export class Sound {
     const t = this.ctx!.currentTime + 0.003;
     const o = this.out('tools', w);
     const dur = 0.22;
-    const src = this.tone('sawtooth', t, rand(70, 90), rand(95, 120), dur);
-    const f = this.filter('bandpass', 900, 6);
-    f.frequency.setValueAtTime(700, t);
-    f.frequency.linearRampToValueAtTime(1300, t + dur);
+    const src = this.tone('sawtooth', t, rand(42, 55), rand(58, 72), dur);
+    const f = this.filter('bandpass', 500, 6);
+    f.frequency.setValueAtTime(380, t);
+    f.frequency.linearRampToValueAtTime(720, t + dur);
     const g = this.ctx!.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(0.35, t + 0.04);
@@ -244,7 +244,7 @@ export class Sound {
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
       src.loop = true;
-      const filt = this.filter('bandpass', 1500, 2.5);
+      const filt = this.filter('bandpass', 700, 2);
       const chop = ctx.createGain();
       chop.gain.value = 0.55;
       const teeth = ctx.createOscillator();
@@ -264,8 +264,8 @@ export class Sound {
     const t = ctx.currentTime;
     const k = Math.min(1, speed);
     s.amp.gain.setTargetAtTime(w.gain * 0.8 * k, t, 0.015);
-    s.filt.frequency.setTargetAtTime(900 + 1700 * k + (push ? 500 : 0), t, 0.02);
-    s.teeth.frequency.setTargetAtTime(25 + 90 * k, t, 0.02);
+    s.filt.frequency.setTargetAtTime(420 + 850 * k + (push ? 220 : 0), t, 0.02);
+    s.teeth.frequency.setTargetAtTime(14 + 46 * k, t, 0.02);
     s.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, w.pan)), t, 0.05);
   }
 
