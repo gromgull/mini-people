@@ -163,7 +163,7 @@ const sparks = new Sparks(scene);
 // deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
 let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
   ACTIONS.includes(q.get('act') as ActionKind)
-    ? { at: num('actAt', 0), who: num('select', 0), kind: q.get('act') as ActionKind }
+    ? { at: num('actAt', 0), who: q.has('actAll') ? -1 : num('select', 0), kind: q.get('act') as ActionKind }
     : null;
 let along: number[] = []; // distance travelled along the parade ring / lane
 let compareBase: Genome | null = null; // the body every lane shares in compare mode
@@ -276,8 +276,12 @@ function rebuildOne(i: number) {
   attachRing();
 }
 
+const TURN_FIRST = 0.5; // rad: further off-path than this → turn on the spot before walking
+
 function modeSpeed(i: number) {
   if (actors[i]?.holdSpeed || settings.mode === 'stand') return 0;
+  const o = offsets[i];
+  if (o && (o.locked || Math.abs(o.yaw) > TURN_FIRST)) return 0;
   if (settings.mode === 'parade') return settings.speed; // same speed or they'd collide
   return settings.speed * styleOf(people[i]).speedK;
 }
@@ -295,10 +299,12 @@ function simulate(dt: number) {
   simTime += dt;
   if (settings.mode === 'stand' && settings.spin) spinAngle += dt * 0.8;
   if (scheduled && simTime >= scheduled.at) {
-    act(scheduled.who, scheduled.kind, scheduled.push);
+    if (scheduled.who < 0) people.forEach((_, i) => act(i, scheduled!.kind));
+    else act(scheduled.who, scheduled.kind, scheduled.push);
     scheduled = null;
   }
   const decay = 1 - Math.exp(-dt * 1.5);
+  const turnStep = 3.2 * dt; // rad/s turning on the spot
   people.forEach((p, i) => {
     const m = motions[i];
     const a = actors[i];
@@ -313,9 +319,15 @@ function simulate(dt: number) {
     if (settings.mode !== 'stand') along[i] += m.speed * dt;
     const o = offsets[i];
     if (!o.locked) {
-      o.x -= o.x * decay;
-      o.z -= o.z * decay;
-      o.yaw -= o.yaw * decay;
+      // Turn back toward the path at a steady rate (plus a soft finish), and
+      // only drift back onto it while actually walking — never skate.
+      const ay = Math.max(0, Math.abs(o.yaw) - turnStep);
+      o.yaw = Math.sign(o.yaw) * (ay - ay * decay);
+      if (settings.mode !== 'stand') {
+        const k = decay * Math.min(1, m.speed / WALK_SPEED);
+        o.x -= o.x * k;
+        o.z -= o.z * k;
+      }
     }
     placeOne(i, pose?.lift ?? 0);
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose);
@@ -548,7 +560,7 @@ function frame() {
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
-  if (++frames === 2) (window as any).__mini = { ready: true, people, select };
+  if (++frames === 2) (window as any).__mini = { ready: true, people, select, debug: () => ({ offsets, actors, motions, baseTransform }) };
   requestAnimationFrame(frame);
 }
 
