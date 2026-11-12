@@ -171,6 +171,7 @@ const sound = new Sound({ ...defaultAudio, enabled: !q.has('mute') });
 const startSound = () => sound.start();
 window.addEventListener('pointerdown', startSound);
 window.addEventListener('keydown', startSound);
+document.addEventListener('visibilitychange', () => sound.setHidden(document.hidden));
 let prevPhase: number[] = [];
 let walkersHeard = 0; // on-screen walkers last frame (footsteps share the space)
 let walkersNow = 0;
@@ -198,8 +199,9 @@ const _sp = new THREE.Vector3();
 function whereOf(p: Person): Where | null {
   _sp.set(0, p.dims.height * 0.8, 0).applyMatrix4(p.root.matrixWorld).project(camera);
   if (Math.abs(_sp.x) > 1.15 || Math.abs(_sp.y) > 1.15) return null;
-  const edge = Math.max(0, Math.max(Math.abs(_sp.x), Math.abs(_sp.y)) - 0.8) / 0.35;
-  return { pan: _sp.x * 0.8, gain: Math.min(1.2, 0.3 + 0.45 * camera.zoom) * (1 - 0.7 * edge) };
+  // what's near the middle of the view is what you're listening to
+  const centre = Math.min(1, Math.max(0.2, 1.15 - 0.85 * Math.hypot(_sp.x, _sp.y)));
+  return { pan: _sp.x * 0.8, gain: Math.min(1.2, 0.3 + 0.45 * camera.zoom) * centre };
 }
 
 const sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
@@ -426,8 +428,8 @@ function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
   sound.saw(i, !!w && a.kind === 'saw' && a.sawSpeed > 0, a.sawSpeed, a.sawPush, w ?? { pan: 0, gain: 0 });
   if (!w) return;
   if (a.impact) sound.hammer(w);
-  if (a.beat && Math.random() < 0.8 && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
-  if (gasped && Math.random() < 0.5) sound.exclaim('gasp', v, w);
+  if (a.beat && Math.random() < (a.partner >= 0 ? 0.55 : 0.2) && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
+  if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
   for (const e of a.events) {
     if (e === 'thunk') sound.thunk(w, 1);
     else if (e === 'log') sound.thunk(w, 0.8);

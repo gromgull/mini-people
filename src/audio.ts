@@ -35,6 +35,8 @@ const VOWELS: [number, number][] = [
   [520, 900], // o
   [340, 780], // u
 ];
+const MAX_SAWS = 2;
+const MAX_TALKERS = 3;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class Sound {
@@ -96,6 +98,14 @@ export class Sound {
     if (s.crunch) this.crusher.connect(this.master);
   }
 
+  /** Pause/resume the whole engine (e.g. while the tab is hidden). */
+  setHidden(hidden: boolean) {
+    if (!this.ctx || this.offline) return;
+    const c = this.ctx as AudioContext;
+    if (hidden && c.state === 'running') c.suspend();
+    else if (!hidden && c.state === 'suspended') c.resume();
+  }
+
   get live() {
     return !!this.ctx && (this.offline || this.ctx.state === 'running') && this.settings.enabled;
   }
@@ -106,7 +116,7 @@ export class Sound {
     const now = this.ctx!.currentTime;
     const dt = now - this.lastRefill;
     this.lastRefill = now;
-    const caps = { steps: 8, voices: 30, tools: 10 }; // events per second
+    const caps = { steps: 8, voices: 12, tools: 6 }; // events per second
     for (const k of Object.keys(this.tokens) as (keyof Sound['tokens'])[]) this.tokens[k] = Math.min(caps[k] * 0.5, this.tokens[k] + dt * caps[k]);
     if (this.tokens[kind] < 1) return false;
     this.tokens[kind] -= 1;
@@ -234,6 +244,7 @@ export class Sound {
       return;
     }
     const ctx = this.ctx;
+    if (!s && this.saws.size >= MAX_SAWS) return; // a couple of saws is plenty
     if (!s) {
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
@@ -320,8 +331,11 @@ export class Sound {
    * falling (or, sometimes, questioning) pitch contour.
    */
   phrase(id: number, v: Voice, w: Where, syllables = 0) {
-    if (!this.live || !this.allow('voices')) return;
+    if (!this.live) return;
     const ctx = this.ctx!;
+    let talkers = 0;
+    for (const end of this.talking.values()) if (end > ctx.currentTime) talkers++;
+    if (talkers >= MAX_TALKERS || !this.allow('voices')) return;
     const n = syllables || 2 + Math.floor(Math.random() * 4);
     const question = Math.random() < 0.25;
     let t = ctx.currentTime + 0.01;
