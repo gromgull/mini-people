@@ -47,7 +47,7 @@ export class Sound {
   private noise!: AudioBuffer;
   private tokens = { steps: 0, voices: 0, tools: 0 };
   private lastRefill = 0;
-  private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode; touched: boolean }>();
+  private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode; touched: boolean; biteLfo: OscillatorNode; biteBp: BiquadFilterNode }>();
   private talking = new Map<number, number>(); // person → end of current phrase (ctx time)
 
   constructor(public settings: AudioSettings) {}
@@ -247,16 +247,32 @@ export class Sound {
       const teeth = ctx.createOscillator();
       teeth.type = 'triangle';
       const depth = ctx.createGain();
-      depth.gain.value = 0.45;
+      depth.gain.value = 0.6;
       teeth.connect(depth).connect(chop.gain);
+      // the bite: each tooth catching, as a ratchety tick in the upper mids.
+      // A sawtooth LFO gives a sharp onset per tooth; the band-pass and
+      // low-pass after it keep it crisp but not hissy.
+      const bite = ctx.createGain();
+      bite.gain.value = 1; // 1 − saw(−1…1): jumps to 2 at each tooth, ramps to 0
+      const biteLfo = ctx.createOscillator();
+      biteLfo.type = 'sawtooth';
+      const biteDepth = ctx.createGain();
+      biteDepth.gain.value = -1;
+      biteLfo.connect(biteDepth).connect(bite.gain);
+      const biteBp = this.filter('bandpass', 1500, 2.2);
+      const biteLp = this.filter('lowpass', 3000, 0.5);
+      const biteLevel = ctx.createGain();
+      biteLevel.gain.value = 0.35;
       const amp = ctx.createGain();
       amp.gain.value = 0;
       const pan = ctx.createStereoPanner();
       // teeth chop the noise *before* filtering, so the filters smooth the edges too
       src.connect(chop).connect(filt).connect(lp1).connect(lp2).connect(amp).connect(pan).connect(this.bus.tools);
+      src.connect(bite).connect(biteBp).connect(biteLp).connect(biteLevel).connect(amp);
       src.start();
       teeth.start();
-      s = { src, filt, amp, teeth, pan, touched: true };
+      biteLfo.start();
+      s = { src, filt, amp, teeth, pan, touched: true, biteLfo, biteBp };
       this.saws.set(id, s);
     }
     s.touched = true;
@@ -264,7 +280,10 @@ export class Sound {
     const k = Math.min(1, speed);
     s.amp.gain.setTargetAtTime(w.gain * 1.3 * k, t, 0.015);
     s.filt.frequency.setTargetAtTime(260 + 480 * k + (push ? 120 : 0), t, 0.02);
-    s.teeth.frequency.setTargetAtTime(14 + 46 * k, t, 0.02);
+    s.teeth.frequency.setTargetAtTime(20 + 60 * k, t, 0.02);
+    // teeth bite at the same rate (slightly offset so they don't phase-lock dully)
+    s.biteLfo.frequency.setTargetAtTime(22 + 64 * k, t, 0.02);
+    s.biteBp.frequency.setTargetAtTime(1200 + 700 * k + (push ? 250 : 0), t, 0.03);
     s.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, w.pan)), t, 0.05);
   }
 
@@ -275,6 +294,7 @@ export class Sound {
     s.amp.gain.setTargetAtTime(0, t, 0.03);
     s.src.stop(t + 0.2);
     s.teeth.stop(t + 0.2);
+    s.biteLfo.stop(t + 0.2);
     this.saws.delete(id);
   }
 
