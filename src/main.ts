@@ -759,6 +759,7 @@ function focusSelected(k = 1) {
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
+  let simulated = false;
   if (!settings.paused) {
     if (settings.animFps > 0) {
       // "animating on twos": pose & position only update at a low fixed rate
@@ -767,11 +768,15 @@ function frame() {
       while (simAcc >= step) {
         simulate(step);
         simAcc -= step;
+        simulated = true;
       }
     } else {
       simulate(dt);
+      simulated = true;
     }
   }
+  // stop continuous sounds whose owner stopped reporting (mode switch, pause…)
+  if (simulated || settings.paused) sound.sweep();
   if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
   controls.update();
 

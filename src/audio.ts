@@ -47,7 +47,7 @@ export class Sound {
   private noise!: AudioBuffer;
   private tokens = { steps: 0, voices: 0, tools: 0 };
   private lastRefill = 0;
-  private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode }>();
+  private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode; touched: boolean }>();
   private talking = new Map<number, number>(); // person → end of current phrase (ctx time)
 
   constructor(public settings: AudioSettings) {}
@@ -230,13 +230,7 @@ export class Sound {
     if (!this.ctx) return;
     let s = this.saws.get(id);
     if (!active || !this.live) {
-      if (s) {
-        const t = this.ctx.currentTime;
-        s.amp.gain.setTargetAtTime(0, t, 0.03);
-        s.src.stop(t + 0.2);
-        s.teeth.stop(t + 0.2);
-        this.saws.delete(id);
-      }
+      this.stopSaw(id);
       return;
     }
     const ctx = this.ctx;
@@ -262,15 +256,37 @@ export class Sound {
       src.connect(chop).connect(filt).connect(lp1).connect(lp2).connect(amp).connect(pan).connect(this.bus.tools);
       src.start();
       teeth.start();
-      s = { src, filt, amp, teeth, pan };
+      s = { src, filt, amp, teeth, pan, touched: true };
       this.saws.set(id, s);
     }
+    s.touched = true;
     const t = ctx.currentTime;
     const k = Math.min(1, speed);
     s.amp.gain.setTargetAtTime(w.gain * 1.3 * k, t, 0.015);
     s.filt.frequency.setTargetAtTime(260 + 480 * k + (push ? 120 : 0), t, 0.02);
     s.teeth.frequency.setTargetAtTime(14 + 46 * k, t, 0.02);
     s.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, w.pan)), t, 0.05);
+  }
+
+  private stopSaw(id: number) {
+    const s = this.saws.get(id);
+    if (!s || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    s.amp.gain.setTargetAtTime(0, t, 0.03);
+    s.src.stop(t + 0.2);
+    s.teeth.stop(t + 0.2);
+    this.saws.delete(id);
+  }
+
+  /**
+   * Call once per rendered frame: any continuous sound nobody updated since
+   * the last sweep (person removed, mode switched, sim paused) fades out.
+   */
+  sweep() {
+    for (const [id, s] of this.saws) {
+      if (!s.touched) this.stopSaw(id);
+      else s.touched = false;
+    }
   }
 
   /** Is this person mid-phrase? (for conversational turn-taking) */
