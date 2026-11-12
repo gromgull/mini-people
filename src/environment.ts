@@ -60,9 +60,8 @@ export class Clouds {
   readonly group = new THREE.Group();
   private clouds: Cloud[] = [];
   private _fwd = new THREE.Vector3();
-  private _right = new THREE.Vector3();
 
-  constructor(toon: THREE.Material, outline: THREE.Material, count = 9, seed = 7) {
+  constructor(toon: THREE.Material, outline: THREE.Material, count = 26, seed = 7) {
     const r = mulberry32(seed);
     for (let k = 0; k < count; k++) {
       // a cloud: a row of overlapping puffs, biggest in the middle, flat-ish bottom
@@ -89,37 +88,22 @@ export class Clouds {
   }
 
   /**
-   * Keep every cloud in the sky band for the current view. `halfW/halfH` are
-   * the ortho half-extents in world units; `far` is the horizon distance.
+   * Clouds are real objects in the world, just beyond the horizon at fixed
+   * heights and sizes, so zooming and orbiting treat them like everything
+   * else. Only their ring follows the view centre and the horizon distance.
    */
   update(camera: THREE.OrthographicCamera, target: THREE.Vector3, far: number, dt: number) {
-    const halfH = (camera.top - camera.bottom) / 2 / camera.zoom;
-    const halfW = (camera.right - camera.left) / 2 / camera.zoom;
     const fwd = this._fwd.subVectors(target, camera.position).setY(0).normalize();
-    const right = this._right.set(-fwd.z, 0, fwd.x);
     const viewAz = Math.atan2(fwd.x, fwd.z);
-    const el = Math.asin(Math.min(0.999, Math.max(0.001, (camera.position.y - target.y) / camera.position.distanceTo(target))));
-    const horizonY = far * Math.sin(el); // screen-space height of the horizon above the view centre
-    const skyVisible = horizonY < halfH * 0.98;
     for (const c of this.clouds) {
       c.az += dt * 0.004; // a slow drift
       const rel = Math.atan2(Math.sin(c.az - viewAz), Math.cos(c.az - viewAz));
-      c.mesh.visible = skyVisible && Math.abs(rel) < 1.4;
+      c.mesh.visible = Math.cos(rel) > 0.15; // only the ones on the far side
       if (!c.mesh.visible) continue;
-      // screen position: x from the angle, y inside the band above the horizon
-      const x = Math.sin(rel) * halfW * 1.9;
-      // keep the whole cloud on screen: a thin sky strip gets smaller, lower clouds
-      const band = halfH - horizonY;
-      const scale = c.size * Math.min(halfH * 0.11, band * 0.32);
-      const y = horizonY + Math.max(scale * 0.4, (band - scale * 1.3) * (0.1 + c.band * 0.75));
-      // put it just beyond the horizon, then lift it so it lands at y on screen
-      const D = far * 1.05;
-      const H = (y - D * Math.sin(el)) / Math.cos(el);
-      c.mesh.position.copy(target).addScaledVector(fwd, D).addScaledVector(right, x);
-      c.mesh.position.y = target.y + H;
-      c.mesh.rotation.y = viewAz; // face the camera side-on (long axis across the screen)
-      c.mesh.scale.setScalar(scale);
+      const D = far * 1.12;
+      c.mesh.position.set(target.x + Math.sin(c.az) * D, 0.4 + c.band * 1.7, target.z + Math.cos(c.az) * D);
+      c.mesh.rotation.y = viewAz; // long axis across the view
+      c.mesh.scale.setScalar(0.4 + c.size * 0.5);
     }
-    return horizonY;
   }
 }

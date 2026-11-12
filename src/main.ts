@@ -73,7 +73,7 @@ const outline = createOutlineMaterial(fog);
 // (but share lighting and outline settings with everything else)
 const cloudToon = createToonMaterial(atlas);
 cloudToon.uniforms.uLightView = toon.uniforms.uLightView;
-cloudToon.uniforms.uWrap = toon.uniforms.uWrap;
+cloudToon.uniforms.uWrap.value = 1.6; // very soft light: white with a pale shade underneath
 const cloudOutline = createOutlineMaterial();
 for (const k of ['uPx', 'uResolution', 'uColor'] as const) cloudOutline.uniforms[k] = outline.uniforms[k];
 const sky = createSky(fog);
