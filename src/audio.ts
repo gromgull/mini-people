@@ -244,18 +244,22 @@ export class Sound {
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
       src.loop = true;
-      const filt = this.filter('bandpass', 700, 2);
+      const filt = this.filter('bandpass', 450, 1.4);
+      // two low-passes: keep the rasp, lose the hiss
+      const lp1 = this.filter('lowpass', 1100, 0.6);
+      const lp2 = this.filter('lowpass', 1100, 0.6);
       const chop = ctx.createGain();
       chop.gain.value = 0.55;
       const teeth = ctx.createOscillator();
-      teeth.type = 'square';
+      teeth.type = 'triangle';
       const depth = ctx.createGain();
       depth.gain.value = 0.45;
       teeth.connect(depth).connect(chop.gain);
       const amp = ctx.createGain();
       amp.gain.value = 0;
       const pan = ctx.createStereoPanner();
-      src.connect(filt).connect(chop).connect(amp).connect(pan).connect(this.bus.tools);
+      // teeth chop the noise *before* filtering, so the filters smooth the edges too
+      src.connect(chop).connect(filt).connect(lp1).connect(lp2).connect(amp).connect(pan).connect(this.bus.tools);
       src.start();
       teeth.start();
       s = { src, filt, amp, teeth, pan };
@@ -263,8 +267,8 @@ export class Sound {
     }
     const t = ctx.currentTime;
     const k = Math.min(1, speed);
-    s.amp.gain.setTargetAtTime(w.gain * 0.8 * k, t, 0.015);
-    s.filt.frequency.setTargetAtTime(420 + 850 * k + (push ? 220 : 0), t, 0.02);
+    s.amp.gain.setTargetAtTime(w.gain * 1.3 * k, t, 0.015);
+    s.filt.frequency.setTargetAtTime(260 + 480 * k + (push ? 120 : 0), t, 0.02);
     s.teeth.frequency.setTargetAtTime(14 + 46 * k, t, 0.02);
     s.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, w.pan)), t, 0.05);
   }
@@ -299,33 +303,53 @@ export class Sound {
   }
 
   private syllable(t: number, dur: number, pitch: number, vowel: [number, number], v: Voice, out: AudioNode, peak: number, glide: number) {
+    const ctx = this.ctx!;
+    // glottal-ish source: a sawtooth with its top rolled off, a gentle vibrato
+    // and a little jitter, so it reads as a throat rather than a buzzer
     const src = this.tone('sawtooth', t, pitch, pitch * glide, dur);
-    const g = this.ctx!.createGain();
+    const vib = ctx.createOscillator();
+    vib.frequency.value = rand(4.5, 6.5);
+    const vibAmt = ctx.createGain();
+    vibAmt.gain.value = pitch * 0.018;
+    vib.connect(vibAmt).connect(src.frequency);
+    vib.start(t);
+    vib.stop(t + dur + 0.05);
+    const glottal = this.filter('lowpass', Math.min(2200, pitch * 7), 0.3);
+    src.connect(glottal);
+
+    const g = ctx.createGain();
     peak *= Sound.VOICE_GAIN;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(peak, t + 0.012);
+    g.gain.linearRampToValueAtTime(peak, t + 0.025);
     g.gain.setValueAtTime(peak * 0.8, t + dur * 0.7);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    const f1 = this.filter('bandpass', vowel[0] * v.formant, 7);
-    const f2 = this.filter('bandpass', vowel[1] * v.formant, 10);
-    const f2g = this.ctx!.createGain();
-    f2g.gain.value = 0.6;
-    const body = this.filter('lowpass', 900 * v.formant, 0.7);
-    const bodyG = this.ctx!.createGain();
-    bodyG.gain.value = 0.12;
-    src.connect(f1).connect(g);
-    src.connect(f2).connect(f2g).connect(g);
-    src.connect(body).connect(bodyG).connect(g);
-    g.connect(out);
+
+    // wide-ish formants (narrow ones ring like metal) + a warm body
+    const band = (f: number, q: number, gain: number) => {
+      const bf = this.filter('bandpass', f, q);
+      const bg = ctx.createGain();
+      bg.gain.value = gain;
+      glottal.connect(bf).connect(bg).connect(g);
+    };
+    band(vowel[0] * v.formant, 3, 1);
+    band(vowel[1] * v.formant, 4, 0.45);
+    band(2600 * v.formant, 5, 0.1);
+    band(380 * v.formant, 1, 0.35);
+    // breath
+    this.noiseSrc(t, dur).connect(this.filter('bandpass', 1300 * v.formant, 0.8)).connect(this.env(t, 0.035, 0.02, dur)).connect(g);
+
+    const top = this.filter('lowpass', 3000, 0.5);
+    g.connect(top).connect(out);
   }
 
   /** Narrow formant filters eat a lot of energy: make up for it here. */
-  private static VOICE_GAIN = 3.2;
+  private static VOICE_GAIN = 1.5;
 
   private consonant(t: number, out: AudioNode, v: Voice) {
     this.noiseSrc(t, 0.03)
-      .connect(this.filter('bandpass', rand(2500, 5000) * v.formant, 2))
-      .connect(this.env(t, 0.12, 0.002, 0.018))
+      .connect(this.filter('bandpass', rand(1600, 3200) * v.formant, 1.5))
+      .connect(this.filter('lowpass', 3500, 0.5))
+      .connect(this.env(t, 0.07, 0.003, 0.02))
       .connect(out);
   }
 
