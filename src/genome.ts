@@ -19,6 +19,7 @@ export interface Genome {
   hands: number;
   feet: number;
   nose: number;
+  eyeSize: number;
   // looks
   skin: number;
   hair: number;
@@ -33,7 +34,7 @@ export interface Genome {
 }
 
 export const SHAPE_GENES = [
-  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose',
+  'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'eyeSize',
 ] as const;
 
 export const HAIR_STYLES = ['bald', 'short', 'long', 'hat'] as const;
@@ -64,6 +65,7 @@ export function randomGenome(seed: number): Genome {
     shoes: pickIndex(r, PALETTE.shoes.length),
     longSleeves: r() < 0.55,
     shorts: r() < 0.25,
+    eyeSize: r(), // drawn last so older seeds keep their bodies
     persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
   // separate stream so adding personality doesn't reshuffle existing bodies
@@ -101,6 +103,7 @@ export interface BodyDims {
   foreArmR: number;
   handR: number;
   noseR: number;
+  eyeR: number;
   armOut: number; // rest-pose abduction so arms clear the body
 }
 
@@ -166,6 +169,7 @@ export function deriveBody(g: Genome): BodyDims {
     foreArmR,
     handR,
     noseR: headR * lerp(0.12, 0.3, g.nose),
+    eyeR: headR * lerp(0.22, 0.34, g.eyeSize),
     armOut,
   };
 }

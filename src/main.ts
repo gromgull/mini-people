@@ -11,6 +11,7 @@ import { Animator } from './animate';
 import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
 import { ACTIONS, type ActionKind, Actor } from './actions';
 import { Sparks } from './fx';
+import { Gaze, type GazeWorld, LOOK_MODES, type LookMode } from './gaze';
 
 const MODES = ['stand', 'parade', 'compare'] as const;
 type Mode = (typeof MODES)[number];
@@ -45,6 +46,7 @@ const settings = {
   gait: { ...defaultGait },
   personality: num('persona', 1), // global exaggeration of everyone's persona
   autoActions: q.has('auto'),
+  lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
 
 // ---------------------------------------------------------------- renderer / scene
@@ -154,6 +156,8 @@ function removePerson(p: Person) {
 let motions: Motion[] = [];
 let anims: Animator[] = [];
 let actors: Actor[] = [];
+let gazes: Gaze[] = [];
+let cursorWorld: THREE.Vector3 | null = null;
 let offsets: { x: number; z: number; yaw: number; locked: boolean }[] = [];
 let nextAuto: number[] = [];
 let simTime = 0;
@@ -255,6 +259,7 @@ function rebuildAll() {
   anims = people.map((_, i) => new Animator(settings.seed * 977 + i));
   actors.forEach((a) => a.dispose());
   actors = people.map((p) => new Actor(p, kit));
+  gazes = people.map((p, i) => new Gaze(p, i, mulberry32(settings.seed * 4243 + i)));
   offsets = people.map(() => ({ x: 0, z: 0, yaw: 0, locked: false }));
   nextAuto = people.map(() => simTime + 1 + Math.random() * 6);
   const gap = settings.mode === 'compare' ? 0 : (Math.PI * 2 * ringRadius()) / n;
@@ -272,6 +277,7 @@ function rebuildOne(i: number) {
   removePerson(people[i]);
   people[i] = makePerson(i, g);
   actors[i] = new Actor(people[i], kit);
+  gazes[i] = new Gaze(people[i], i, mulberry32(settings.seed * 4243 + i));
   placeAll();
   attachRing();
 }
@@ -285,6 +291,19 @@ function modeSpeed(i: number) {
   if (settings.mode === 'parade') return settings.speed; // same speed or they'd collide
   return settings.speed * styleOf(people[i]).speedK;
 }
+
+const gazeWorld: GazeWorld = {
+  mode: 'auto',
+  people: [],
+  busy: (i) => {
+    const k = actors[i]?.kind;
+    return k === 'fall' || k === 'jump' || k === 'hammer';
+  },
+  camera: new THREE.Vector3(),
+  cursor: null,
+  selected: 0,
+  time: 0,
+};
 
 const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall'];
 
@@ -304,6 +323,12 @@ function simulate(dt: number) {
     scheduled = null;
   }
   const decay = 1 - Math.exp(-dt * 1.5);
+  gazeWorld.mode = settings.lookAt;
+  gazeWorld.people = people;
+  gazeWorld.camera.copy(camera.position);
+  gazeWorld.cursor = cursorWorld;
+  gazeWorld.selected = selected;
+  gazeWorld.time = simTime;
   const turnStep = 3.2 * dt; // rad/s turning on the spot
   people.forEach((p, i) => {
     const m = motions[i];
@@ -330,8 +355,10 @@ function simulate(dt: number) {
       }
     }
     placeOne(i, pose?.lift ?? 0);
-    anims[i].update(dt, p, m, st, p.root.rotation.y, pose);
+    gazes[i].aim(gazeWorld);
+    anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
     a.post(dt, m, st);
+    gazes[i].update(dt, simTime);
     if (a.impact && a.hammerHead) {
       p.root.updateMatrixWorld(true);
       sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
@@ -427,6 +454,7 @@ for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
 actF.add(settings, 'autoActions').name('random crowd actions');
+actF.add(settings, 'lookAt', LOOK_MODES).name('👀 look at');
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall' } as const)[e.key as '1'];
@@ -495,6 +523,13 @@ look.add(settings, 'eyes').onChange(rebuildAll);
 const ray = new THREE.Raycaster();
 let downAt: [number, number] | null = null;
 renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
+// cursor → a point at roughly head height above the ground, for "look at cursor"
+const lookPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.75);
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const ndc = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  cursorWorld = ray.ray.intersectPlane(lookPlane, cursorWorld ?? new THREE.Vector3());
+});
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
   const ndc = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);

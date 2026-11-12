@@ -21,8 +21,16 @@ export interface BuildOptions {
   eyes: boolean;
 }
 
+/** A googly eye: `pivot` sits in the head, `pupil` is moved over the eyeball. */
+export interface Eye {
+  pivot: THREE.Object3D;
+  pupil: THREE.Object3D;
+  r: number;
+}
+
 export interface Person {
   genome: Genome;
+  eyes: Eye[];
   dims: BodyDims;
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
@@ -188,12 +196,22 @@ export function buildPerson(
   noseGeo.translate(0, hc - d.headR * 0.12, d.headR * 0.95);
   part(head, noseGeo);
 
+  // googly eyes: an oversized white ball poking out of the face, with a
+  // pupil that rides on its surface (aimed every frame by the Gaze system)
+  const eyes: Eye[] = [];
   if (opts.eyes) {
     for (const s of [1, -1]) {
-      const dir = new THREE.Vector3(s * 0.36, 0.18, 0.92).normalize().multiplyScalar(d.headR * 0.96);
-      const e = ball(d.headR * 0.11, 6, eye);
-      e.translate(dir.x, hc + dir.y, dir.z);
-      part(head, e, false);
+      const pivot = new THREE.Object3D();
+      const dir = new THREE.Vector3(s * 0.4, 0.2, 0.9).normalize().multiplyScalar(d.headR * 0.82);
+      pivot.position.set(dir.x, hc + dir.y, dir.z);
+      pivot.rotation.y = s * 0.18; // a little splay reads friendlier
+      head.add(pivot);
+      part(pivot, ball(d.eyeR, segs + 2, ROWS.eyeWhite[0]));
+      const pupilGeo = ball(d.eyeR * 0.56, Math.max(6, segs), eye);
+      pupilGeo.scale(1, 1, 0.6); // flattened disc-ish pupil
+      const pupil = part(pivot, pupilGeo, false);
+      pupil.position.z = d.eyeR * 0.7;
+      eyes.push({ pivot, pupil, r: d.eyeR });
     }
   }
 
@@ -210,9 +228,9 @@ export function buildPerson(
   } else if (genome.hairStyle === 3) {
     const hatRow = genome.hair % 2 === 0 ? ROWS.pants[(genome.pants + 3) % ROWS.pants.length] : ROWS.shoes[2];
     const brim = withRow(new THREE.CylinderGeometry(d.headR * 1.35, d.headR * 1.35, d.headR * 0.08, hairSegs), hatRow);
-    brim.translate(0, hc + d.headR * 0.42, 0);
+    brim.translate(0, hc + d.headR * 0.56, 0); // sits above the googly eyes
     const crown = withRow(new THREE.CylinderGeometry(d.headR * 0.8, d.headR * 0.9, d.headR * 0.7, hairSegs), hatRow);
-    crown.translate(0, hc + d.headR * 0.75, 0);
+    crown.translate(0, hc + d.headR * 0.89, 0);
     part(head, merge([brim, crown]));
   }
 
@@ -221,6 +239,7 @@ export function buildPerson(
 
   return {
     genome,
+    eyes,
     dims: d,
     root,
     joints,

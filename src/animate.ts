@@ -2,6 +2,7 @@ import type { Person } from './body';
 import { type Motion, type BodyExtras, applyGait } from './gait';
 import type { Style } from './persona';
 import type { ActionPose } from './actions';
+import type { LookHint } from './gaze';
 import { Spring, type SpringParams } from './springs';
 import { mulberry32 } from './rng';
 
@@ -71,7 +72,7 @@ export class Animator {
     return this.springs[ch].update(dt, x, this.sp);
   }
 
-  update(dt: number, p: Person, m: Motion, st: Style, heading: number, act: ActionPose | null = null) {
+  update(dt: number, p: Person, m: Motion, st: Style, heading: number, act: ActionPose | null = null, look: LookHint | null = null) {
     const J = p.joints;
     const d = p.dims;
     const sp = st.spring;
@@ -112,11 +113,11 @@ export class Animator {
     const glance = idleK * (0.55 * this.noise(4, t, 0.5) + 0.35 * Math.sign(this.noise(6, t, 0.2)) * Math.abs(this.noise(8, t, 0.3)));
 
     const spineX = (act?.spineX ?? 0) + u.spineX - 0.14 * P + accelLean + breathe + nz * 0.04 * this.noise(10, t, 2.1);
-    const spineY = u.spineY + nz * 0.08 * this.noise(12, t, 1.4) + glance * 0.25;
+    const spineY = (look?.yaw ?? 0) * 0.3 + u.spineY + nz * 0.08 * this.noise(12, t, 1.4) + glance * 0.25;
     const spineZ = u.spineZ + nz * 0.07 * this.noise(14, t, 1.7);
     const neckX = 0.28 * Math.max(0, -P) - 0.04 * Math.max(0, P); // slouch: head juts forward
-    const headX = (act?.headX ?? 0) + u.headX - 0.24 * Math.max(0, -P) - 0.06 * Math.max(0, P) - accelLean * 0.6 - bobK + nz * 0.08 * this.noise(16, t, 2.6);
-    const headY = (act?.headY ?? 0) + u.headY + glance * 0.7 + nz * 0.15 * this.noise(18, t, 1.2);
+    const headX = (act?.headX ?? 0) + (look?.pitch ?? 0) + u.headX - 0.24 * Math.max(0, -P) - 0.06 * Math.max(0, P) - accelLean * 0.6 - bobK + nz * 0.08 * this.noise(16, t, 2.6);
+    const headY = (act?.headY ?? 0) + (look?.yaw ?? 0) * 0.7 + u.headY + glance * 0.7 + nz * 0.15 * this.noise(18, t, 1.2);
     const headZ = (act?.headZ ?? 0) + u.headZ + nz * 0.12 * this.noise(20, t, 1.9);
 
     const asymL = 1 + st.asym;
