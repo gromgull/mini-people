@@ -33,11 +33,13 @@ const ACTIONS: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit'
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
-export const wanderRadius = (count: number) => Math.max(1.6, Math.sqrt(count) * 0.85);
+/** Area radius for a crowd; `spread` scales it (1 = default density). */
+export const wanderRadius = (count: number, spread = 1) => Math.max(1.6, Math.sqrt(count) * 0.85) * spread;
 
 /** Scatter people in the disc without overlaps (best effort). */
-export function scatter(count: number, rnd: () => number): WanderState[] {
-  const R = wanderRadius(count);
+export function scatter(count: number, rnd: () => number, spread = 1): WanderState[] {
+  const R = wanderRadius(count, spread);
+  const gap = 0.45 * Math.max(0.7, spread);
   const out: WanderState[] = [];
   for (let i = 0; i < count; i++) {
     let x = 0, z = 0;
@@ -46,7 +48,7 @@ export function scatter(count: number, rnd: () => number): WanderState[] {
       const r = R * Math.sqrt(rnd());
       x = Math.cos(a) * r;
       z = Math.sin(a) * r;
-      if (out.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > 0.45 ** 2)) break;
+      if (out.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > gap ** 2)) break;
     }
     out.push({ x, z, yaw: rnd() * Math.PI * 2, tx: x, tz: z, walking: false, face: null, until: rnd() * 3 });
   }
@@ -54,6 +56,7 @@ export function scatter(count: number, rnd: () => number): WanderState[] {
 }
 
 export class Wander {
+  spread = 1; // scales the roaming area (from the spacing slider)
   constructor(private rnd: () => number) {}
 
   /** Is (x, z) free of other people and of where they're heading? */
@@ -100,7 +103,7 @@ export class Wander {
    */
   think(i: number, all: WanderState[], b: WanderBody, time: number, dt: number): { speed: number; act: ActionKind | null } {
     const s = all[i];
-    const R = wanderRadius(all.length);
+    const R = wanderRadius(all.length, this.spread);
     let act: ActionKind | null = null;
 
     // turning to face someone while standing

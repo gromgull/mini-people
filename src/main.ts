@@ -28,7 +28,7 @@ const num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
 const settings = {
   seed: num('seed', 1),
   count: num('count', 48),
-  spacing: 0.9,
+  spacing: num('spacing', 0.9),
   spin: q.has('spin'),
   segments: num('segs', 8),
   eyes: true,
@@ -210,7 +210,8 @@ let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3
   ACTIONS.includes(q.get('act') as ActionKind)
     ? { at: num('actAt', 0), who: q.has('actAll') ? -1 : num('select', 0), kind: q.get('act') as ActionKind }
     : null;
-let wanders: WanderState[] = []; // wander mode: everyone's own position/heading/plan
+let wanders: WanderState[] = [];
+const wanderSpread = () => settings.spacing / 0.9; // spacing slider, 0.9 = default density // wander mode: everyone's own position/heading/plan
 let brain = new Wander(mulberry32(settings.seed * 7919));
 let along: number[] = []; // distance travelled along the parade ring / lane
 let compareBase: Genome | null = null; // the body every lane shares in compare mode
@@ -324,8 +325,9 @@ function rebuildAll() {
   actors = people.map((p) => new Actor(p, kit));
   gazes = people.map((p, i) => new Gaze(p, i, mulberry32(settings.seed * 4243 + i)));
   offsets = people.map(() => ({ x: 0, z: 0, yaw: 0, locked: false }));
-  wanders = scatter(n, mulberry32(settings.seed * 91 + 3));
+  wanders = scatter(n, mulberry32(settings.seed * 91 + 3), wanderSpread());
   brain = new Wander(mulberry32(settings.seed * 7919));
+  brain.spread = wanderSpread();
   nextAuto = people.map(() => simTime + 1 + Math.random() * 6);
   const gap = settings.mode === 'compare' ? 0 : (Math.PI * 2 * ringRadius()) / n;
   along = people.map((_, i) => (settings.mode === 'compare' ? -1.5 + r() * 0.3 : i * gap));
@@ -551,7 +553,7 @@ function updateLabels() {
 
 function fitCamera() {
   if (q.has('zoom')) return;
-  camera.zoom = settings.mode === 'parade' ? Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6)) : settings.mode === 'wander' ? Math.min(1.4, (VIEW_H * 0.5) / (wanderRadius(people.length) * 0.7 + 0.4)) : settings.mode === 'compare' ? 1.25 : 1;
+  camera.zoom = settings.mode === 'parade' ? Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6)) : settings.mode === 'wander' ? Math.min(1.4, (VIEW_H * 0.5) / (wanderRadius(people.length, wanderSpread()) * 0.7 + 0.4)) : settings.mode === 'compare' ? 1.25 : 1;
   camera.updateProjectionMatrix();
 }
 
@@ -573,7 +575,15 @@ if (q.has('nogui')) {
 const pop = gui.addFolder('Population');
 pop.add(settings, 'seed', 1, 9999, 1).onFinishChange(rebuildAll);
 pop.add(settings, 'count', 1, 200, 1).onFinishChange(rebuildAll);
-pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(placeAll);
+pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(() => {
+  brain.spread = wanderSpread();
+  if (settings.mode === 'wander') {
+    // re-scatter at the new density
+    wanders = scatter(people.length, mulberry32(settings.seed * 91 + 3), wanderSpread());
+    fitCamera();
+  }
+  placeAll();
+});
 pop.add({ reroll: () => { settings.seed = Math.floor(Math.random() * 9999) + 1; pop.controllersRecursive().forEach((c) => c.updateDisplay()); rebuildAll(); } }, 'reroll').name('🎲 new crowd');
 pop.add(settings, 'spin').name('spin (stand mode)');
 
