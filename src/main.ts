@@ -16,7 +16,7 @@ import { Sound, type Voice, type Where, defaultAudio } from './audio';
 import { Wander, type WanderState, scatter, wanderRadius } from './wander';
 import { Gaze, type GazeWorld, LOOK_MODES, type LookMode } from './gaze';
 
-const MODES = ['stand', 'parade', 'wander', 'compare'] as const;
+const MODES = ['single', 'stand', 'parade', 'wander', 'compare'] as const;
 type Mode = (typeof MODES)[number];
 
 // Colours are authored as display values and the atlas does all the shading,
@@ -49,6 +49,7 @@ const settings = {
   gait: { ...defaultGait },
   personality: num('persona', 1), // global exaggeration of everyone's persona
   autoActions: q.has('auto'),
+  walk: q.has('walk'), // single mode: stroll a loop instead of standing still
   sky: q.get('sky') !== '0',
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
@@ -242,6 +243,8 @@ const wanderSpread = () => settings.spacing / 0.9; // spacing slider, 0.9 = defa
 let brain = new Wander(mulberry32(settings.seed * 7919));
 let along: number[] = []; // distance travelled along the parade ring / lane
 let compareBase: Genome | null = null; // the body every lane shares in compare mode
+let singleGenome: Genome | null = null; // who single mode shows (else ?who= from the seed)
+const SINGLE_R = 1.0; // radius of the single-mode stroll
 const COMPARE = q.get('lanes')?.split(',').filter((k) => PRESETS[k]) ?? Object.keys(PRESETS);
 const LANE_LEN = 9;
 const LANE_GAP = 0.85;
@@ -259,8 +262,8 @@ function baseTransform(i: number) {
     const w = wanders[i];
     return { x: w.x, z: w.z, yaw: w.yaw };
   }
-  if (settings.mode === 'parade') {
-    const R = ringRadius();
+  if (settings.mode === 'parade' || settings.mode === 'single') {
+    const R = settings.mode === 'single' ? SINGLE_R : ringRadius();
     const th = along[i] / R;
     // counter-clockwise: velocity = (-sin, 0, cos)
     return { x: Math.cos(th) * R, z: Math.sin(th) * R, yaw: Math.atan2(-Math.sin(th), Math.cos(th)) };
@@ -315,13 +318,15 @@ function setTargetSpeeds() {
     if (!m) return;
     if (settings.mode === 'stand' || settings.mode === 'wander') m.targetSpeed = 0;
     else if (settings.mode === 'parade') m.targetSpeed = settings.speed; // same speed or they'd collide
+    else if (settings.mode === 'single' && !settings.walk) m.targetSpeed = 0;
     else m.targetSpeed = settings.speed * styleOf(p).speedK;
   });
 }
 
 function setMode(mode: Mode) {
-  const rebuild = (mode === 'compare') !== (settings.mode === 'compare') || mode === 'compare';
+  const rebuild = (mode === 'compare') !== (settings.mode === 'compare') || mode === 'compare' || (mode === 'single') !== (settings.mode === 'single');
   if (mode === 'compare' && settings.mode !== 'compare') compareBase = structuredClone(people[selected]?.genome ?? randomGenome(1));
+  if (mode === 'single' && settings.mode !== 'single') singleGenome = structuredClone(people[selected]?.genome ?? randomGenome(1));
   if (mode === 'wander') {
     // start from wherever everyone is standing now
     wanders = people.map((p) => ({ x: p.root.position.x, z: p.root.position.z, yaw: p.root.rotation.y, tx: 0, tz: 0, walking: false, face: null, until: simTime + Math.random() * 2 }));
@@ -329,12 +334,19 @@ function setMode(mode: Mode) {
   }
   settings.mode = mode;
   if (rebuild) rebuildAll();
+  if (mode === 'single') {
+    // look at the middle of their little loop
+    const off = camera.position.clone().sub(controls.target);
+    controls.target.set(0, 0.5, 0);
+    camera.position.copy(controls.target).add(off);
+  }
   setTargetSpeeds();
   placeAll();
   fitCamera();
 }
 
 function genomeFor(i: number): Genome {
+  if (settings.mode === 'single') return structuredClone(singleGenome ?? randomGenome(settings.seed * 100003 + num('who', 0)));
   if (settings.mode !== 'compare') return randomGenome(settings.seed * 100003 + i);
   const g = structuredClone(compareBase ?? randomGenome(1));
   g.persona = { ...PRESETS[COMPARE[i]] };
@@ -343,7 +355,7 @@ function genomeFor(i: number): Genome {
 
 function rebuildAll() {
   people.forEach(removePerson);
-  const n = settings.mode === 'compare' ? COMPARE.length : settings.count;
+  const n = settings.mode === 'compare' ? COMPARE.length : settings.mode === 'single' ? 1 : settings.count;
   people = Array.from({ length: n }, (_, i) => makePerson(i, genomeFor(i)));
   const r = mulberry32(settings.seed * 31 + 7);
   motions = people.map(() => newMotion(r()));
@@ -383,6 +395,7 @@ function modeSpeed(i: number) {
   const o = offsets[i];
   if (o && (o.locked || Math.abs(o.yaw) > TURN_FIRST)) return 0;
   if (settings.mode === 'parade') return settings.speed; // same speed or they'd collide
+  if (settings.mode === 'single' && !settings.walk) return 0;
   return settings.speed * styleOf(people[i]).speedK;
 }
 
@@ -436,7 +449,7 @@ function startTalk(i: number) {
   for (const [a, b] of best >= 0 ? [[i, best], [best, i]] : [[i, -1]]) {
     actors[a].start('talk');
     actors[a].partner = b;
-    if (settings.mode === 'parade') actors[a].holdSpeed = false; // chat on the move
+    if (settings.mode === 'parade' || (settings.mode === 'single' && settings.walk)) actors[a].holdSpeed = false; // chat on the move
     if (settings.mode === 'wander' && b >= 0) {
       const w = wanders[a];
       const o = people[b].root.position;
@@ -593,7 +606,7 @@ function updateLabels() {
 
 function fitCamera() {
   if (q.has('zoom')) return;
-  camera.zoom = settings.mode === 'parade' ? Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6)) : settings.mode === 'wander' ? Math.min(1.4, (VIEW_H * 0.5) / (wanderRadius(people.length, wanderSpread()) * 0.7 + 0.4)) : settings.mode === 'compare' ? 1.25 : 1;
+  camera.zoom = settings.mode === 'single' ? (VIEW_H * 0.3) / (SINGLE_R * 0.75) : settings.mode === 'parade' ? Math.min(1, (VIEW_H * 0.42) / (ringRadius() + 0.6)) : settings.mode === 'wander' ? Math.min(1.4, (VIEW_H * 0.5) / (wanderRadius(people.length, wanderSpread()) * 0.7 + 0.4)) : settings.mode === 'compare' ? 1.25 : 1;
   camera.updateProjectionMatrix();
 }
 
@@ -602,6 +615,7 @@ function attachRing() {
   if (!p) return;
   selectRing.scale.setScalar(Math.max(p.dims.hipR, p.dims.shoulderR, p.dims.waistR) * 1.4);
   p.root.add(selectRing);
+  selectRing.visible = settings.mode !== 'single'; // no need to point out the only one
 }
 
 // ---------------------------------------------------------------- GUI
@@ -613,7 +627,11 @@ if (q.has('nogui')) {
 }
 
 const pop = gui.addFolder('Population');
-pop.add(settings, 'seed', 1, 9999, 1).onFinishChange(rebuildAll);
+const newCrowd = () => {
+  singleGenome = null; // single mode shows someone from the new seed
+  rebuildAll();
+};
+pop.add(settings, 'seed', 1, 9999, 1).onFinishChange(newCrowd);
 pop.add(settings, 'count', 1, 200, 1).onFinishChange(rebuildAll);
 pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(() => {
   brain.spread = wanderSpread();
@@ -624,11 +642,12 @@ pop.add(settings, 'spacing', 0.5, 2, 0.05).onChange(() => {
   }
   placeAll();
 });
-pop.add({ reroll: () => { settings.seed = Math.floor(Math.random() * 9999) + 1; pop.controllersRecursive().forEach((c) => c.updateDisplay()); rebuildAll(); } }, 'reroll').name('🎲 new crowd');
+pop.add({ reroll: () => { settings.seed = Math.floor(Math.random() * 9999) + 1; pop.controllersRecursive().forEach((c) => c.updateDisplay()); newCrowd(); } }, 'reroll').name('🎲 new crowd');
 pop.add(settings, 'spin').name('spin (stand mode)');
 
 const motion = gui.addFolder('Motion');
 motion.add({ mode: settings.mode }, 'mode', MODES).onChange(setMode);
+const walkCtl = motion.add(settings, 'walk').name('🚶 walk (single)  [W]').onChange(setTargetSpeeds);
 motion.add(settings, 'speed', 0, 1.5, 0.01).onChange(setTargetSpeeds);
 motion.add(settings, 'personality', 0, 2, 0.01).name('personality amount');
 motion.add(settings, 'animFps', 0, 30, 1).name('anim fps (0=smooth)');
@@ -707,6 +726,7 @@ labBtn('fiddle tune', () => {
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
   if (k) act(selected, k);
+  if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);
 });
 
 let selFolder: GUI | null = null;
@@ -888,7 +908,7 @@ function frame() {
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
-  if (++frames === 2) (window as any).__mini = { ready: true, people, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
+  if (++frames === 2) (window as any).__mini = { ready: true, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
   requestAnimationFrame(frame);
 }
 
