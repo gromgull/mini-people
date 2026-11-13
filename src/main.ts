@@ -7,6 +7,7 @@ import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
 import { Clouds, Sun, createSky } from './environment';
 import { type Caster, Trees } from './trees';
+import { daylight } from './daylight';
 import { Pond } from './pond';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
@@ -40,7 +41,7 @@ const settings = {
   outlinePx: 1,
   outlineColor: '#1a1410',
   lightAz: num('sunaz', 35),
-  lightEl: num('sunel', 50),
+  lightEl: num('sunel', 50), // below 0 the sun has set: dusk, then night with the moon
   shadowLength: 1, // 0 = round blobs, 1 = as long as the sun angle says
   wrap: 0.35,
   ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
@@ -80,6 +81,7 @@ const outline = createOutlineMaterial(fog);
 // (but share lighting and outline settings with everything else)
 const cloudToon = createToonMaterial(atlas);
 cloudToon.uniforms.uLightView = toon.uniforms.uLightView;
+cloudToon.uniforms.uTint = toon.uniforms.uTint;
 cloudToon.uniforms.uWrap.value = 1.6; // very soft light: white with a pale shade underneath
 const cloudOutline = createOutlineMaterial();
 for (const k of ['uPx', 'uResolution', 'uColor'] as const) cloudOutline.uniforms[k] = outline.uniforms[k];
@@ -88,7 +90,8 @@ scene.add(sky);
 const clouds = new Clouds(cloudToon, cloudOutline);
 scene.add(clouds.group);
 const sun = new Sun();
-scene.add(sun.group);
+const moon = new Sun('moon');
+scene.add(sun.group, moon.group);
 let horizonFar = 30;
 // stencil: each pixel takes shadow once, so overlapping shadows don't stack darker
 const shadowMat = new THREE.MeshBasicMaterial({
@@ -101,6 +104,7 @@ const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: fa
 const groundMat = createGroundMaterial(atlas, fog, ROWS.ground[0]);
 groundMat.uniforms.uLightView = toon.uniforms.uLightView;
 groundMat.uniforms.uWrap = toon.uniforms.uWrap;
+groundMat.uniforms.uTint = toon.uniforms.uTint;
 let ground: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
 {
   const g = new THREE.PlaneGeometry(1600, 1600);
@@ -810,8 +814,8 @@ look.add(settings.ramp, 'shadowDepth', 0, 0.6, 0.01).name('shadow depth').onChan
 look.add(settings.ramp, 'hueShift', 0, 0.2, 0.005).name('hue shift').onChange(refill);
 look.add(settings.ramp, 'highlight', 0, 0.5, 0.01).onChange(refill);
 look.add(settings, 'wrap', 0, 1, 0.01).name('light wrap');
-look.add(settings, 'lightAz', -180, 180, 1).name('light azimuth');
-look.add(settings, 'lightEl', 5, 90, 1).name('light elevation');
+look.add(settings, 'lightAz', -180, 180, 1).name('sun azimuth');
+look.add(settings, 'lightEl', -40, 90, 1).name('sun elevation');
 look.add(settings, 'shadowLength', 0, 1.5, 0.05).name('shadow length');
 look.add(settings, 'outline');
 look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
@@ -879,7 +883,11 @@ function updateShadows(light: THREE.Vector3) {
   if (trees.group.visible) for (const c of trees.casters) orient(c, 0);
 }
 
-const lightWorld = new THREE.Vector3();
+const lightWorld = new THREE.Vector3(); // what shades the scene: the sun, or the moon once the sun is down
+const sunWorld = new THREE.Vector3();
+const moonWorld = new THREE.Vector3();
+const day = daylight(50);
+const _sunNdc = new THREE.Vector3();
 const clock = new THREE.Clock();
 let frames = 0;
 let simAcc = 0;
@@ -901,7 +909,7 @@ const _hz = new THREE.Vector3();
 function updateEnvironment(dt: number) {
   const tgt = controls.target;
   sky.visible = clouds.group.visible = settings.sky;
-  if (!settings.sky) sun.group.visible = false;
+  if (!settings.sky) sun.group.visible = moon.group.visible = false;
   if (!settings.sky) {
     fog.uFogFar.value = fog.uFogNear.value = 1e9;
     return;
@@ -917,10 +925,21 @@ function updateEnvironment(dt: number) {
   fog.uFogFar.value = horizonFar;
   fog.uFogNear.value = horizonFar * 0.8;
   clouds.update(camera, tgt, horizonFar, dt);
-  sun.update(camera, tgt, horizonFar, lightWorld);
+  sun.update(camera, tgt, horizonFar, sunWorld);
+  moon.update(camera, tgt, horizonFar, moonWorld);
+  sun.setColor(day.sun);
   _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
-  sky.material.uniforms.uHorizon.value = _hz.y;
-  sky.material.uniforms.uRes.value.set(rt.width, rt.height);
+  const u = sky.material.uniforms;
+  u.uHorizon.value = _hz.y;
+  u.uRes.value.set(rt.width, rt.height);
+  // time of day: sky colours, a glow around the sun when it faces us, stars at night
+  u.uTop.value.copy(day.top);
+  u.uGlow.value.copy(day.glow);
+  u.uGlowAmt.value = day.glowAmt * THREE.MathUtils.smoothstep(sun.facing, -0.2, 0.6);
+  u.uSunX.value = _sunNdc.copy(sun.at).project(camera).x;
+  u.uStars.value = day.stars;
+  u.uStarShift.value = (Math.atan2(_fwd.x, _fwd.z) / (Math.PI * 2)) * rt.width * 3;
+  u.uTime.value = performance.now() / 1000;
 }
 
 function frame() {
@@ -953,7 +972,21 @@ function frame() {
 
   const az = THREE.MathUtils.degToRad(settings.lightAz);
   const el = THREE.MathUtils.degToRad(settings.lightEl);
-  lightWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  sunWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  moonWorld.copy(sunWorld).negate(); // a full moon, opposite the sun
+  // shade by the sun while it's up, by the moon once it has set; never from
+  // below the ground (the tint does the dimming)
+  lightWorld.copy(settings.lightEl > -3 ? sunWorld : moonWorld);
+  const minY = Math.sin(THREE.MathUtils.degToRad(4));
+  if (lightWorld.y < minY) {
+    const h = Math.hypot(lightWorld.x, lightWorld.z) || 1;
+    const k = Math.sqrt(1 - minY * minY) / h;
+    lightWorld.set(lightWorld.x * k, minY, lightWorld.z * k);
+  }
+  daylight(settings.lightEl, day);
+  toon.uniforms.uTint.value.copy(day.tint);
+  fog.uHaze.value.copy(day.horizon);
+  shadowMat.opacity = day.shadow;
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
   trees.group.visible = settings.trees;

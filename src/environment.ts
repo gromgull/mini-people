@@ -25,6 +25,12 @@ export function createSky(fog: FogUniforms) {
       uTop: { value: new THREE.Color('#5aa0e2') },
       uHorizon: { value: 0 }, // NDC y of the horizon line
       uRes: { value: new THREE.Vector2(1, 1) },
+      uGlow: { value: new THREE.Color('#f08a3a') }, // sunset glow around the sun
+      uGlowAmt: { value: 0 },
+      uSunX: { value: 0 }, // NDC x of the sun
+      uStars: { value: 0 }, // 0 = day … 1 = full night
+      uStarShift: { value: 0 }, // pixels: stars slide sideways as the view turns
+      uTime: { value: 0 },
     },
     vertexShader: /* glsl */ `
       void main() { gl_Position = vec4(position.xy, 0.9999, 1.0); }
@@ -34,12 +40,38 @@ export function createSky(fog: FogUniforms) {
       uniform vec3 uTop;
       uniform float uHorizon;
       uniform vec2 uRes;
+      uniform vec3 uGlow;
+      uniform float uGlowAmt;
+      uniform float uSunX;
+      uniform float uStars;
+      uniform float uStarShift;
+      uniform float uTime;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       void main() {
-        float y = gl_FragCoord.y / uRes.y * 2.0 - 1.0;
-        // a quick haze band at the horizon, then plain blue
-        float t = clamp((y - uHorizon) / 0.3, 0.0, 1.0);
+        vec2 ndc = gl_FragCoord.xy / uRes * 2.0 - 1.0;
+        // a quick haze band at the horizon, then the sky colour
+        float t = clamp((ndc.y - uHorizon) / 0.3, 0.0, 1.0);
         t = floor(t * 4.0 + 0.5) / 4.0; // a few flat bands, pixel-art style
-        gl_FragColor = vec4(mix(uHaze, uTop, t), 1.0);
+        vec3 c = mix(uHaze, uTop, t);
+
+        // sunset glow: a wide, low lens of the glow colour centred on the sun
+        float dx = (ndc.x - uSunX) * uRes.x / uRes.y;
+        float dy = max(ndc.y - uHorizon, 0.0);
+        float g = exp(-dx * dx / 0.9 - dy * dy / 0.08) * uGlowAmt;
+        g = floor(g * 4.0 + 0.3) / 4.0; // banded too
+        c = mix(c, uGlow, g * 0.85);
+
+        // stars: single pixels on a hashed grid, only above the haze, gently twinkling
+        if (uStars > 0.0 && t > 0.2) {
+          vec2 px = floor(gl_FragCoord.xy + vec2(uStarShift, 0.0));
+          float h = hash(px);
+          if (h > 0.992) {
+            float tw = 0.65 + 0.35 * sin(uTime * (1.0 + 3.0 * hash(px + 7.0)) + h * 400.0);
+            float b = uStars * smoothstep(0.2, 0.6, t) * tw * (0.55 + 0.45 * hash(px + 3.0));
+            c = mix(c, vec3(1.0, 0.98, 0.9), b);
+          }
+        }
+        gl_FragColor = vec4(c, 1.0);
       }
     `,
   });
@@ -109,51 +141,70 @@ export class Clouds {
 }
 
 /**
- * A flat pixel-art sun on the far side of the horizon, in the light's
+ * A flat pixel-art sun (or moon) on the far side of the horizon, in its
  * direction. It sits just past the horizon (in an ortho view anything further
- * back is drawn higher up) and is drawn before the clouds, so they always pass
- * in front of it. It rises with the light's elevation. Like the clouds it's only shown when
- * it's on the far side of the view: with the light behind the camera, the
- * sun is behind you too.
+ * back is drawn higher up) and is drawn before everything else, so clouds pass
+ * in front of it and, once it dips below the horizon, the hazy ground does too.
+ * Like the clouds it's only shown when it's on the far side of the view: with
+ * it behind the camera, it's behind you too.
  */
 export class Sun {
   readonly group = new THREE.Group();
+  /** World position it's drawn at, even when hidden (for the sky's glow). */
+  readonly at = new THREE.Vector3();
+  /** How much it faces the view direction (−1…1). */
+  facing = 0;
   private _fwd = new THREE.Vector3();
+  private core: THREE.MeshBasicMaterial;
 
-  constructor() {
+  constructor(kind: 'sun' | 'moon' = 'sun') {
     // Drawn in the opaque pass right after the sky, without depth: everything
     // else (clouds, ground, people) paints over it. The halo rings glow additively,
     // because blending only happens in the transparent pass, which runs last.
     const disc = (r: number, color: string, glow: number, order: number) => {
-      const m = new THREE.Mesh(
-        new THREE.CircleGeometry(r, 24),
-        new THREE.MeshBasicMaterial({
-          color, depthTest: false, depthWrite: false, fog: false,
-          ...(glow < 1 ? { blending: THREE.AdditiveBlending, opacity: glow } : {}),
-        }),
-      );
+      const mat = new THREE.MeshBasicMaterial({
+        color, depthTest: false, depthWrite: false, fog: false,
+        ...(glow < 1 ? { blending: THREE.AdditiveBlending, opacity: glow } : {}),
+      });
+      const m = new THREE.Mesh(new THREE.CircleGeometry(r, 24), mat);
       m.renderOrder = order;
       m.frustumCulled = false;
       m.raycast = () => {};
       this.group.add(m);
       return m;
     };
-    // stepped halo rings, then the disc: flat bands, no gradients
-    disc(1.25, '#fff2c8', 0.07, -9);
-    disc(0.95, '#fff2c8', 0.1, -8);
-    disc(0.62, '#fff4c4', 1, -7);
+    if (kind === 'sun') {
+      // stepped halo rings, then the disc: flat bands, no gradients
+      disc(1.25, '#fff2c8', 0.07, -9);
+      disc(0.95, '#fff2c8', 0.1, -8);
+      this.core = disc(0.62, '#fff4c4', 1, -7).material as THREE.MeshBasicMaterial;
+    } else {
+      disc(0.85, '#9fb4e0', 0.08, -9);
+      this.core = disc(0.42, '#e8ecf2', 1, -7).material as THREE.MeshBasicMaterial;
+      // a few darker "seas"
+      for (const [x, y, r] of [[-0.12, 0.1, 0.12], [0.13, -0.05, 0.09], [0.02, -0.2, 0.07]]) disc(r, '#c3cad8', 1, -6).position.set(x, y, 0);
+    }
   }
 
-  /** `light`: unit vector towards the light (world). */
-  update(camera: THREE.OrthographicCamera, target: THREE.Vector3, far: number, light: THREE.Vector3) {
+  setColor(c: THREE.Color) {
+    this.core.color.copy(c);
+  }
+
+  /** `dir`: unit vector towards it (world); may point below the horizon. */
+  update(camera: THREE.OrthographicCamera, target: THREE.Vector3, far: number, dir: THREE.Vector3) {
     const fwd = this._fwd.subVectors(target, camera.position).setY(0).normalize();
-    const h = Math.hypot(light.x, light.z);
-    // facing the camera's way, and not straight overhead
-    this.group.visible = h > 0.05 && (light.x * fwd.x + light.z * fwd.z) / h > 0.15;
-    if (!this.group.visible) return;
-    const el = Math.atan2(light.y, h);
+    const h = Math.hypot(dir.x, dir.z);
+    const el = Math.atan2(dir.y, h);
+    this.facing = h > 0.05 ? (dir.x * fwd.x + dir.z * fwd.z) / h : 0;
     const D = far * 1.02;
-    this.group.position.set(target.x + (light.x / h) * D, 0.5 + (el / (Math.PI / 2)) * 2.4, target.z + (light.z / h) * D);
+    // el 0° puts the disc's centre a little above the horizon line; below that it
+    // sinks quickly into the haze (the ground paints over it) and is gone by −8°
+    const deg = THREE.MathUtils.radToDeg(el);
+    const y = deg >= 0 ? 0.15 + (deg / 90) * 2.6 : 0.15 + deg * 0.12;
+    this.at.set(target.x + (h > 1e-4 ? dir.x / h : 0) * D, y, target.z + (h > 1e-4 ? dir.z / h : 0) * D);
+    this.group.visible = h > 0.05 && this.facing > 0.15 && deg > -8;
+    if (!this.group.visible) return;
+    this.group.position.copy(this.at);
     this.group.quaternion.copy(camera.quaternion); // billboard
   }
 }

@@ -51,6 +51,7 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
       uRows: { value: ROW_COUNT },
       uLightView: { value: new THREE.Vector3(0, 1, 0) },
       uWrap: { value: 0.35 },
+      uTint: { value: new THREE.Color(1, 1, 1) }, // time-of-day light colour
     },
     vertexShader: /* glsl */ `
       attribute float aRow;
@@ -70,6 +71,7 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
       uniform float uRows;
       uniform vec3 uLightView;
       uniform float uWrap;
+      uniform vec3 uTint;
       varying vec3 vN;
       varying float vRow;
       ${FOG_GLSL}
@@ -78,7 +80,7 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
         float ndl = dot(normalize(vN), uLightView);
         // wrapped lambert: uWrap=0 → plain lambert, 1 → half-lambert
         float u = clamp((ndl + uWrap) / (1.0 + uWrap), 0.001, 0.999);
-        vec3 c = texture2D(uAtlas, vec2(u, (vRow + 0.5) / uRows)).rgb;
+        vec3 c = texture2D(uAtlas, vec2(u, (vRow + 0.5) / uRows)).rgb * uTint;
         gl_FragColor = vec4(mix(c, uHaze, haze), 1.0);
       }
     `,
@@ -159,6 +161,7 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
       uRagged: { value: defaultGrass.ragged },
       uTooth: { value: defaultGrass.tooth },
       uContrast: { value: defaultGrass.contrast },
+      uTint: { value: new THREE.Color(1, 1, 1) },
       uFlowers: { value: defaultGrass.flowers },
       uFlowerSize: { value: defaultGrass.flowerSize },
       uPink: { value: new THREE.Color('#e88ac8') },
@@ -185,6 +188,7 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
       uniform float uRagged;
       uniform float uTooth;
       uniform float uContrast;
+      uniform vec3 uTint;
       uniform float uFlowers;
       uniform float uFlowerSize;
       uniform vec3 uPink;
@@ -270,6 +274,7 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
         c *= mix(vec3(1.0), k, uContrast);
         vec4 fl = flower(p);
         c = mix(c, fl.rgb * lit, fl.a);
+        c *= uTint;
 
         gl_FragColor = vec4(mix(c, uHaze, haze), 1.0);
       }
