@@ -100,6 +100,7 @@ Handy for sharing a particular scene, e.g.
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `sky=0` | no sky or horizon |
+| `sunaz` / `sunel` | sun azimuth / elevation in degrees (default 35 / 50) |
 | `grass=0` | plain ground, no grass patches |
 | `flowers` | flower density, 0–1 (0 = none) |
 | `look` | where everyone looks: `auto` · `cursor` · `camera` · `selected` |

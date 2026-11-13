@@ -5,7 +5,7 @@ import { type Person, buildPerson } from './body';
 import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
-import { Clouds, createSky } from './environment';
+import { Clouds, Sun, createSky } from './environment';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -37,8 +37,9 @@ const settings = {
   outline: q.get('outline') !== '0',
   outlinePx: 1,
   outlineColor: '#1a1410',
-  lightAz: 35,
-  lightEl: 50,
+  lightAz: num('sunaz', 35),
+  lightEl: num('sunel', 50),
+  shadowLength: 1, // 0 = round blobs, 1 = as long as the sun angle says
   wrap: 0.35,
   ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
   mode: (MODES.includes(q.get('mode') as Mode) ? q.get('mode') : 'parade') as Mode,
@@ -82,8 +83,14 @@ const sky = createSky(fog);
 scene.add(sky);
 const clouds = new Clouds(cloudToon, cloudOutline);
 scene.add(clouds.group);
+const sun = new Sun();
+scene.add(sun.group);
 let horizonFar = 30;
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
+// stencil: each pixel takes shadow once, so overlapping shadows don't stack darker
+const shadowMat = new THREE.MeshBasicMaterial({
+  color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false,
+  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
+});
 const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: false, transparent: true });
 
 // ground: toon-lit like everything else, plus grass patches (falls back to plain toon)
@@ -112,10 +119,10 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.5, 0);
 camera.position.y += 0.5;
 controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.47;
+controls.maxPolarAngle = Math.PI * 0.49; // down to ~2° above the ground
 
 // low-res target → nearest-neighbour upscale for the pixel look
-const rt = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
+const rt = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true, stencilBuffer: true });
 const blitScene = new THREE.Scene();
 const blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: rt.texture })));
@@ -142,7 +149,7 @@ window.addEventListener('resize', resize);
 
 let people: Person[] = [];
 let selected = 0;
-const shadowGeo = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
+const shadowGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
 const selectGeo = new THREE.RingGeometry(1.05, 1.25, 28).rotateX(-Math.PI / 2);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
@@ -162,12 +169,14 @@ function makePerson(i: number, genome = randomGenome(settings.seed * 100003 + i)
   p.root.position.set(t.x, 0, t.z);
   p.root.rotation.y = t.rot;
   p.root.userData.index = i;
+  // drop shadow: an ellipse in a pivot that turns it away from the sun (see updateShadows)
   const shadow = new THREE.Mesh(shadowGeo, shadowMat);
-  const sr = Math.max(p.dims.hipR, p.dims.shoulderR, p.dims.waistR) * 1.35;
-  shadow.scale.setScalar(sr);
-  shadow.position.y = 0.002;
   shadow.raycast = () => {};
-  p.root.add(shadow);
+  const pivot = new THREE.Group();
+  pivot.position.y = 0.002;
+  pivot.add(shadow);
+  p.root.add(pivot);
+  p.root.userData.shadow = { pivot, shadow, r: Math.max(p.dims.hipR, p.dims.shoulderR, p.dims.waistR) * 1.35, h: p.dims.height };
   scene.add(p.root);
   return p;
 }
@@ -795,6 +804,7 @@ look.add(settings.ramp, 'highlight', 0, 0.5, 0.01).onChange(refill);
 look.add(settings, 'wrap', 0, 1, 0.01).name('light wrap');
 look.add(settings, 'lightAz', -180, 180, 1).name('light azimuth');
 look.add(settings, 'lightEl', 5, 90, 1).name('light elevation');
+look.add(settings, 'shadowLength', 0, 1.5, 0.05).name('shadow length');
 look.add(settings, 'outline');
 look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
 look.addColor(settings, 'outlineColor').name('outline color');
@@ -839,6 +849,26 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 
 // ---------------------------------------------------------------- loop
 
+/**
+ * Not real shadows: each person's blob is an ellipse that starts under their
+ * feet and stretches away from the sun, as long as a pole of their height would
+ * cast (capped, so a low sun doesn't paint the whole field).
+ */
+function updateShadows(light: THREE.Vector3) {
+  const h = Math.hypot(light.x, light.z);
+  const yaw = h > 1e-4 ? Math.atan2(light.z, -light.x) : 0; // local +x → away from the sun
+  const stretch = h > 1e-4 ? Math.min(h / Math.max(light.y, 1e-4), 3) : 0; // 1/tan(elevation)
+  for (const p of people) {
+    const s = p.root.userData.shadow;
+    if (!s) continue;
+    const len = s.h * stretch * settings.shadowLength;
+    const a = s.r + len * 0.5; // semi-major
+    s.pivot.rotation.y = yaw - p.root.rotation.y;
+    s.shadow.scale.set(a, 1, s.r);
+    s.shadow.position.x = a - s.r; // near end stays at the feet
+  }
+}
+
 const lightWorld = new THREE.Vector3();
 const clock = new THREE.Clock();
 let frames = 0;
@@ -861,6 +891,7 @@ const _hz = new THREE.Vector3();
 function updateEnvironment(dt: number) {
   const tgt = controls.target;
   sky.visible = clouds.group.visible = settings.sky;
+  if (!settings.sky) sun.group.visible = false;
   if (!settings.sky) {
     fog.uFogFar.value = fog.uFogNear.value = 1e9;
     return;
@@ -876,6 +907,7 @@ function updateEnvironment(dt: number) {
   fog.uFogFar.value = horizonFar;
   fog.uFogNear.value = horizonFar * 0.8;
   clouds.update(camera, tgt, horizonFar, dt);
+  sun.update(camera, tgt, horizonFar, lightWorld);
   _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
   sky.material.uniforms.uHorizon.value = _hz.y;
   sky.material.uniforms.uRes.value.set(rt.width, rt.height);
@@ -914,6 +946,7 @@ function frame() {
   lightWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
+  updateShadows(lightWorld);
   toon.uniforms.uWrap.value = settings.wrap;
   ground.material = settings.grass.enabled ? groundMat : toon;
   groundMat.uniforms.uScale.value = settings.grass.scale;

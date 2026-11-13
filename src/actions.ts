@@ -1010,7 +1010,9 @@ export class Actor {
       g.t += dt;
       const k = smooth(g.t / g.dur);
       // (slerpQuaternions copies its first arg into `this`, so stash the target)
-      for (const j of JOINTS) J[j].quaternion.slerpQuaternions(g.q.get(j)!, _target.copy(J[j].quaternion), k);
+      // (not the root: it's already placed, and writing its quaternion would make three
+      // re-derive its Euler as (180°, 180° − yaw, 180°), breaking every root.rotation.y reader)
+      for (const j of JOINTS) if (j !== 'root') J[j].quaternion.slerpQuaternions(g.q.get(j)!, _target.copy(J[j].quaternion), k);
       J.pelvis.position.lerpVectors(g.pelvis, J.pelvis.position, k);
       if (g.t >= g.dur) this.stop();
     }

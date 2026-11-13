@@ -107,3 +107,53 @@ export class Clouds {
     }
   }
 }
+
+/**
+ * A flat pixel-art sun on the far side of the horizon, in the light's
+ * direction. It sits just past the horizon (in an ortho view anything further
+ * back is drawn higher up) and is drawn before the clouds, so they always pass
+ * in front of it. It rises with the light's elevation. Like the clouds it's only shown when
+ * it's on the far side of the view: with the light behind the camera, the
+ * sun is behind you too.
+ */
+export class Sun {
+  readonly group = new THREE.Group();
+  private _fwd = new THREE.Vector3();
+
+  constructor() {
+    // Drawn in the opaque pass right after the sky, without depth: everything
+    // else (clouds, ground, people) paints over it. The halo rings glow additively,
+    // because blending only happens in the transparent pass, which runs last.
+    const disc = (r: number, color: string, glow: number, order: number) => {
+      const m = new THREE.Mesh(
+        new THREE.CircleGeometry(r, 24),
+        new THREE.MeshBasicMaterial({
+          color, depthTest: false, depthWrite: false, fog: false,
+          ...(glow < 1 ? { blending: THREE.AdditiveBlending, opacity: glow } : {}),
+        }),
+      );
+      m.renderOrder = order;
+      m.frustumCulled = false;
+      m.raycast = () => {};
+      this.group.add(m);
+      return m;
+    };
+    // stepped halo rings, then the disc: flat bands, no gradients
+    disc(1.25, '#fff2c8', 0.07, -9);
+    disc(0.95, '#fff2c8', 0.1, -8);
+    disc(0.62, '#fff4c4', 1, -7);
+  }
+
+  /** `light`: unit vector towards the light (world). */
+  update(camera: THREE.OrthographicCamera, target: THREE.Vector3, far: number, light: THREE.Vector3) {
+    const fwd = this._fwd.subVectors(target, camera.position).setY(0).normalize();
+    const h = Math.hypot(light.x, light.z);
+    // facing the camera's way, and not straight overhead
+    this.group.visible = h > 0.05 && (light.x * fwd.x + light.z * fwd.z) / h > 0.15;
+    if (!this.group.visible) return;
+    const el = Math.atan2(light.y, h);
+    const D = far * 1.02;
+    this.group.position.set(target.x + (light.x / h) * D, 0.5 + (el / (Math.PI / 2)) * 2.4, target.z + (light.z / h) * D);
+    this.group.quaternion.copy(camera.quaternion); // billboard
+  }
+}
