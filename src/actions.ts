@@ -6,6 +6,7 @@ import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 import { twoBoneIK } from './ik';
+import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
 export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
@@ -44,6 +45,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t / tin) * smooth((dur - t) / tout);
 
 const JUMP_G = 14;
+
 export const BPM = 112; // shared tempo for music and dancing
 const SAW_CROUCH = 0.1;
 const SAW_STROKE = 0.22; // half-stroke, × arm length
@@ -173,7 +175,9 @@ export class Actor {
   beatTime = 0;
   /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
   note: { f: number; dur: number } | null = null;
-  private tune: { deg: number; hold: number }[] = [];
+  /** Which part of the tune this fiddler plays (0 melody, 1 harmony, 2 bass), −1 = not playing. */
+  fiddleVoice = -1;
+  private fiddleDur = 10;
   private bow = { dir: 1, start: 0, len: 0.25, lastSlot: -1 };
   private bowStroke = 0; // −1 … 1 along the bow
   private bowWeight = 0;
@@ -239,6 +243,8 @@ export class Actor {
     if (this.logSet) this.logSet.visible = false;
     if (this.fiddle) this.fiddle.visible = false;
     if (this.bowMesh) this.bowMesh.visible = false;
+    leaveBand(this.fiddleVoice);
+    this.fiddleVoice = -1;
     this.partner = -1;
     this.kind = null;
     this.ragdoll = null;
@@ -296,23 +302,15 @@ export class Actor {
       p.root.add(this.bowMesh); // placed across the strings every frame; the arm follows it
     }
     this.fiddle.visible = this.bowMesh!.visible = true;
-    // a tune: a random walk on D major pentatonic, in eighth notes, some held
-    const len = 16;
-    this.tune = [];
-    let deg = 2 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < len; i++) {
-      const r = Math.random();
-      if (r < 0.6) deg += Math.random() < 0.5 ? 1 : -1;
-      else if (r < 0.75) deg += Math.random() < 0.5 ? 2 : -2;
-      deg = Math.max(0, Math.min(9, deg));
-      const hold = Math.random() < 0.25 && i % 2 === 0 ? 2 : 1;
-      this.tune.push({ deg, hold });
-      if (hold === 2) {
-        this.tune.push({ deg, hold: 0 }); // tied: no new bow stroke
-        i++;
-      }
-    }
-    this.tune[len - 1] = { deg: 0, hold: 1 }; // land home on D
+    // join the band: take a free part of the shared tune, and play to the end
+    // of the next full phrase so we stop on a cadence, not mid-line
+    this.fiddleVoice = joinBand();
+    const eighth = 30 / BPM;
+    const now = this.beatTime * 2;
+    const lead = 0.5; // getting the fiddle up
+    const startSlot = now + lead / eighth;
+    const endSlot = (Math.floor(startSlot / PHRASE_SLOTS) + 2) * PHRASE_SLOTS;
+    this.fiddleDur = lead + (endSlot - startSlot) * eighth + 0.6;
     this.bow.lastSlot = -1;
   }
 
@@ -820,18 +818,17 @@ export class Actor {
       }
 
       case 'fiddle': {
-        const dur = 10;
+        const dur = this.fiddleDur;
         if (t >= dur) return this.finish();
         const e = envelope(t, dur, 0.5, 0.5);
         // play along the shared beat in eighth notes
         const slot = Math.floor(this.beatTime * 2);
         const eighth = 30 / BPM; // seconds per eighth note at the shared tempo
-        if (t > 0.5 && t < dur - 0.4 && slot !== this.bow.lastSlot) {
+        if (t > 0.5 && t < dur - 0.5 && slot !== this.bow.lastSlot) {
           this.bow.lastSlot = slot;
-          const n = this.tune[slot % this.tune.length];
+          const n = tune().parts[Math.max(0, this.fiddleVoice)][slot % FORM_SLOTS];
           if (n.hold > 0) {
-            const semis = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21][n.deg];
-            this.note = { f: 293.66 * 2 ** (semis / 12), dur: eighth * n.hold };
+            this.note = { f: degToHz(n.deg), dur: eighth * n.hold };
             this.bow.dir = -this.bow.dir; // change bow direction on every new note
             this.bow.start = t;
             this.bow.len = eighth * n.hold;

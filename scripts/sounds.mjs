@@ -1,12 +1,12 @@
 // Render every sound recipe offline (in the headless browser) to WAV files,
 // plus a spectrogram sheet, so they can be auditioned without running the app.
-//   node scripts/sounds.mjs [seed=1]    → screenshots/sounds/*.wav, screenshots/sounds.png
+//   node scripts/sounds.mjs [seed=1] [name filter]   (seed also picks the fiddle tune)    → screenshots/sounds/*.wav, screenshots/sounds.png
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const [seed = '1'] = process.argv.slice(2);
+const [seed = '1', only] = process.argv.slice(2);
 mkdirSync('screenshots/sounds', { recursive: true });
 const server = await createServer({ server: { port: 5192, strictPort: true }, logLevel: 'error' });
 await server.listen();
@@ -28,14 +28,19 @@ const RECIPES = {
   hammer: [2.6, `for (let k = 0; k < 3; k++) at(0.1 + k * 0.85, () => s.hammer(C));`],
   saw: [2.2, `for (let f = 0; f < 120; f++) { const u = f / 60 / 0.62; at(f / 60, () => s.saw(9, u < 3, Math.abs(Math.sin(Math.PI * 2 * u)), u % 1 < 0.5, C)); } at(2.05, () => s.saw(9, false, 0, false, C));`],
   'vocal-reactions': [3.6, `['oof', 'hup', 'grunt', 'gasp', 'hey'].forEach((k, i) => at(0.1 + i * 0.7, () => s.exclaim(k, V.mid, C)));`],
-  'fiddle': [4.4, `const e = 30 / 112; [0,2,4,7,9,7,4,2,0,4,7,12,9,7,4,0].forEach((d, k) => at(0.05 + k * e, () => s.fiddleNote(293.66 * 2 ** (d / 12), e * (k === 15 ? 2 : 1), C)));`],
-  'claps': [2.4, `for (let k = 0; k < 8; k++) at(0.05 + k * 60 / 112, () => s.clap({ pan: k % 2 ? 0.2 : -0.2, gain: 1 }));`],
+  'fiddle-melody': [35, `const e = 30 / 112; const t = T.makeTune(R(+SEED)); const play = (v, g) => t.parts[v].forEach((n, k) => n.hold && at(0.05 + k * e, () => s.fiddleNote(T.degToHz(n.deg), e * n.hold, g))); play(0, C);`],
+  'fiddle-trio': [35, `const e = 30 / 112; const t = T.makeTune(R(+SEED)); const play = (v, g) => t.parts[v].forEach((n, k) => n.hold && at(0.05 + k * e, () => s.fiddleNote(T.degToHz(n.deg), e * n.hold, g))); play(0, { pan: -0.35, gain: 1 }); play(1, { pan: 0.35, gain: 0.85 }); play(2, { pan: 0, gain: 0.9 });`],
+  'claps': [4.4, `for (let k = 0; k < 8; k++) at(0.05 + k * 60 / 112, () => s.clap({ pan: k % 2 ? 0.2 : -0.2, gain: 1 }));`],
   'props': [1.6, `at(0.1, () => s.thunk(C, 1)); at(0.6, () => s.thunk(C, 0.8)); at(1.0, () => s.creak(C));`],
 };
 
-for (const [name, [secs, body]] of Object.entries(RECIPES)) {
-  const b64 = await pg.evaluate(async ([secs, body]) => {
+const NAMES = Object.keys(RECIPES).filter((n) => !only || n.includes(only));
+for (const name of NAMES) {
+  const [secs, body] = RECIPES[name];
+  const b64 = await pg.evaluate(async ([secs, body, seed]) => {
     const s = window.__mini.sound;
+    const T = await import('/src/tune.ts');
+    const { mulberry32: RNG } = await import('/src/rng.ts');
     const sr = 44100;
     const ctx = new OfflineAudioContext(2, Math.ceil(sr * secs), sr);
     s.start(ctx);
@@ -46,12 +51,19 @@ for (const [name, [secs, body]] of Object.entries(RECIPES)) {
       high: { f0: 235, formant: 1.22, rate: 1.2, weight: 0.2 },
     };
     // schedule calls at render times by suspending the offline context there
+    // (one suspend per render quantum: several calls can share a moment)
+    const due = new Map();
     const at = (t, fn) => {
       const q = Math.max(0, Math.round((t * sr) / 128) * 128) / sr;
-      if (q === 0) fn();
-      else ctx.suspend(q).then(() => { fn(); ctx.resume(); }).catch(() => fn());
+      if (q === 0) return fn();
+      if (q >= secs) return; // past the end of the render
+      if (!due.has(q)) {
+        due.set(q, []);
+        ctx.suspend(q).then(() => { due.get(q).forEach((f) => f()); ctx.resume(); });
+      }
+      due.get(q).push(fn);
     };
-    new Function('s', 'at', 'C', 'V', body)(s, at, C, V);
+    new Function('s', 'at', 'C', 'V', 'T', 'R', 'SEED', body)(s, at, C, V, T, RNG, seed);
     const buf = await ctx.startRendering();
     // 16-bit stereo WAV
     const n = buf.length;
@@ -72,7 +84,7 @@ for (const [name, [secs, body]] of Object.entries(RECIPES)) {
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     return { data: btoa(bin), peak };
-  }, [secs, body]);
+  }, [secs, body, seed]);
   writeFileSync(`screenshots/sounds/${name}.wav`, Buffer.from(b64.data, 'base64'));
   console.log(`${name.padEnd(16)} peak ${b64.peak.toFixed(2)}`);
 }
@@ -81,7 +93,7 @@ await server.close();
 
 // spectrogram sheet
 const pics = [];
-for (const name of Object.keys(RECIPES)) {
+for (const name of NAMES) {
   const out = `screenshots/frames/spec-${name}.png`;
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', `screenshots/sounds/${name}.wav`, '-lavfi', `showspectrumpic=s=600x200:legend=0:fscale=log,drawtext=text='${name}':x=8:y=8:fontcolor=white:fontsize=18`, out]);
   pics.push(out);

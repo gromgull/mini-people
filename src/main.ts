@@ -423,11 +423,15 @@ function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   if (kind === 'talk') return startTalk(i);
   a.start(kind, { push });
   if (kind === 'fiddle' && settings.mode === 'wander') {
-    // music! some idle folk nearby get up and dance
+    // music! some idle folk nearby get up and dance, and now and then
+    // someone fetches their own fiddle and plays a harmony part
     const me = people[i].root.position;
+    let band = 0;
     people.forEach((o, j) => {
       if (j !== i && !actors[j].busy && !wanders[j]?.walking && o.root.position.distanceTo(me) < 2.6 && Math.random() < 0.6) {
-        setTimeout(() => !actors[j].busy && actors[j].start('dance'), 300 + Math.random() * 1500);
+        const kind = band < 2 && Math.random() < 0.3 ? 'fiddle' : 'dance';
+        if (kind === 'fiddle') band++;
+        setTimeout(() => !actors[j].busy && actors[j].start(kind), (kind === 'fiddle' ? 800 : 300) + Math.random() * 1500);
       }
     });
   }
