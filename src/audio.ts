@@ -27,6 +27,20 @@ export interface AudioSettings {
   crunch: boolean;
 }
 
+/**
+ * What makes the voices warm rather than metallic. All on by default; the
+ * flags exist so scripts/sounds.mjs can render before/after comparisons.
+ */
+export interface VoiceFx {
+  wobble: boolean; // 1: random pitch drift + jitter + shimmer instead of a steady sine vibrato
+  cascade: boolean; // 4: formant resonators in series (no cancelling between bands)
+  hums: boolean; // 8: nasal m/n murmurs and the odd "mm" syllable
+  room: boolean; // 9: a little room reverb on voices
+  softRing: boolean; // 5: tame the fixed high formant around 2600 Hz
+  warm: boolean; // 10: gentle saturation + a treble cut on the voices
+}
+export const defaultVoiceFx: VoiceFx = { wobble: true, cascade: true, hums: true, room: true, softRing: true, warm: true };
+
 export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, music: 0.7, crunch: false };
 
 const VOWELS: [number, number][] = [
@@ -52,6 +66,16 @@ export class Sound {
   private lastRefill = 0;
   private saws = new Map<number, { src: AudioBufferSourceNode; filt: BiquadFilterNode; amp: GainNode; teeth: OscillatorNode; pan: StereoPannerNode; touched: boolean; biteLfo: OscillatorNode; biteBp: BiquadFilterNode }>();
   private talking = new Map<number, number>(); // person → end of current phrase (ctx time)
+  private roomSend!: GainNode;
+  private voiceSat!: WaveShaperNode;
+  private voiceShelf!: BiquadFilterNode;
+  voiceFx: VoiceFx = { ...defaultVoiceFx };
+  // the wobble's own dice, so switching it on doesn't change what gets said
+  private wobSeed = 1;
+  private wob = (a: number, b: number) => {
+    this.wobSeed = (this.wobSeed * 16807) % 2147483647;
+    return a + (this.wobSeed / 2147483647) * (b - a);
+  };
 
   constructor(public settings: AudioSettings) {}
 
@@ -78,7 +102,19 @@ export class Sound {
     mix.connect(this.crusher).connect(this.master);
     this.master.connect(comp).connect(ctx.destination);
     this.bus = { steps: ctx.createGain(), voices: ctx.createGain(), tools: ctx.createGain(), music: ctx.createGain() };
-    Object.values(this.bus).forEach((g) => g.connect(mix));
+    const { voices, ...others } = this.bus;
+    Object.values(others).forEach((g) => g.connect(mix));
+    // voices get their own little channel strip: saturation, a treble shelf, then a room send
+    this.voiceSat = ctx.createWaveShaper();
+    this.voiceSat.oversample = '2x';
+    this.voiceShelf = ctx.createBiquadFilter();
+    this.voiceShelf.type = 'highshelf';
+    this.voiceShelf.frequency.value = 3500;
+    voices.connect(this.voiceSat).connect(this.voiceShelf).connect(mix);
+    const room = ctx.createConvolver();
+    room.buffer = roomImpulse(ctx);
+    this.roomSend = ctx.createGain();
+    this.voiceShelf.connect(this.roomSend).connect(room).connect(mix);
     // one second of white noise, shared by every noisy recipe
     this.noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = this.noise.getChannelData(0);
@@ -96,6 +132,9 @@ export class Sound {
     this.bus.tools.gain.value = s.tools;
     this.bus.music.gain.value = s.music;
     this.dry.gain.value = s.crunch ? 0 : 1;
+    this.roomSend.gain.value = this.voiceFx.room ? 0.14 : 0;
+    this.voiceSat.curve = this.voiceFx.warm ? satCurve(2.2) : null;
+    this.voiceShelf.gain.value = this.voiceFx.warm ? -6 : 0;
     this.crusher.disconnect();
     if (s.crunch) this.crusher.connect(this.master);
   }
@@ -137,11 +176,11 @@ export class Sound {
     return g;
   }
 
-  private noiseSrc(t: number, dur: number) {
+  private noiseSrc(t: number, dur: number, offset = Math.random()) {
     const s = this.ctx!.createBufferSource();
     s.buffer = this.noise;
     s.loop = true;
-    s.start(t, Math.random() * 0.9);
+    s.start(t, offset * 0.9);
     s.stop(t + dur + 0.05);
     return s;
   }
@@ -396,51 +435,123 @@ export class Sound {
       const u = n > 1 ? i / (n - 1) : 0;
       let pitch = v.f0 * (1.08 - 0.18 * u) * rand(0.95, 1.06);
       if (question && i === n - 1) pitch *= 1.3;
-      if (Math.random() < 0.45) this.consonant(t, o, v);
-      this.syllable(t, dur, pitch, VOWELS[Math.floor(Math.random() * VOWELS.length)], v, o, 0.32, question && i === n - 1 ? 1.15 : 0.95);
-      t += dur + rand(0.02, 0.06) / v.rate;
+      const glide = question && i === n - 1 ? 1.15 : 0.95;
+      if (this.voiceFx.hums && Math.random() < 0.12) {
+        // a whole "mm" / "mm-hm" syllable, mouth closed
+        this.hum(t, dur * 1.3, pitch, v, o, 0.3, glide);
+        t += dur * 1.3 + rand(0.02, 0.06) / v.rate;
+        continue;
+      }
+      let at = t;
+      if (this.voiceFx.hums && Math.random() < 0.35) {
+        // m/n onset: a short nasal murmur sliding into the vowel
+        const hd = rand(0.035, 0.06) / v.rate;
+        this.hum(t, hd + 0.02, pitch, v, o, 0.28, 1);
+        at = t + hd;
+      } else if (Math.random() < 0.45) this.consonant(t, o, v);
+      this.syllable(at, dur, pitch, VOWELS[Math.floor(Math.random() * VOWELS.length)], v, o, 0.32, glide);
+      t = at + dur + rand(0.02, 0.06) / v.rate;
     }
     this.talking.set(id, t);
   }
 
-  private syllable(t: number, dur: number, pitch: number, vowel: [number, number], v: Voice, out: AudioNode, peak: number, glide: number) {
+  /**
+   * The throat: a sawtooth with its top rolled off. Either a steady sine
+   * vibrato (classic) or, with `wobble`, the irregular drift and cycle-to-cycle
+   * jitter of a real voice.
+   */
+  private voiceSource(t: number, dur: number, pitch: number, glide: number) {
     const ctx = this.ctx!;
-    // glottal-ish source: a sawtooth with its top rolled off, a gentle vibrato
-    // and a little jitter, so it reads as a throat rather than a buzzer
     const src = this.tone('sawtooth', t, pitch, pitch * glide, dur);
-    const vib = ctx.createOscillator();
-    vib.frequency.value = rand(4.5, 6.5);
-    const vibAmt = ctx.createGain();
-    vibAmt.gain.value = pitch * 0.018;
-    vib.connect(vibAmt).connect(src.frequency);
-    vib.start(t);
-    vib.stop(t + dur + 0.05);
+    if (this.voiceFx.wobble) {
+      // slow wander: random targets every ~40 ms, ±25 cents, joined by ramps
+      src.detune.setValueAtTime(this.wob(-20, 20), t);
+      for (let k = 0.03 + this.wob(0, 1) * 0.03; k < dur + 0.05; k += this.wob(0.03, 0.06)) src.detune.linearRampToValueAtTime(this.wob(-25, 25), t + k);
+      // fast jitter: low-passed noise on the pitch (±~10 cents)
+      const jit = this.noiseSrc(t, dur, this.wob(0, 1));
+      const jg = ctx.createGain();
+      jg.gain.value = 260;
+      jit.connect(this.filter('lowpass', 70, 0.5)).connect(jg).connect(src.detune);
+    } else {
+      const vib = ctx.createOscillator();
+      vib.frequency.value = this.wob(4.5, 6.5);
+      const vibAmt = ctx.createGain();
+      vibAmt.gain.value = pitch * 0.018;
+      vib.connect(vibAmt).connect(src.frequency);
+      vib.start(t);
+      vib.stop(t + dur + 0.05);
+    }
     const glottal = this.filter('lowpass', Math.min(2200, pitch * 7), 0.3);
     src.connect(glottal);
+    if (!this.voiceFx.wobble) return glottal as AudioNode;
+    // shimmer: a little uneven loudness from cycle to cycle
+    const sh = ctx.createGain();
+    sh.gain.setValueAtTime(1, t);
+    for (let k = 0.02; k < dur + 0.05; k += this.wob(0.02, 0.04)) sh.gain.linearRampToValueAtTime(this.wob(0.8, 1.1), t + k);
+    return glottal.connect(sh);
+  }
 
-    const g = ctx.createGain();
-    peak *= Sound.VOICE_GAIN;
+  /** Syllable envelope: quick swell, sustain, fade. */
+  private voiceEnv(t: number, dur: number, peak: number) {
+    const g = this.ctx!.createGain();
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(peak, t + 0.025);
     g.gain.setValueAtTime(peak * 0.8, t + dur * 0.7);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    return g;
+  }
 
-    // wide-ish formants (narrow ones ring like metal) + a warm body
-    const band = (f: number, q: number, gain: number) => {
-      const bf = this.filter('bandpass', f, q);
-      const bg = ctx.createGain();
-      bg.gain.value = gain;
-      glottal.connect(bf).connect(bg).connect(g);
-    };
-    band(vowel[0] * v.formant, 3, 1);
-    band(vowel[1] * v.formant, 4, 0.45);
-    band(2600 * v.formant, 5, 0.1);
-    band(380 * v.formant, 1, 0.35);
+  private syllable(t: number, dur: number, pitch: number, vowel: [number, number], v: Voice, out: AudioNode, peak: number, glide: number) {
+    const ctx = this.ctx!;
+    const src = this.voiceSource(t, dur, pitch, glide);
+    const g = this.voiceEnv(t, dur, peak * Sound.VOICE_GAIN);
+    if (this.voiceFx.cascade) {
+      // resonators in series, like a vocal tract: each formant is a resonant
+      // low-pass, so there's nothing to cancel between them and the natural
+      // high-frequency roll-off comes for free (resonance in dB for lowpass)
+      const f1 = this.filter('lowpass', vowel[0] * v.formant, 9);
+      const f2 = this.filter('lowpass', vowel[1] * v.formant, 11);
+      const f3 = this.filter('lowpass', 2600 * v.formant, this.voiceFx.softRing ? 1.5 : 6);
+      const lift = this.filter('highshelf', 900 * v.formant, 0); // put back some presence the chain rolls off
+      lift.gain.value = 9;
+      const mk = ctx.createGain();
+      mk.gain.value = 0.32;
+      src.connect(f1).connect(f2).connect(f3).connect(lift).connect(mk).connect(g);
+    } else {
+      // wide-ish formants (narrow ones ring like metal) + a warm body
+      const band = (f: number, q: number, gain: number) => {
+        const bf = this.filter('bandpass', f, q);
+        const bg = ctx.createGain();
+        bg.gain.value = gain;
+        src.connect(bf).connect(bg).connect(g);
+      };
+      band(vowel[0] * v.formant, 3, 1);
+      band(vowel[1] * v.formant, 4, 0.45);
+      if (this.voiceFx.softRing) band(2600 * v.formant, 1.5, 0.05);
+      else band(2600 * v.formant, 5, 0.1);
+      band(380 * v.formant, 1, 0.35);
+    }
     // breath
     this.noiseSrc(t, dur).connect(this.filter('bandpass', 1300 * v.formant, 0.8)).connect(this.env(t, 0.035, 0.02, dur)).connect(g);
 
     const top = this.filter('lowpass', 3000, 0.5);
     g.connect(top).connect(out);
+  }
+
+  /**
+   * Mouth closed: a nasal murmur. Low resonance around 250 Hz, a dip around
+   * 1 kHz where the closed mouth swallows energy, and very little above.
+   */
+  private hum(t: number, dur: number, pitch: number, v: Voice, out: AudioNode, peak: number, glide: number) {
+    const src = this.voiceSource(t, dur, pitch, glide);
+    const g = this.voiceEnv(t, dur, peak * Sound.VOICE_GAIN);
+    const nasal = this.filter('lowpass', 280 * v.formant, 8);
+    const dip = this.filter('notch', 1000 * v.formant, 2);
+    const ring = this.filter('peaking', 2100 * v.formant, 3);
+    ring.gain.value = 4;
+    const mk = this.ctx!.createGain();
+    mk.gain.value = 0.55;
+    src.connect(nasal).connect(dip).connect(ring).connect(mk).connect(g).connect(out);
   }
 
   /** Narrow formant filters eat a lot of energy: make up for it here. */
@@ -486,6 +597,39 @@ export class Sound {
       }
     }
   }
+}
+
+/** A small, soft room: a few early reflections, then a short dark tail. */
+function roomImpulse(ctx: BaseAudioContext) {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * 0.45);
+  const buf = ctx.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const tt = i / sr;
+      // dark noise tail: one-pole low-pass on white noise, gone in ~0.3 s
+      lp += 0.25 * (Math.random() * 2 - 1 - lp);
+      d[i] = lp * Math.exp(-tt / 0.06) * 0.5;
+    }
+    for (const [ms, a] of [[7, 0.35], [13, 0.22], [21, 0.15], [31, 0.1]]) {
+      const i = Math.floor(((ms + c * 2.5) / 1000) * sr);
+      d[i] += a * (c ? 0.9 : 1);
+    }
+  }
+  return buf;
+}
+
+/** Soft clipping (tanh), normalised so small signals pass at unity gain. */
+function satCurve(drive: number) {
+  const n = 2048;
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = Math.tanh(x * drive) / drive;
+  }
+  return c;
 }
 
 /** Bit-depth reduction curve for the optional retro crunch. */

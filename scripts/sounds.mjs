@@ -25,6 +25,8 @@ const RECIPES = {
   'talk-mid': [2.6, `at(0, () => s.phrase(1, V.mid, C)); at(1.3, () => s.phrase(2, V.mid, C));`],
   'talk-high': [2.6, `at(0, () => s.phrase(1, V.high, C)); at(1.3, () => s.phrase(2, V.high, C));`],
   'conversation': [4.5, `[0, 0.9, 1.7, 2.6, 3.4].forEach((t, k) => at(t, () => s.phrase(k, k % 2 ? V.high : V.deep, { pan: k % 2 ? 0.4 : -0.4, gain: 1 })));`],
+  'voice-before': [9, `const say = (t, k, fn) => at(t, () => { Math.random = R(100 + k); fn(); }); say(0.05, 1, () => s.phrase(1, V.deep, C)); say(1.35, 2, () => s.phrase(2, V.mid, C)); say(2.6, 3, () => s.phrase(3, V.high, C)); [3.9, 4.6, 5.3, 6.0].forEach((t, k) => say(t, 10 + k, () => s.phrase(10 + k, k % 2 ? V.high : V.deep, { pan: k % 2 ? 0.4 : -0.4, gain: 1 }))); say(7.0, 20, () => s.exclaim('hey', V.mid, C)); say(7.6, 21, () => s.exclaim('oof', V.deep, C)); say(8.2, 22, () => s.exclaim('grunt', V.mid, C));`, { wobble: false, cascade: false, hums: false, room: false, softRing: false, warm: false }],
+  'voice-now': [9, `const say = (t, k, fn) => at(t, () => { Math.random = R(100 + k); fn(); }); say(0.05, 1, () => s.phrase(1, V.deep, C)); say(1.35, 2, () => s.phrase(2, V.mid, C)); say(2.6, 3, () => s.phrase(3, V.high, C)); [3.9, 4.6, 5.3, 6.0].forEach((t, k) => say(t, 10 + k, () => s.phrase(10 + k, k % 2 ? V.high : V.deep, { pan: k % 2 ? 0.4 : -0.4, gain: 1 }))); say(7.0, 20, () => s.exclaim('hey', V.mid, C)); say(7.6, 21, () => s.exclaim('oof', V.deep, C)); say(8.2, 22, () => s.exclaim('grunt', V.mid, C));`],
   hammer: [2.6, `for (let k = 0; k < 3; k++) at(0.1 + k * 0.85, () => s.hammer(C));`],
   saw: [2.2, `for (let f = 0; f < 120; f++) { const u = f / 60 / 0.62; at(f / 60, () => s.saw(9, u < 3, Math.abs(Math.sin(Math.PI * 2 * u)), u % 1 < 0.5, C)); } at(2.05, () => s.saw(9, false, 0, false, C));`],
   'vocal-reactions': [3.6, `['oof', 'hup', 'grunt', 'gasp', 'hey'].forEach((k, i) => at(0.1 + i * 0.7, () => s.exclaim(k, V.mid, C)));`],
@@ -36,9 +38,12 @@ const RECIPES = {
 
 const NAMES = Object.keys(RECIPES).filter((n) => !only || n.includes(only));
 for (const name of NAMES) {
-  const [secs, body] = RECIPES[name];
-  const b64 = await pg.evaluate(async ([secs, body, seed]) => {
+  const [secs, body, fx] = RECIPES[name];
+  const b64 = await pg.evaluate(async ([secs, body, seed, fx]) => {
     const s = window.__mini.sound;
+    const rnd = Math.random;
+    const { defaultVoiceFx } = await import('/src/audio.ts');
+    s.voiceFx = { ...defaultVoiceFx, ...fx }; // recipes can switch the warmth off for comparison
     const T = await import('/src/tune.ts');
     const { mulberry32: RNG } = await import('/src/rng.ts');
     const sr = 44100;
@@ -65,6 +70,7 @@ for (const name of NAMES) {
     };
     new Function('s', 'at', 'C', 'V', 'T', 'R', 'SEED', body)(s, at, C, V, T, RNG, seed);
     const buf = await ctx.startRendering();
+    Math.random = rnd;
     // 16-bit stereo WAV
     const n = buf.length;
     const out = new DataView(new ArrayBuffer(44 + n * 4));
@@ -74,19 +80,20 @@ for (const name of NAMES) {
     out.setUint32(24, sr, true); out.setUint32(28, sr * 4, true); out.setUint16(32, 4, true); out.setUint16(34, 16, true);
     str(36, 'data'); out.setUint32(40, n * 4, true);
     const L = buf.getChannelData(0), R = buf.getChannelData(1);
-    let peak = 0;
+    let peak = 0, sq = 0;
     for (let i = 0; i < n; i++) {
       peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+      sq += L[i] * L[i] + R[i] * R[i];
       out.setInt16(44 + i * 4, Math.max(-1, Math.min(1, L[i])) * 32767, true);
       out.setInt16(46 + i * 4, Math.max(-1, Math.min(1, R[i])) * 32767, true);
     }
     const bytes = new Uint8Array(out.buffer);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    return { data: btoa(bin), peak };
-  }, [secs, body, seed]);
+    return { data: btoa(bin), peak, rms: Math.sqrt(sq / (2 * n)) };
+  }, [secs, body, seed, fx ?? {}]);
   writeFileSync(`screenshots/sounds/${name}.wav`, Buffer.from(b64.data, 'base64'));
-  console.log(`${name.padEnd(16)} peak ${b64.peak.toFixed(2)}`);
+  console.log(`${name.padEnd(16)} peak ${b64.peak.toFixed(2)}  rms ${b64.rms.toFixed(3)}`);
 }
 await b.close();
 await server.close();
