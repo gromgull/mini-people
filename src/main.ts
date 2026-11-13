@@ -4,7 +4,7 @@ import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
 import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
-import { createFog, createOutlineMaterial, createToonMaterial } from './materials';
+import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
 import { Clouds, createSky } from './environment';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
@@ -51,6 +51,7 @@ const settings = {
   autoActions: q.has('auto'),
   walk: q.has('walk'), // single mode: stroll a loop instead of standing still
   sky: q.get('sky') !== '0',
+  grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
 
@@ -85,12 +86,17 @@ let horizonFar = 30;
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
 const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: false, transparent: true });
 
-// ground uses the same toon material, just a different atlas row
+// ground: toon-lit like everything else, plus grass patches (falls back to plain toon)
+const groundMat = createGroundMaterial(atlas, fog, ROWS.ground[0]);
+groundMat.uniforms.uLightView = toon.uniforms.uLightView;
+groundMat.uniforms.uWrap = toon.uniforms.uWrap;
+let ground: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
 {
   const g = new THREE.PlaneGeometry(1600, 1600);
   g.rotateX(-Math.PI / 2);
   g.setAttribute('aRow', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(ROWS.ground[0]), 1));
-  scene.add(new THREE.Mesh(g, toon));
+  ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(g, toon);
+  scene.add(ground);
 }
 
 const VIEW_H = 6;
@@ -795,6 +801,15 @@ look.addColor(settings, 'outlineColor').name('outline color');
 look.add(settings, 'segments', 4, 16, 2).onFinishChange(rebuildAll);
 look.add(settings, 'eyes').onChange(rebuildAll);
 
+const grassF = look.addFolder('Ground').close();
+grassF.add(settings.grass, 'enabled').name('grass patches');
+grassF.add(settings.grass, 'scale', 1, 20, 0.1).name('patch size');
+grassF.add(settings.grass, 'ragged', 0, 0.4, 0.005).name('edge raggedness');
+grassF.add(settings.grass, 'tooth', 0.05, 1.5, 0.01).name('tooth size');
+grassF.add(settings.grass, 'contrast', 0, 2, 0.05).name('patch contrast');
+grassF.add(settings.grass, 'flowers', 0, 1, 0.01).name('flowers');
+grassF.add(settings.grass, 'flowerSize', 0.03, 0.1, 0.005).name('flower size');
+
 // ---------------------------------------------------------------- picking
 
 const ray = new THREE.Raycaster();
@@ -900,6 +915,13 @@ function frame() {
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
   toon.uniforms.uWrap.value = settings.wrap;
+  ground.material = settings.grass.enabled ? groundMat : toon;
+  groundMat.uniforms.uScale.value = settings.grass.scale;
+  groundMat.uniforms.uRagged.value = settings.grass.ragged;
+  groundMat.uniforms.uTooth.value = settings.grass.tooth;
+  groundMat.uniforms.uContrast.value = settings.grass.contrast;
+  groundMat.uniforms.uFlowers.value = settings.grass.flowers;
+  groundMat.uniforms.uFlowerSize.value = settings.grass.flowerSize;
   updateEnvironment(dt);
   outline.visible = settings.outline;
   cloudOutline.visible = settings.outline;
