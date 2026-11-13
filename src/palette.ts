@@ -16,6 +16,10 @@ export const PALETTE = {
   lips: ['#4a2420', '#6a2a28', '#8a3236', '#b0343e', '#c8404c', '#d86070', '#e88090'],
   ground: ['#7fae4c'],
   cloud: ['#fbfaf4'],
+  pine: ['#2e6a4c', '#38754f', '#2a5f47'],
+  bark: ['#6a4630', '#7a5236'],
+  leaf: ['#4e9a3a', '#5aa642', '#64a23c'],
+  apple: ['#d6372e', '#c42a2a', '#e04a2a'],
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

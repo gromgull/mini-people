@@ -6,6 +6,7 @@ import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, rand
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
 import { Clouds, Sun, createSky } from './environment';
+import { type Caster, Trees } from './trees';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -52,6 +53,7 @@ const settings = {
   autoActions: q.has('auto'),
   walk: q.has('walk'), // single mode: stroll a loop instead of standing still
   sky: q.get('sky') !== '0',
+  trees: q.get('trees') !== '0',
   grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
@@ -151,6 +153,8 @@ let people: Person[] = [];
 let selected = 0;
 const shadowGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
 const selectGeo = new THREE.RingGeometry(1.05, 1.25, 28).rotateX(-Math.PI / 2);
+const trees = new Trees(toon, outline, shadowGeo, shadowMat);
+scene.add(trees.group);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
 
@@ -819,6 +823,7 @@ grassF.add(settings.grass, 'tooth', 0.05, 1.5, 0.01).name('tooth size');
 grassF.add(settings.grass, 'contrast', 0, 2, 0.05).name('patch contrast');
 grassF.add(settings.grass, 'flowers', 0, 1, 0.01).name('flowers');
 grassF.add(settings.grass, 'flowerSize', 0.03, 0.1, 0.005).name('flower size');
+grassF.add(settings, 'trees');
 
 // ---------------------------------------------------------------- picking
 
@@ -858,15 +863,15 @@ function updateShadows(light: THREE.Vector3) {
   const h = Math.hypot(light.x, light.z);
   const yaw = h > 1e-4 ? Math.atan2(light.z, -light.x) : 0; // local +x → away from the sun
   const stretch = h > 1e-4 ? Math.min(h / Math.max(light.y, 1e-4), 3) : 0; // 1/tan(elevation)
-  for (const p of people) {
-    const s = p.root.userData.shadow;
-    if (!s) continue;
+  const orient = (s: Caster, parentYaw: number) => {
     const len = s.h * stretch * settings.shadowLength;
     const a = s.r + len * 0.5; // semi-major
-    s.pivot.rotation.y = yaw - p.root.rotation.y;
+    s.pivot.rotation.y = yaw - parentYaw;
     s.shadow.scale.set(a, 1, s.r);
     s.shadow.position.x = a - s.r; // near end stays at the feet
-  }
+  };
+  for (const p of people) if (p.root.userData.shadow) orient(p.root.userData.shadow, p.root.rotation.y);
+  if (trees.group.visible) for (const c of trees.casters) orient(c, 0);
 }
 
 const lightWorld = new THREE.Vector3();
@@ -946,6 +951,7 @@ function frame() {
   lightWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
+  trees.group.visible = settings.trees;
   updateShadows(lightWorld);
   toon.uniforms.uWrap.value = settings.wrap;
   ground.material = settings.grass.enabled ? groundMat : toon;
