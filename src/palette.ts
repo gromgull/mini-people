@@ -20,6 +20,9 @@ export const PALETTE = {
   bark: ['#6a4630', '#7a5236'],
   leaf: ['#4e9a3a', '#5aa642', '#64a23c'],
   apple: ['#d6372e', '#c42a2a', '#e04a2a'],
+  water: ['#4f9fc8', '#3b86b6'],
+  shore: ['#a8a070'],
+  stone: ['#8e8b85', '#a19c92', '#78756f'],
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

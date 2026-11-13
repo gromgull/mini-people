@@ -7,6 +7,7 @@ import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
 import { Clouds, Sun, createSky } from './environment';
 import { type Caster, Trees } from './trees';
+import { Pond } from './pond';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -54,6 +55,7 @@ const settings = {
   walk: q.has('walk'), // single mode: stroll a loop instead of standing still
   sky: q.get('sky') !== '0',
   trees: q.get('trees') !== '0',
+  pond: q.get('pond') !== '0',
   grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
@@ -155,6 +157,8 @@ const shadowGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
 const selectGeo = new THREE.RingGeometry(1.05, 1.25, 28).rotateX(-Math.PI / 2);
 const trees = new Trees(toon, outline, shadowGeo, shadowMat);
 scene.add(trees.group);
+const pond = new Pond(toon, outline);
+scene.add(pond.group);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
 
@@ -824,6 +828,7 @@ grassF.add(settings.grass, 'contrast', 0, 2, 0.05).name('patch contrast');
 grassF.add(settings.grass, 'flowers', 0, 1, 0.01).name('flowers');
 grassF.add(settings.grass, 'flowerSize', 0.03, 0.1, 0.005).name('flower size');
 grassF.add(settings, 'trees');
+grassF.add(settings, 'pond');
 
 // ---------------------------------------------------------------- picking
 
@@ -952,6 +957,8 @@ function frame() {
   camera.updateMatrixWorld();
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
   trees.group.visible = settings.trees;
+  pond.group.visible = settings.pond;
+  pond.update(simTime);
   updateShadows(lightWorld);
   toon.uniforms.uWrap.value = settings.wrap;
   ground.material = settings.grass.enabled ? groundMat : toon;

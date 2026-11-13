@@ -104,6 +104,7 @@ Handy for sharing a particular scene, e.g.
 | `grass=0` | plain ground, no grass patches |
 | `flowers` | flower density, 0–1 (0 = none) |
 | `trees=0` | no forest or apple trees |
+| `pond=0` | no pond |
 | `look` | where everyone looks: `auto` · `cursor` · `camera` · `selected` |
 | `mute` | start silent |
 | `nogui` | hide the panel |

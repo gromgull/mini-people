@@ -20,12 +20,12 @@ export interface Caster {
   h: number; // height (sets how long the shadow gets)
 }
 
-type Part = { geo: THREE.BufferGeometry; row: number };
+export type Part = { geo: THREE.BufferGeometry; row: number };
 
 const pick = <T>(r: () => number, a: readonly T[]) => a[Math.floor(r() * a.length)];
 
 /** Smooth, deterministic 3D wobble: same input position → same output, so welded seams stay closed. */
-function wobble(seed: number) {
+export function wobble(seed: number) {
   const r = mulberry32(seed);
   const waves = Array.from({ length: 5 }, () => ({
     d: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize().multiplyScalar(2 + r() * 3),
@@ -95,7 +95,7 @@ function appleTree(r: () => number, seed: number): { parts: Part[]; h: number; r
 }
 
 /** Faceted toon copy (flat normals) and a smooth, welded copy for the outline hull. */
-function bake(parts: Part[]) {
+export function bake(parts: Part[]) {
   const flat: THREE.BufferGeometry[] = [];
   const smooth: THREE.BufferGeometry[] = [];
   for (const { geo, row } of parts) {
