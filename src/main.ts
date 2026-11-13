@@ -48,6 +48,7 @@ const settings = {
   mode: (MODES.includes(q.get('mode') as Mode) ? q.get('mode') : 'parade') as Mode,
   speed: num('speed', WALK_SPEED),
   animFps: num('fps', 0), // 0 = smooth; 8–12 = classic sprite feel
+  maxFps: num('maxfps', 30), // render cap; 0 = every display refresh (60/120 Hz)
   follow: q.has('follow'),
   paused: q.has('paused'),
   gait: { ...defaultGait },
@@ -806,6 +807,7 @@ function select(i: number) {
 const look = gui.addFolder('Look');
 const refill = () => fillAtlas(atlas, settings.ramp);
 look.add(settings, 'pixelSize', 1, 8, 1).name('pixel size').onChange(resize);
+look.add(settings, 'maxFps', { '15': 15, '24': 24, '30': 30, '60': 60, uncapped: 0 }).name('max fps');
 look.add(settings, 'sky').name('sky & horizon');
 look.add(settings.ramp, 'bands', 1, 5, 1).onChange(refill);
 look.add(settings.ramp, 'smooth').onChange(refill);
@@ -1014,7 +1016,6 @@ function frame() {
   renderer.render(blitScene, blitCam);
 
   if (++frames === 2) (window as any).__mini = { ready: true, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
-  requestAnimationFrame(frame);
 }
 
 resize();
@@ -1027,4 +1028,21 @@ if (q.has('select')) {
   select(num('select', 0));
   if (q.has('focus')) focusSelected();
 }
+// Render at most settings.maxFps: pixel art gains nothing from 120 fps, and
+// each frame is ~2300 draw calls, so the cap is most of the CPU cost. rAF keeps
+// ticking at the display rate and frames that come too soon are skipped. The
+// schedule advances in fixed steps (not "now"), so on refresh rates that don't
+// divide evenly (75, 144 Hz…) the average still lands on the cap; a little slack
+// keeps 60/120 Hz on an exact every-2nd/4th rhythm.
+let lastRenderAt = -Infinity;
+function loop(now: number) {
+  requestAnimationFrame(loop);
+  if (settings.maxFps > 0) {
+    const step = 1000 / settings.maxFps;
+    if (now - lastRenderAt < step - 2) return;
+    lastRenderAt = Math.max(lastRenderAt + step, now - step); // don't bank up time after a stall
+  } else lastRenderAt = now;
+  frame();
+}
 frame();
+requestAnimationFrame(loop);

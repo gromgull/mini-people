@@ -97,6 +97,7 @@ Handy for sharing a particular scene, e.g.
 | `az` / `el` | camera angle |
 | `px` | pixel size |
 | `fps` | animate on twos (e.g. 10) |
+| `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `sky=0` | no sky or horizon |
