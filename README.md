@@ -101,7 +101,9 @@ Handy for sharing a particular scene, e.g.
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `sky=0` | no sky or horizon |
-| `sunaz` / `sunel` | sun azimuth / elevation in degrees (default 35 / 50) |
+| `time` | time of day in hours, 0–24 (default 10; 18 ≈ sunset, 0 = midnight) |
+| `daycycle=0` | stop the clock (by default a day passes in `daymin` minutes) |
+| `daymin` | real minutes per day when the clock runs (default 30) |
 | `grass=0` | plain ground, no grass patches |
 | `flowers` | flower density, 0–1 (0 = none) |
 | `trees=0` | no forest or apple trees |

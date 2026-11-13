@@ -66,3 +66,33 @@ export function daylight(el: number, out?: Daylight): Daylight {
   o.shadow = a.shadow + (b.shadow - a.shadow) * t;
   return o;
 }
+
+/** Highest the sun gets (at noon); at midnight it's this far below the horizon. */
+const MAX_EL = 55;
+/**
+ * World azimuths (degrees) of the noon sun and of the sunset. The default
+ * camera sits at azimuth 25 looking toward 205: the noon sun lights faces from
+ * front-right (the old default light), and the sun sets 20° off the view
+ * direction, so a zoomed-out default view watches it go down.
+ */
+const NOON_AZ = 35;
+const SUNSET_AZ = 185;
+
+/**
+ * The sun's position at a time of day (hours, 0–24): up at 06:00, highest at
+ * noon, down at 18:00; the same curve carries on below the horizon at night
+ * (the moon, opposite, is highest at midnight). The azimuth isn't a real sun's
+ * steady 15°/h: by day it sweeps from sunrise to sunset through noon (25°/h),
+ * and at night it creeps the rest of the way round (5°/h), so the light and the
+ * sunset both land where the default view wants them. Degrees.
+ */
+export function sunAt(hours: number) {
+  const h = ((hours % 24) + 24) % 24;
+  const dayRate = (SUNSET_AZ - NOON_AZ) / 6; // °/h between 06:00 and 18:00
+  const sunriseAz = NOON_AZ - 6 * dayRate;
+  const nightRate = (sunriseAz + 360 - SUNSET_AZ) / 12;
+  const az =
+    h >= 6 && h <= 18 ? NOON_AZ + (h - 12) * dayRate
+    : SUNSET_AZ + (h >= 18 ? h - 18 : h + 6) * nightRate;
+  return { az, el: MAX_EL * Math.sin(((h - 6) / 24) * Math.PI * 2) };
+}

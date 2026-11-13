@@ -7,7 +7,7 @@ import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
 import { Clouds, Sun, createSky } from './environment';
 import { type Caster, Trees } from './trees';
-import { daylight } from './daylight';
+import { daylight, sunAt } from './daylight';
 import { Pond } from './pond';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
@@ -40,8 +40,9 @@ const settings = {
   outline: q.get('outline') !== '0',
   outlinePx: 1,
   outlineColor: '#1a1410',
-  lightAz: num('sunaz', 35),
-  lightEl: num('sunel', 50), // below 0 the sun has set: dusk, then night with the moon
+  time: ((num('time', 10) % 24) + 24) % 24, // hours: sets the sun (and the moon opposite it)
+  dayCycle: q.get('daycycle') !== '0', // let the time of day run by itself
+  dayMinutes: num('daymin', 30), // real minutes per day when it does
   shadowLength: 1, // 0 = round blobs, 1 = as long as the sun angle says
   wrap: 0.35,
   ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
@@ -816,8 +817,10 @@ look.add(settings.ramp, 'shadowDepth', 0, 0.6, 0.01).name('shadow depth').onChan
 look.add(settings.ramp, 'hueShift', 0, 0.2, 0.005).name('hue shift').onChange(refill);
 look.add(settings.ramp, 'highlight', 0, 0.5, 0.01).onChange(refill);
 look.add(settings, 'wrap', 0, 1, 0.01).name('light wrap');
-look.add(settings, 'lightAz', -180, 180, 1).name('sun azimuth');
-look.add(settings, 'lightEl', -40, 90, 1).name('sun elevation');
+const timeF = gui.addFolder('Time of day');
+timeF.add(settings, 'time', 0, 24, 0.05).name('time (h)').decimals(2).listen();
+timeF.add(settings, 'dayCycle').name('run');
+timeF.add(settings, 'dayMinutes', 1, 120, 1).name('day length (min)');
 look.add(settings, 'shadowLength', 0, 1.5, 0.05).name('shadow length');
 look.add(settings, 'outline');
 look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
@@ -972,20 +975,23 @@ function frame() {
   if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
   controls.update();
 
-  const az = THREE.MathUtils.degToRad(settings.lightAz);
-  const el = THREE.MathUtils.degToRad(settings.lightEl);
+  // the clock: a whole day in settings.dayMinutes, stopped while paused
+  if (settings.dayCycle && !settings.paused) settings.time = (settings.time + (dt * 24) / (settings.dayMinutes * 60)) % 24;
+  const pos = sunAt(settings.time);
+  const az = THREE.MathUtils.degToRad(pos.az);
+  const el = THREE.MathUtils.degToRad(pos.el);
   sunWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
   moonWorld.copy(sunWorld).negate(); // a full moon, opposite the sun
   // shade by the sun while it's up, by the moon once it has set; never from
   // below the ground (the tint does the dimming)
-  lightWorld.copy(settings.lightEl > -3 ? sunWorld : moonWorld);
+  lightWorld.copy(pos.el > -3 ? sunWorld : moonWorld);
   const minY = Math.sin(THREE.MathUtils.degToRad(4));
   if (lightWorld.y < minY) {
     const h = Math.hypot(lightWorld.x, lightWorld.z) || 1;
     const k = Math.sqrt(1 - minY * minY) / h;
     lightWorld.set(lightWorld.x * k, minY, lightWorld.z * k);
   }
-  daylight(settings.lightEl, day);
+  daylight(pos.el, day);
   toon.uniforms.uTint.value.copy(day.tint);
   fog.uHaze.value.copy(day.horizon);
   shadowMat.opacity = day.shadow;
