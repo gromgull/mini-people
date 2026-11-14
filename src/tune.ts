@@ -11,6 +11,9 @@
  *
  * Everyone reads the same grid (slot = shared eighth-note count), so parts
  * always line up no matter when someone starts playing.
+ *
+ * A fourth part is for banjos: a rolling pattern of plucked chord tones
+ * under the fiddles, with the short fifth string droning on the off-beats.
  */
 
 /** One eighth-note slot: a new note of `hold` eighths, or hold 0 = still sounding. */
@@ -30,6 +33,8 @@ export const SECTION_BARS = 4;
 export const FORM_SLOTS = 4 * SECTION_BARS * 8; // A A B B, 8 eighths per bar
 export const PHRASE_SLOTS = SECTION_BARS * 8;
 export const VOICES = ['melody', 'harmony', 'bass'] as const;
+/** The banjo's part (parts[BANJO]). */
+export const BANJO = 3;
 
 const SCALE = [0, 2, 4, 5, 7, 9, 11];
 const D4 = 293.66;
@@ -174,7 +179,25 @@ export function makeTune(rnd: () => number): Tune {
     }
   });
 
-  return { chords, parts: [melody, harmony, bass] };
+  // ---- banjo: an eighth-note roll through each bar's chord, the drone string
+  // (A4, the open fifth string) on the off-beats; a different roll for B
+  const DRONE = 4;
+  const ROLLS = [
+    [0, 2, 'd', 7, 4, 2, 'd', 7], // forward roll
+    [0, 'd', 4, 7, 2, 'd', 4, 7],
+    [7, 4, 'd', 2, 0, 4, 'd', 2], // backward
+  ] as const;
+  // (picked from the progressions already chosen, not with fresh random draws,
+  // so adding the banjo didn't change any tune or anything else seeded after it)
+  const rollA = ROLLS[A_PROGS.indexOf(A) % ROLLS.length], rollB = ROLLS[(B_PROGS.indexOf(B) + 1) % ROLLS.length];
+  const banjo: Slot[] = [];
+  chords.forEach((root, b) => {
+    const roll = b < 8 ? rollA : rollB;
+    const base = root - 7; // the chord an octave down, from D3 up
+    for (const step of roll) banjo.push({ deg: step === 'd' ? DRONE : base + step, hold: 1 });
+  });
+
+  return { chords, parts: [melody, harmony, bass, banjo] };
 }
 
 /** The degree closest to `from` (within lo…hi) that passes `ok`. */
@@ -190,18 +213,27 @@ function nearest(from: number, ok: (d: number) => boolean, lo: number, hi: numbe
  * fiddling while nobody else is, so the square hears a new tune now and then.
  */
 let current = makeTune(Math.random);
-const playing = [0, 0, 0];
+const playing = [0, 0, 0, 0]; // fiddlers per part, then banjos
 
 export const tune = () => current;
 export function setTune(t: Tune) {
   current = t;
 }
 
-/** Join in: take the first free part (melody first). Returns the voice index. */
-export function joinBand(): number {
+/**
+ * Join in: a fiddle takes the first free part (melody first), a banjo plays
+ * the banjo part. Returns the part index. Starting while nobody else plays
+ * strikes up a new tune.
+ */
+export function joinBand(instrument: 'fiddle' | 'banjo' = 'fiddle'): number {
   if (playing.every((n) => n === 0)) current = makeTune(Math.random);
-  let v = playing.findIndex((n) => n === 0);
-  if (v < 0) v = playing.indexOf(Math.min(...playing));
+  if (instrument === 'banjo') {
+    playing[BANJO]++;
+    return BANJO;
+  }
+  const fid = playing.slice(0, BANJO);
+  let v = fid.findIndex((n) => n === 0);
+  if (v < 0) v = fid.indexOf(Math.min(...fid));
   playing[v]++;
   return v;
 }

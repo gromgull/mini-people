@@ -253,6 +253,7 @@ export class Crowd {
     if (!w) return;
     if (a.impact) sound.hammer(w);
     if (a.note) sound.fiddleNote(a.note.f, a.note.dur, w);
+    if (a.pluck) sound.banjoNote(a.pluck.f, w);
     if (a.beat && Math.random() < (a.partner >= 0 ? 0.55 : 0.2) && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
     if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
     for (const e of a.events) {

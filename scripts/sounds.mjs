@@ -14,7 +14,7 @@ const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-un
 const pg = await b.newPage();
 const errors = [];
 pg.on('pageerror', (e) => errors.push(String(e)));
-await pg.goto(`http://localhost:5192/?seed=${seed}&count=24&paused&nogui&mode=stand`);
+await pg.goto(`http://localhost:5192/demo.html?seed=${seed}&count=24&paused&nogui&mode=stand`);
 await pg.waitForFunction(() => window.__mini?.ready);
 
 // name → [seconds, script run inside the page with (s, at, C, voices)]
@@ -35,6 +35,7 @@ const RECIPES = {
   'claps': [4.4, `for (let k = 0; k < 8; k++) at(0.05 + k * 60 / 112, () => s.clap({ pan: k % 2 ? 0.2 : -0.2, gain: 1 }));`],
   'chores': [9, `['chop', 'chop', 'chop'].forEach((k, i) => at(0.1 + i * 0.6, () => s.chore(k, C))); at(1.9, () => s.chore('crack', C)); at(3.0, () => s.chore('whump', C)); at(4.0, () => s.chore('rustle', C)); at(4.3, () => s.chore('rustle', C)); at(4.7, () => s.chore('snap', C)); at(5.1, () => s.chore('crunch', C)); at(5.6, () => s.chore('crunch', C)); at(6.1, () => s.chore('whoosh', C)); at(6.7, () => s.chore('plop', C)); for (let k = 0; k < 14; k++) at(7.1 + k * 0.09, () => s.chore('tick', C)); at(7.3, () => s.chore('splash', C)); at(8.4, () => s.chore('splash', C));`],
   'meal': [7, `at(0.1, () => s.creak(C)); at(0.6, () => s.chore('scrape', C)); at(1.0, () => s.chore('scrape', C)); at(1.6, () => s.chore('crunch', C)); at(2.0, () => s.chore('munch', C)); at(2.9, () => s.chore('munch', C)); at(3.6, () => s.chore('gulp', C)); at(4.05, () => s.chore('gulp', C)); at(4.5, () => s.chore('gulp', C)); at(5.1, () => s.chore('clunk', C)); at(5.5, () => s.exclaim('ahh', V.mid, C)); at(6.3, () => s.exclaim('mmm', V.mid, C));`],
+  'banjo': [6, `const e8 = 30 / 112; const D = 293.66; const hz = (st) => D * 2 ** (st / 12); const roll = [-12, -8, 7, 0, -5, -8, 7, 0]; for (let b = 0; b < 4; b++) roll.forEach((st, k) => at(0.1 + (b * 8 + k) * e8, () => s.banjoNote(hz(st + [0, 5, 7, 0][b]), C))); [12, 14, 16, 19, 21, 19, 16, 14, 12, 16, 19, 24].forEach((st, k) => at(2.5 + k * e8, () => s.fiddleNote(hz(st - 12), e8, C)));`],
   'props': [1.6, `at(0.1, () => s.thunk(C, 1)); at(0.6, () => s.thunk(C, 0.8)); at(1.0, () => s.creak(C));`],
 };
 

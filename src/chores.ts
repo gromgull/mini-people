@@ -30,6 +30,10 @@ export interface ChoreOut {
   depart: boolean;
   /** Mouth open this frame (biting, chewing). */
   mouthOpen: boolean;
+  /** The shared beat clock (read). */
+  readonly beatTime: number;
+  /** A plucked string this frame (banjo). */
+  pluck: { f: number } | null;
 }
 
 export interface Chore {

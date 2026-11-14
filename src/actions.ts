@@ -10,12 +10,13 @@ import { type ActionPose, type PropKit, arm, envelope, lerp, mesh, smooth } from
 import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from './chores';
 import { type DineAsk, Dine } from './dine';
 import { Haul, type LogSpot } from './haul';
+import { Banjo } from './banjo';
 import type { PineSpec } from './trees';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
 const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -148,6 +149,8 @@ export class Actor {
   private chores: Partial<Record<ActionKind, Chore>> = {};
   /** Shared beat clock (beats since start), set by the caller every frame. */
   beatTime = 0;
+  /** A banjo string plucked this frame: frequency (Hz). */
+  pluck: { f: number } | null = null;
   /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
   note: { f: number; dur: number } | null = null;
   /** Which part of the tune this fiddler plays (0 melody, 1 harmony, 2 bass), −1 = not playing. */
@@ -181,14 +184,14 @@ export class Actor {
 
   /** Sawing a real log on a real sawhorse (village): its size; no conjured trestles. */
   private sawLog: { r: number; len: number } | null = null;
-  /** Sitting on a real bench (village): stay seated until standUp(). */
-  private sitOn: { until: number } | null = null;
+  private phrases: number | undefined;
 
   /** This person's chore of a kind (made on first use): for fitting props before starting it. */
   choreOf(kind: 'chop'): Chop;
   choreOf(kind: 'haul'): Haul;
-  choreOf(kind: 'chop' | 'haul'): Chore {
-    return (this.chores[kind] ??= kind === 'chop' ? new Chop(this.p, this.kit) : new Haul(this.p, this.kit));
+  choreOf(kind: 'banjo'): Banjo;
+  choreOf(kind: 'chop' | 'haul' | 'banjo'): Chore {
+    return (this.chores[kind] ??= kind === 'chop' ? new Chop(this.p, this.kit) : kind === 'haul' ? new Haul(this.p, this.kit) : new Banjo(this.p, this.kit));
   }
 
   start(
@@ -202,8 +205,10 @@ export class Actor {
       tree?: PineSpec;
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
-      /** Sitting: on a real bench (no conjured one), until standUp(). */
-      onBench?: boolean;
+      /** Music: how many phrases to play (default: to the end of the next full one). */
+      phrases?: number;
+      /** Sit down for it (on a conjured seat) and get up after. */
+      seated?: boolean;
     } = {},
   ) {
     if (this.kind === 'fall') return; // let them finish falling/getting up
@@ -217,7 +222,12 @@ export class Actor {
     this.holdSpeed = kind !== 'wave' && kind !== 'jump';
     this.stopNow = kind === 'fall';
     this.sawLog = opts.sawLog ?? null;
-    this.sitOn = kind === 'sit' && opts.onBench ? { until: Infinity } : null;
+    this.phrases = opts.phrases;
+    if (kind === 'fall') this.dropSeat(); // no staying seated through that
+    if (opts.seated && kind !== 'fall') {
+      this.sitDown({ conjure: true });
+      this.posture.autoUp = true;
+    }
     this.lastU = 0;
     this.lastStroke = -1;
     if (kind === 'hammer') this.showHammer(true);
@@ -235,6 +245,12 @@ export class Actor {
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
       if (kind === 'chop') (this.chore as Chop).aim(opts.tree ?? null);
       this.chore.start();
+    }
+    if (kind === 'banjo') {
+      const b = this.choreOf('banjo');
+      b.plan(this.beatTime, this.playLength(0.6, this.phrases));
+      this.chore = b;
+      b.start();
     }
     if (kind === 'haul') {
       const h = this.choreOf('haul');
@@ -332,13 +348,8 @@ export class Actor {
     this.fiddle.visible = this.bowMesh!.visible = true;
     // join the band: take a free part of the shared tune, and play to the end
     // of the next full phrase so we stop on a cadence, not mid-line
-    this.fiddleVoice = joinBand();
-    const eighth = 30 / BPM;
-    const now = this.beatTime * 2;
-    const lead = 0.5; // getting the fiddle up
-    const startSlot = now + lead / eighth;
-    const endSlot = (Math.floor(startSlot / PHRASE_SLOTS) + 2) * PHRASE_SLOTS;
-    this.fiddleDur = lead + (endSlot - startSlot) * eighth + 0.6;
+    this.fiddleVoice = joinBand('fiddle');
+    this.fiddleDur = this.playLength(0.5, this.phrases); // (0.5 s getting the fiddle up)
     this.bow.lastSlot = -1;
   }
 
@@ -564,20 +575,113 @@ export class Actor {
     return { h, z, crouch: (standY - (h + d.hipBelow * 0.9)) / d.legLen, benchZ: -z - d.thighLen * 0.05, depth: d.thighLen * 1.1 };
   }
 
-  /** Get up off a real bench (see start's `sitOn`). */
-  standUp() {
-    if (this.kind === 'sit' && this.sitOn) this.sitOn.until = Math.min(this.sitOn.until, this.t);
+  // ------------------------------------------------------------ seated or standing
+  //
+  // Sitting can also be a state that outlasts actions: sitDown() lowers them
+  // onto a seat (a real bench that's behind them, or a conjured one) and they
+  // stay seated through whatever they do next (play, talk, …) until getUp().
+  // Each frame the seat is layered onto whatever pose the action asks for.
+
+  private posture = { want: false, k: 0, conjured: false, autoUp: false, creaked: false };
+
+  /** Sit down on a seat behind them: a real one, or (conjure) one that appears. */
+  sitDown(opts: { conjure?: boolean } = {}) {
+    const f = this.sitFit();
+    Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
+    if (!this.posture.want && this.posture.k === 0) this.posture.creaked = false;
+    this.posture.want = true;
+    if (opts.conjure && this.posture.k === 0) {
+      this.makeBench();
+      this.posture.conjured = true;
+    }
+  }
+
+  getUp() {
+    this.posture.want = false;
+    this.posture.autoUp = false;
+  }
+
+  /** Fully down on the seat. */
+  get seated() {
+    return this.posture.want && this.posture.k >= 1;
+  }
+
+  /** On the seat, or on the way down or up. */
+  get onSeat() {
+    return this.posture.want || this.posture.k > 0;
+  }
+
+  private dropSeat() {
+    this.posture.want = false;
+    this.posture.k = 0;
+    this.posture.autoUp = false;
+    if (this.posture.conjured && this.bench) this.bench.visible = false;
+    this.posture.conjured = false;
+  }
+
+  /** Layer the seat (and its transitions) onto this frame's pose. */
+  private applyPosture(dt: number, pose: ActionPose | null, tempo: number): ActionPose | null {
+    const ps = this.posture;
+    if (ps.autoUp && !this.kind) this.getUp();
+    if (!ps.want && ps.k === 0) return pose;
+    const tDown = 0.9 / Math.sqrt(tempo);
+    const tUp = 0.8 / Math.sqrt(tempo);
+    const was = ps.k;
+    ps.k = ps.want ? Math.min(1, ps.k + dt / tDown) : Math.max(0, ps.k - dt / tUp);
+    if (ps.want && was < 0.85 && ps.k >= 0.85 && !ps.creaked) {
+      ps.creaked = true;
+      this.events.push('creak');
+    }
+    const P = pose ?? this.pose;
+    if (!pose) {
+      P.crouch = P.sitZ = P.lift = P.spineY = P.spineZ = P.spin = P.fwd = P.spineX = P.headX = P.headY = P.headZ = 0;
+      Object.assign(P.arms.L, arm());
+      Object.assign(P.arms.R, arm());
+    }
+    const k = smooth(ps.k);
+    const moving = ps.k > 0 && ps.k < 1 ? Math.sin(Math.PI * k) : 0;
+    // push the hips back first, then drop: reads as lowering onto a seat
+    P.sitZ = this.seat.z * smooth(Math.min(1, k * 1.6));
+    P.crouch += this.seat.crouch * smooth(Math.max(0, (k - 0.15) / 0.85));
+    P.spineX += 0.45 * moving - 0.04 * k;
+    P.headX -= 0.2 * moving;
+    for (const sd of ['L', 'R'] as const) {
+      // hands on the thighs unless the action has them busy
+      if (P.arms[sd].w < 0.01) Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
+    }
+    if (ps.conjured && this.bench) {
+      this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, smooth(Math.min(1, ps.k * 2.5))));
+      this.bench.visible = true;
+    }
+    if (!ps.want && ps.k === 0) this.dropSeat();
+    // seated (or getting there): going nowhere; once up, an idle person may walk again
+    this.holdSpeed = this.kind ? this.holdSpeed || this.onSeat : this.onSeat;
+    return P;
+  }
+
+  // ------------------------------------------------------------ music
+
+  /** The playing window for an instrument starting now: to the end of the `phrases`-th full phrase from here. */
+  private playLength(lead: number, phrases = 2) {
+    const eighth = 30 / BPM;
+    const startSlot = this.beatTime * 2 + lead / eighth;
+    const endSlot = (Math.floor(startSlot / PHRASE_SLOTS) + phrases) * PHRASE_SLOTS;
+    return lead + (endSlot - startSlot) * eighth + 0.6;
+  }
+
+  /** Stop playing: at the end of this phrase, or (now) right away. */
+  stopPlaying(now = false) {
+    const eighth = 30 / BPM;
+    const slot = this.beatTime * 2;
+    const toPhrase = (Math.ceil(slot / PHRASE_SLOTS + 1e-6) * PHRASE_SLOTS - slot) * eighth;
+    const end = this.t + (now ? 0.5 : toPhrase + 0.6);
+    if (this.kind === 'fiddle') this.fiddleDur = Math.min(this.fiddleDur, end);
+    if (this.kind === 'banjo') this.choreOf('banjo').stopAt(end);
   }
 
   private makeBench() {
     const p = this.p;
     const d = p.dims;
-    if (this.sitOn) {
-      // a real bench is there: just the numbers
-      const f = this.sitFit();
-      Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
-      return;
-    }
     if (!this.bench) {
       const g = boxGeo();
       this.bench = new THREE.Group();
@@ -643,10 +747,15 @@ export class Actor {
 
   /** Before the animator: returns overrides (or null when idle). */
   pre(dt: number, m: Motion, st: Style): ActionPose | null {
+    return this.applyPosture(dt, this.preAction(dt, m, st), st.tempo);
+  }
+
+  private preAction(dt: number, m: Motion, st: Style): ActionPose | null {
     this.impact = false;
     this.dust = false;
     this.beat = false;
     this.note = null;
+    this.pluck = null;
     this.sawSpeed = 0;
     this.events.length = 0;
     this.bursts.length = 0;
@@ -797,11 +906,10 @@ export class Actor {
       }
 
       case 'sit': {
-        const tIn = this.sitOn ? 0 : 0.35; // bench appears (a real one is already there)
+        const tIn = 0.35; // bench appears
         const tDown = 0.9 / Math.sqrt(tempo);
         const tUp = 0.8 / Math.sqrt(tempo);
-        // when they get up: after a while, or (on a real bench) when told to
-        const upAt = this.sitOn ? Math.max(this.sitOn.until, tIn + tDown) : tIn + tDown + 6;
+        const upAt = tIn + tDown + 6;
         const dur = upAt + tUp + 0.25;
         if (t >= dur) return this.finish();
         let k = 0; // 0 standing → 1 seated
@@ -818,7 +926,7 @@ export class Actor {
         P.spineX = 0.45 * moving - 0.04 * k; // lean forward to balance, then sit up
         P.headX = -0.2 * moving;
         const pop = t < tIn ? smooth(t / tIn) : t > dur - 0.25 ? smooth((dur - t) / 0.25) : 1;
-        if (this.bench && !this.sitOn) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
+        if (this.bench) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
         for (const sd of ['L', 'R'] as const) {
           // hands rest on the thighs; push off them when moving
           Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });

@@ -32,8 +32,8 @@ export interface Village {
   removeLog(l: Log): void;
   treeObstacle(t: Tree): Obstacle | null;
   horseObstacle: Obstacle;
-  bench: Bench;
-  benchObstacle: Obstacle;
+  /** Somewhere to sit (with the obstacle to step past onto it). */
+  benches: { bench: Bench; obstacle: Obstacle }[];
   time: number;
   /** Bookkeeping for the overlay and the tests. */
   stats: { felled: number; sawn: number };
@@ -44,7 +44,12 @@ export interface Worker {
   actor: Actor;
   walker: Walker;
   root: THREE.Object3D;
+  /** What they play when they've time on their hands. */
+  instrument: 'fiddle' | 'banjo' | null;
 }
+
+/** Steps that aren't work: sitting about and playing. */
+const LEISURE = new Set(['to bench', 'sitting', 'playing', 'getting up']);
 
 type Step = { kind: string; [k: string]: unknown };
 
@@ -82,7 +87,8 @@ export abstract class Job {
 
   /** Called every simulation step, before walking. */
   tick(v: Village) {
-    this.run(v);
+    if (LEISURE.has(this.step.kind)) this.leisureStep(v);
+    else this.run(v);
     const a = this.w.actor;
     // interrupted while carrying (tripped, shoved): drop it here (but a
     // carry that just ended because it was put down is the routine's to handle)
@@ -99,6 +105,96 @@ export abstract class Job {
   }
 
   protected abstract run(v: Village): void;
+  /** Is there something for them to do right now? (Leisure ends when there is.) */
+  protected abstract hasWork(v: Village): boolean;
+
+  // ------------------------------------------------------------ time on their hands
+
+  private restAfter = 0;
+  private nextTune = 0;
+  private wasPlaying = false;
+
+  /**
+   * Nothing to do: now and then go and sit on a free bench (and maybe play
+   * there), or play standing where they are. Returns whether they started
+   * something. Any of it stops as soon as there's work.
+   */
+  protected leisure(v: Village) {
+    if (v.time < this.restAfter) return false;
+    this.restAfter = v.time + 5 + Math.random() * 6;
+    const r = Math.random();
+    const me = this.w.walker;
+    const free = v.benches.filter((b) => b.bench.claimedBy < 0);
+    if (free.length && r < 0.6) {
+      const b = free.reduce((a, b) => (Math.hypot(b.bench.x - me.x, b.bench.z - me.z) < Math.hypot(a.bench.x - me.x, a.bench.z - me.z) ? b : a));
+      b.bench.claimedBy = this.w.i;
+      const at = b.bench.sitSpot(0.22);
+      this.go(at.x, at.z, at.yaw, b.obstacle, 'ahead');
+      this.step = { kind: 'to bench', bench: b };
+      return true;
+    }
+    if (this.w.instrument && r < 0.85) {
+      this.play();
+      this.step = { kind: 'playing' };
+      return true;
+    }
+    return false;
+  }
+
+  private play() {
+    this.w.actor.start(this.w.instrument!, { phrases: 2 + Math.floor(Math.random() * 2) }); // (the rest of this phrase, then one or two more)
+    this.wasPlaying = true;
+  }
+
+  private leisureStep(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const bench = (s.bench as { bench: Bench } | undefined)?.bench;
+    const work = this.hasWork(v);
+    switch (s.kind) {
+      case 'to bench':
+        if (work) {
+          bench!.claimedBy = -1;
+          this.w.walker.stop();
+          this.step = { kind: 'idle' };
+        } else if (this.arrived) {
+          a.sitDown();
+          this.nextTune = v.time + 2 + Math.random() * 4;
+          this.step = { ...s, kind: 'sitting' };
+        }
+        return;
+      case 'sitting':
+        if (work) {
+          if (a.busy) a.stopPlaying(true);
+          a.getUp();
+          this.step = { ...s, kind: 'getting up' };
+          return;
+        }
+        if (this.wasPlaying && !a.busy) {
+          // a tune done: sit a while before the next
+          this.wasPlaying = false;
+          this.nextTune = v.time + 4 + Math.random() * 10;
+        }
+        if (!a.busy && a.seated && this.w.instrument && v.time >= this.nextTune) this.play();
+        return;
+      case 'playing':
+        if (work && a.busy) a.stopPlaying(true);
+        if (!a.busy) {
+          this.wasPlaying = false;
+          this.step = { kind: 'idle' };
+        }
+        return;
+      case 'getting up':
+        if (a.busy) a.stopPlaying(true);
+        if (!a.busy) a.getUp(); // (a tune that was still being put away)
+        if (!a.busy && !a.onSeat) {
+          bench!.claimedBy = -1;
+          this.wasPlaying = false;
+          this.step = { kind: 'idle' };
+        }
+        return;
+    }
+  }
   /** Undo bookkeeping after an interrupted carry. */
   protected dropped(_v: Village) {}
 
@@ -141,6 +237,13 @@ export class Lumberjack extends Job {
     v.pile.incoming = Math.max(0, v.pile.incoming - 1);
   }
 
+  protected hasWork(v: Village) {
+    const loose = looseLogs(v);
+    const room = v.pile.count + v.pile.incoming < v.pile.slots.length;
+    if (room && loose.length) return true;
+    return v.pile.count + v.pile.incoming + loose.length < PILE_WANT && v.forest.trees.some((t) => t.state === 'standing' && t.claimedBy < 0);
+  }
+
   protected run(v: Village) {
     const s = this.step;
     const a = this.w.actor;
@@ -172,6 +275,7 @@ export class Lumberjack extends Job {
             return;
           }
         }
+        if (this.leisure(v)) return;
         this.waitUntil = v.time + 1.5;
         return;
       }
@@ -301,14 +405,11 @@ export class Lumberjack extends Job {
 }
 
 export class Woodworker extends Job {
-  /** Not before then will they go and sit down again. */
-  private restAfter = 0;
-
   constructor(w: Worker) {
     super(w, 'woodworker');
   }
 
-  private workWaiting(v: Village) {
+  protected hasWork(v: Village) {
     return !v.horse.log && v.pile.count > 0;
   }
 
@@ -319,61 +420,18 @@ export class Woodworker extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (this.workWaiting(v)) {
+        if (this.hasWork(v)) {
           const spot = v.pile.workSpot(_v, 0.3);
           this.go(spot.x, spot.z, facing(spot.x, spot.z, v.pile.x, v.pile.z));
           this.step = { kind: 'to pile' };
           return;
         }
-        // nothing to do: now and then go and sit on the bench for a bit
-        if (v.time >= this.restAfter && v.bench.claimedBy < 0) {
-          if (Math.random() < 0.6) {
-            v.bench.claimedBy = this.w.i;
-            const at = v.bench.sitSpot(0.22);
-            this.go(at.x, at.z, at.yaw, v.benchObstacle, 'ahead');
-            this.step = { kind: 'to bench' };
-            return;
-          }
-          this.restAfter = v.time + 8;
-        }
+        if (this.leisure(v)) return;
         // otherwise wait at the sawhorse
         const at = horse.sawSpot();
         const w = this.w.walker;
         if (Math.hypot(w.x - at.x, w.z - at.z) > 0.3 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw, v.horseObstacle);
         this.waitUntil = v.time + 1;
-        return;
-      }
-      case 'to bench': {
-        if (this.workWaiting(v)) {
-          // a log's come in: never mind
-          v.bench.claimedBy = -1;
-          this.w.walker.stop();
-          this.step = { kind: 'idle' };
-          return;
-        }
-        if (!this.arrived) return;
-        a.start('sit', { onBench: true });
-        this.step = { kind: 'sitting' };
-        return;
-      }
-      case 'sitting': {
-        if (!a.busy) {
-          // (knocked off it somehow)
-          v.bench.claimedBy = -1;
-          this.step = { kind: 'idle' };
-          return;
-        }
-        if (this.workWaiting(v)) {
-          a.standUp();
-          this.step = { kind: 'getting up' };
-        }
-        return;
-      }
-      case 'getting up': {
-        if (a.busy) return;
-        v.bench.claimedBy = -1;
-        this.restAfter = v.time + 10;
-        this.step = { kind: 'idle' };
         return;
       }
       case 'to pile': {

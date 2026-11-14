@@ -55,6 +55,8 @@ stage.scene.add(forest.group);
 
 type Role = 'lumberjack' | 'woodworker';
 const ROLES: Role[] = ['lumberjack', 'woodworker'];
+/** What each plays in their spare time. */
+const INSTRUMENT: Record<Role, 'fiddle' | 'banjo'> = { lumberjack: 'fiddle', woodworker: 'banjo' };
 const people = ROLES.map((_, i) => crowd.spawn(randomGenome(settings.seed * 100003 + 17 + i * 5), i));
 const r = mulberry32(settings.seed * 31 + 7);
 crowd.people = people;
@@ -145,13 +147,12 @@ const village: Village = {
   removeLog,
   treeObstacle: (t) => treeObstacles.get(t.id) ?? null,
   horseObstacle,
-  bench,
-  benchObstacle,
+  benches: [{ bench, obstacle: benchObstacle }],
   time: 0,
   stats: { felled: 0, sawn: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
-  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root };
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]] };
   return ROLES[i] === 'lumberjack' ? new Lumberjack(w) : new Woodworker(w);
 });
 

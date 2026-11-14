@@ -42,6 +42,8 @@ const shots = process.argv[2]
       ['act-eat-fish', 'mode=stand&count=1&seed=4&select=0&focus&zoom=4&el=12&az=-25&act=eat&meal=fish&actAt=0.1&t=5.4&paused&nogui'],
       ['wander-dine', 'mode=wander&seed=5&count=30&t=40&paused&nogui'],
       ['act-haul', 'mode=single&seed=1&who=3&act=haul&actAt=0.1&zoom=2.5&az=60&el=15&t=3&paused&nogui'],
+      ['act-banjo', 'mode=single&seed=1&who=3&act=banjo&actAt=0.1&zoom=3&az=20&el=12&t=2.5&paused&nogui'],
+      ['act-banjo-seated', 'mode=single&seed=4&act=banjo&actAt=0.1&sitplay&zoom=3&az=30&el=12&t=3&paused&nogui'],
       ['village', 'mode=wander&count=30&seed=1&nogui&zoom=0.42&tz=-8&el=45&time=17.5&daycycle=0&t=3&paused'],
       ['inn', 'mode=stand&count=1&seed=1&nogui&zoom=0.9&tx=-4&tz=-12&az=75&el=22&t=1&paused'],
       ['cabin', 'mode=stand&count=1&seed=1&nogui&zoom=1.1&tx=-0.5&tz=-19&az=30&el=30&t=1&paused'],

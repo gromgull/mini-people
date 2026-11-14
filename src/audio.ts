@@ -304,6 +304,36 @@ export class Sound {
     this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 2400, 1.5)).connect(this.env(t, 0.035, 0.003, 0.04)).connect(o);
   }
 
+  /**
+   * A banjo string: a bright pluck that dies fast. The skin head gives it a
+   * nasal ring (a resonance around 1.8 kHz) and the filter closes as the
+   * note decays; a click from the fingernail on the attack.
+   */
+  banjoNote(f: number, w: Where) {
+    if (!this.live || !this.allow('music')) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005;
+    const o = this.out('music', w);
+    const decay = 0.9 * Math.min(1, 330 / f) + 0.25;
+    const lp = this.filter('lowpass', 5200, 1.2);
+    lp.frequency.setValueAtTime(5200, t);
+    lp.frequency.exponentialRampToValueAtTime(1100, t + decay * 0.5);
+    const head = this.filter('peaking', 1800, 2.2);
+    head.gain.value = 7;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.linearRampToValueAtTime(0.34, t + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    const saw = this.tone('sawtooth', t, f * 1.008, f, decay);
+    const oct = this.tone('triangle', t, f * 2.01, f * 2, decay * 0.6);
+    const ov = ctx.createGain();
+    ov.gain.value = 0.35;
+    saw.connect(lp);
+    oct.connect(ov).connect(lp);
+    lp.connect(head).connect(this.filter('highpass', 140, 0.7)).connect(env).connect(o);
+    this.noiseSrc(t, 0.012).connect(this.filter('bandpass', 3200, 2)).connect(this.env(t, 0.08, 0.0005, 0.008)).connect(o);
+  }
+
   /** A swept noise band: whooshes, rustles, splashes. */
   private noiseSweep(t: number, o: AudioNode, f0: number, f1: number, q: number, peak: number, attack: number, dur: number) {
     const f = this.filter('bandpass', f0, q);

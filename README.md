@@ -63,7 +63,7 @@ Audio from the same genome, with no samples:
   - *single*: one person up close. With *walk* on, they stroll a loop while
     acting.
 - **Actions:** wave, hammer, jump, trip, carry a box, sit on a bench, talk
-  (with turn-taking, nods and gestures), saw a log, fiddle, dance, chop down a
+  (with turn-taking, nods and gestures), saw a log, fiddle, play the banjo, dance, chop down a
   pine, pick an apple, and fish. Apples and fish are carried off afterwards.
   Sit down at a farmhouse table (shuffling the bench in) to eat an apple or a
   fish, or to drink from a tankard; asking for more while seated adds to the
@@ -90,6 +90,7 @@ Audio from the same genome, with no samples:
 | `1`–`9`, `0` | wave / hammer / jump / trip / carry / sit / talk / saw / fiddle / dance |
 | `C` / `A` / `F` | chop a tree / pick an apple / fish |
 | `T` / `E` / `D` | sit at a table / eat / drink |
+| `H` / `B` | haul a log / play the banjo (tick "musicians sit down" to play seated) |
 | `S` | show / hide the fps overlay |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
@@ -149,9 +150,12 @@ So far it has one chain:
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
   logs and a stump), then carry each log to the pile on their shoulder.
 - **The woodworker** carries logs from the pile to their own sawhorse, which
-  is built to their height, and saws them. Between logs they often go and
-  sit on their bench (also built to their height) and get up again when a
-  log comes in.
+  is built to their height, and saws them.
+- **Spare time:** with nothing to do, people now and then sit on a free
+  bench (built to the woodworker's height) or play their instrument, the
+  woodworker a banjo and the lumberjack a fiddle, standing or seated. They
+  stop, get up and go as soon as there's work. Everyone plays the same
+  shared tune, so whoever's playing plays together.
 - **Stumps grow back:** a sapling appears after about a minute and becomes a
   full tree over about two more.
 
@@ -223,6 +227,7 @@ once.
 | `src/demo.ts` | the demo: modes, GUI, input |
 | `src/village/` | the village: `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (the lumberjack's and woodworker's routines), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
+| `src/banjo.ts` | playing the banjo (the shared tune's banjo part), standing or seated |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)
 and [Vite](https://vitejs.dev/).
