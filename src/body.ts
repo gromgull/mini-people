@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { type BodyDims, type Genome, deriveBody } from './genome';
 import { ROWS } from './palette';
+import { type Skin, bakeSkin } from './skin';
 
 /**
  * Rig: a fixed hierarchy of joint nodes (plain Object3Ds). Every person has
@@ -19,6 +20,8 @@ export type JointName = (typeof JOINTS)[number];
 export interface BuildOptions {
   segments: number;
   eyes: boolean;
+  /** Skinned materials: merge the body into one draw call (see skin.ts). */
+  skin?: { toon: THREE.ShaderMaterial; outline: THREE.ShaderMaterial } | null;
 }
 
 /** A googly eye: `pivot` sits in the head, `pupil` is moved over the eyeball. */
@@ -38,6 +41,8 @@ export interface Person {
   dims: BodyDims;
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
+  /** The merged one-draw-call body, when built with `skin`. */
+  skin: Skin | null;
   dispose(): void;
 }
 
@@ -463,6 +468,8 @@ export function buildPerson(
   // tilt so they look a tiny bit alive even static
   head.rotation.x = 0.05;
 
+  const merged = opts.skin ? bakeSkin(root, toon, opts.skin, d.height) : null;
+
   return {
     genome,
     eyes,
@@ -471,6 +478,10 @@ export function buildPerson(
     dims: d,
     root,
     joints,
-    dispose: () => geos.forEach((g) => g.dispose()),
+    skin: merged,
+    dispose: () => {
+      geos.forEach((g) => g.dispose());
+      merged?.dispose();
+    },
   };
 }

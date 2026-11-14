@@ -106,6 +106,7 @@ Handy for sharing a particular scene, e.g.
 | `px` | pixel size |
 | `fps` | animate on twos (e.g. 10) |
 | `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
+| `merge` | `0` draws every body part separately (about 37 draw calls per person instead of 3), for comparison |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `sky=0` | no sky or horizon |
@@ -151,6 +152,7 @@ once.
 |---|---|
 | `src/genome.ts` | the random genome: shape genes, looks, persona |
 | `src/body.ts` | builds a person's meshes and joint hierarchy from a genome |
+| `src/skin.ts` | merges each person into one draw call (plus outline): parts stay in the tree for posing and picking, a vertex shader places them by rigid skinning |
 | `src/persona.ts` | personality sliders, presets, and how they turn into gait style |
 | `src/gait.ts`, `src/animate.ts` | the walk cycle and per-frame posing |
 | `src/springs.ts`, `src/ik.ts`, `src/ragdoll.ts` | secondary motion, inverse kinematics, falling over |

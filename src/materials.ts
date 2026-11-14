@@ -40,6 +40,41 @@ const FOG_GLSL = /* glsl */ `
 `;
 
 /**
+ * Rigid skinning for merged characters (see skin.ts): every vertex belongs to
+ * exactly one part, and the part's matrix (relative to the character root)
+ * comes from a uniform array. Without SKINNED this is a no-op.
+ */
+export const MAX_BONES = 48;
+const SKIN_GLSL = /* glsl */ `
+  #ifdef SKINNED
+  attribute float aBone;
+  attribute float aEdge;
+  uniform mat4 uBones[MAX_BONES];
+  vec3 skinPos() { return (uBones[int(aBone + 0.5)] * vec4(position, 1.0)).xyz; }
+  vec3 skinNormal() { return mat3(uBones[int(aBone + 0.5)]) * normal; }
+  #else
+  vec3 skinPos() { return position; }
+  vec3 skinNormal() { return normal; }
+  #endif
+`;
+
+/**
+ * A skinned twin of a toon or outline material: same shaders with SKINNED
+ * defined, sharing the base material's uniform objects (so light, tint, fog
+ * and outline width stay in step) plus its own bone array, filled per mesh
+ * just before it draws.
+ */
+export function skinnedVariant(base: THREE.ShaderMaterial) {
+  return new THREE.ShaderMaterial({
+    uniforms: { ...base.uniforms, uBones: { value: new Float32Array(16 * MAX_BONES) } },
+    vertexShader: base.vertexShader,
+    fragmentShader: base.fragmentShader,
+    defines: { SKINNED: '', MAX_BONES },
+    side: base.side,
+  });
+}
+
+/**
  * One shared toon material for everything: lighting picks the column,
  * the per-vertex `aRow` attribute picks the colour ramp in the atlas.
  */
@@ -58,10 +93,12 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
       varying vec3 vN;
       varying float vRow;
       varying vec3 vWorld;
+      ${SKIN_GLSL}
       void main() {
-        vN = normalize(normalMatrix * normal);
+        vec3 pos = skinPos();
+        vN = normalize(normalMatrix * skinNormal());
         vRow = aRow;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vec4 wp = modelMatrix * vec4(pos, 1.0);
         vWorld = wp.xyz;
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
@@ -104,10 +141,15 @@ export function createOutlineMaterial(fog: FogUniforms = createFog(1e9)) {
       uniform float uPx;
       uniform vec2 uResolution;
       varying vec3 vWorld;
+      ${SKIN_GLSL}
       void main() {
-        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        vec3 n = normalize(normalMatrix * normal);
+        vec3 pos = skinPos();
+        vWorld = (modelMatrix * vec4(pos, 1.0)).xyz;
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        #ifdef SKINNED
+        if (aEdge < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } // part drawn without an outline
+        #endif
+        vec3 n = normalize(normalMatrix * skinNormal());
         vec2 d = (projectionMatrix * vec4(n, 0.0)).xy * uResolution; // → pixel space
         float l = length(d);
         if (l > 1e-6) d /= l;

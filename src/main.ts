@@ -4,7 +4,8 @@ import GUI from 'lil-gui';
 import { type Person, buildPerson } from './body';
 import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
-import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass } from './materials';
+import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass, skinnedVariant } from './materials';
+import { PARTS_LAYER } from './skin';
 import { Clouds, Sun, createSky } from './environment';
 import { type Caster, Trees } from './trees';
 import { daylight, sunAt } from './daylight';
@@ -36,6 +37,7 @@ const settings = {
   spin: q.has('spin'),
   segments: num('segs', 8),
   eyes: true,
+  merge: q.get('merge') !== '0', // one draw call per person (rigid skinning) instead of one per part
   pixelSize: num('px', 3),
   outline: q.get('outline') !== '0',
   outlinePx: 1,
@@ -79,6 +81,7 @@ fillAtlas(atlas, settings.ramp);
 const fog = createFog();
 const toon = createToonMaterial(atlas, fog);
 const outline = createOutlineMaterial(fog);
+const skinMats = { toon: skinnedVariant(toon), outline: skinnedVariant(outline) };
 // clouds live past the horizon, so they get materials without the haze
 // (but share lighting and outline settings with everything else)
 const cloudToon = createToonMaterial(atlas);
@@ -178,7 +181,7 @@ function slotTransform(i: number) {
 }
 
 function makePerson(i: number, genome = randomGenome(settings.seed * 100003 + i)) {
-  const p = buildPerson(genome, toon, outline, { segments: settings.segments, eyes: settings.eyes });
+  const p = buildPerson(genome, toon, outline, { segments: settings.segments, eyes: settings.eyes, skin: settings.merge ? skinMats : null });
   const t = slotTransform(i);
   p.root.position.set(t.x, 0, t.z);
   p.root.rotation.y = t.rot;
@@ -844,6 +847,7 @@ look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
 look.addColor(settings, 'outlineColor').name('outline color');
 look.add(settings, 'segments', 4, 16, 2).onFinishChange(rebuildAll);
 look.add(settings, 'eyes').onChange(rebuildAll);
+look.add(settings, 'merge').name('one draw call each').onChange(rebuildAll);
 
 const grassF = look.addFolder('Ground').close();
 grassF.add(settings.grass, 'enabled').name('grass patches');
@@ -859,6 +863,7 @@ grassF.add(settings, 'pond');
 // ---------------------------------------------------------------- picking
 
 const ray = new THREE.Raycaster();
+ray.layers.enable(PARTS_LAYER); // merged people still pick by their (undrawn) parts
 let downAt: [number, number] | null = null;
 renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
 // cursor → a point at roughly head height above the ground, for "look at cursor"
@@ -1028,6 +1033,7 @@ function frame() {
   groundMat.uniforms.uFlowerSize.value = settings.grass.flowerSize;
   updateEnvironment(dt);
   outline.visible = settings.outline;
+  skinMats.outline.visible = settings.outline;
   cloudOutline.visible = settings.outline;
   outline.uniforms.uPx.value = settings.outlinePx;
   outline.uniforms.uColor.value.set(settings.outlineColor);
@@ -1038,7 +1044,7 @@ function frame() {
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
-  if (++frames === 2) (window as any).__mini = { ready: true, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
+  if (++frames === 2) (window as any).__mini = { ready: true, renderer, camera, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
 }
 
 resize();
