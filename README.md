@@ -218,8 +218,9 @@ So far it has one chain:
   toon bands, and the lantern glows. They put it out on their way to bed.
 - **The dance:** having eaten, people go out to the green in front of the
   inn. Those with an instrument stand in an arc with the tables behind them
-  and play; the rest dance in the middle while there's music, and stand
-  about (with a pipe, if they smoke) while there isn't. Once everyone's fed the innkeeper
+  and play; the rest dance in the middle while there's music. While there
+  isn't, they stand about chatting with whoever's free (a musician between
+  tunes, too), with a pipe if they smoke. Once everyone's fed the innkeeper
   brings their fiddle too, and the whole band plays with hardly a pause
   between tunes. At 22:00 they finish the tune (or the dance), walk home
   and go in; their lamps glow for an hour and a half. Anyone supper didn't

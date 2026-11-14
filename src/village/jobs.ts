@@ -113,6 +113,8 @@ export interface Village {
   greenSpot(i: number): { x: number; z: number; yaw: number };
   /** Is anyone playing right now (fiddle, banjo or bass)? */
   bandPlaying(): boolean;
+  /** Waiting on the green: strike up a chat with someone else there who's free for one (if anyone is). */
+  chatOnGreen(i: number): void;
   /** Two people have a word: they stop where they are (if walking) and talk for a while. */
   chat(i: number, j: number, seconds: number): void;
   /** Bookkeeping for the overlay and the tests. */
@@ -426,6 +428,10 @@ export abstract class Job {
         }
         // the band's struck up: the pipe goes away, there's dancing to be done
         if (a.kind === 'pipe' && !this.w.instrument && v.bandPlaying()) a.stopPlaying(true);
+        else if (a.kind === 'pipe' && v.time >= this.nextTune) {
+          v.chatOnGreen(this.w.i); // (a word round the pipe)
+          this.nextTune = v.time + 1;
+        }
         if (a.busy) {
           this.wasPlaying = true;
           return;
@@ -435,12 +441,22 @@ export abstract class Job {
           this.wasPlaying = false;
           this.nextTune = v.time + (v.everyoneFed() ? 0.3 + Math.random() * 0.7 : 1 + Math.random() * 3);
         }
-        if (v.time < this.nextTune || this.danceBreak(v)) return;
+        // a chat over: back round to face the green
+        if (a.talkingTo >= 0) this.chatted = true;
+        else if (this.chatted) {
+          this.chatted = false;
+          const at = v.greenSpot(this.w.i);
+          this.go(at.x, at.z, at.yaw);
+        }
+        // (nobody strikes up mid-sentence, or before they're facing the right way)
+        if (v.time < this.nextTune || a.talkingTo >= 0 || (this.w.walker.goal && !this.arrived) || this.danceBreak(v)) return;
         if (this.w.instrument) a.start(this.w.instrument, { phrases: 2 + Math.floor(Math.random() * 2) });
         else if (v.bandPlaying()) a.start('dance');
         else {
-          // no music yet: stand about (with a pipe, if they smoke) till there is
-          if (this.w.pipe) a.start('pipe');
+          // no music yet: stand about till there is, chatting with whoever's
+          // free, and with a pipe if they smoke
+          if (this.w.pipe && Math.random() < 0.5) a.start('pipe');
+          v.chatOnGreen(this.w.i);
           this.nextTune = v.time + 1;
           return;
         }
@@ -486,6 +502,7 @@ export abstract class Job {
   private restAfter = 0;
   private nextTune = 0;
   private wasPlaying = false;
+  private chatted = false;
 
   /**
    * Nothing to do: now and then go and sit on a free bench (and maybe play

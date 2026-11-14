@@ -371,6 +371,7 @@ const village: Village = {
   lamp,
   greenSpot: (i) => greenSpot(i),
   bandPlaying: () => crowd.actors.some((a) => a.kind === 'fiddle' || a.kind === 'banjo' || a.kind === 'bass'),
+  chatOnGreen: (i) => chatOnGreen(i),
   chat: (i, j, seconds) => {
     // (only with someone who's there for it: not asleep, not walking off somewhere)
     if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
@@ -486,6 +487,27 @@ function talk() {
       if (Math.random() < 0.7) chat(i, j, 3.5 + Math.random() * 2);
     }
   }
+}
+
+/**
+ * On the green with no music: a chat with someone else there who's free
+ * (stood about or smoking, not already talking, not just done talking),
+ * the nearest of them.
+ */
+function chatOnGreen(i: number) {
+  const free = (k: number) => {
+    const a = crowd.actors[k];
+    return jobs[k].doing === 'at the dance' && (a.kind === null || a.kind === 'pipe') && a.talkingTo < 0 && simTime >= chattedUntil[k];
+  };
+  if (!free(i)) return;
+  const me = walkers[i];
+  let best = -1, bestD = Infinity;
+  for (let k = 0; k < people.length; k++) {
+    if (k === i || !free(k)) continue;
+    const d = Math.hypot(walkers[k].x - me.x, walkers[k].z - me.z);
+    if (d < bestD) [best, bestD] = [k, d];
+  }
+  if (best >= 0) chat(i, best, 3 + Math.random() * 4);
 }
 
 /** Held for a chat: stand and turn to face whoever they're talking to. */
