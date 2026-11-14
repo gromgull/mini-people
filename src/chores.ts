@@ -560,6 +560,19 @@ export class Fish implements Chore {
   private bitten = false;
   private caught = false;
   private H = 1;
+  /** Fishing real water (village): no conjured pool, and done once the fish is off the hook. */
+  private world = false;
+
+  /** Cast into real water on the next start (the person stands facing it, ~0.6 H from the edge). */
+  aimWater(on: boolean) {
+    this.world = on;
+  }
+
+  /** Where the caught fish is now (world): for handing it over when the chore ends. */
+  catchPose() {
+    this.p.root.updateMatrixWorld(true);
+    return { pos: this.fish.getWorldPosition(new THREE.Vector3()), quat: this.fish.getWorldQuaternion(new THREE.Quaternion()) };
+  }
 
   constructor(private p: Person, private kit: PropKit) {
     const s = Math.sqrt(p.dims.height);
@@ -675,7 +688,7 @@ export class Fish implements Chore {
     const side = (Math.random() - 0.5) * 0.5 * H;
     this.target.set(side, 0, 1.85 * H);
     this.bank.set(side * 0.3, 0, 0.62 * H);
-    this.buildPool();
+    if (!this.world) this.buildPool();
     const wait = 2.2 + Math.random() * 2.6;
     const S = this.sched;
     S.bite = S.settle + wait;
@@ -683,7 +696,7 @@ export class Fish implements Chore {
     S.out = S.reel + 2.4;
     S.grab = S.out + 1.8;
     S.held = S.grab + 0.5;
-    S.done = S.held + CARRY_TIME;
+    S.done = this.world ? S.held + 0.1 : S.held + CARRY_TIME;
     // where the fish sits once it's off the hook: between the hands of the
     // carrying pose, lying across the body
     const d = p.dims;
@@ -701,7 +714,8 @@ export class Fish implements Chore {
     this.len = 0.22 * H;
     this.bitten = this.caught = false;
     this.bend = this.bendTarget = 0;
-    this.rod.visible = this.line.visible = this.bobber.visible = this.pool.visible = true;
+    this.rod.visible = this.line.visible = this.bobber.visible = true;
+    this.pool.visible = !this.world;
     this.fish.visible = false;
     this.rod.scale.setScalar(1e-3);
     this.pool.scale.set(1e-3, 1, 1e-3);
@@ -712,13 +726,14 @@ export class Fish implements Chore {
 
   pre(t: number, dt: number, P: ActionPose, _tempo: number, out: ChoreOut) {
     const S = this.sched;
-    if (t > S.done + 0.4) return false;
+    if (t > S.done + (this.world ? 0 : 0.4)) return false;
     const s = Math.sqrt(this.H);
     // rod and pool go once the fish is off the hook
     const pop = t < 0.35 ? grow(t / 0.35) : Math.max(1e-3, 1 - smooth((t - S.grab) / 0.3));
     this.rod.scale.setScalar(s * pop);
     this.pool.scale.set(pop, 1, pop);
-    this.rod.visible = this.pool.visible = pop > 2e-3;
+    this.rod.visible = pop > 2e-3;
+    this.pool.visible = pop > 2e-3 && !this.world;
 
     let a: ArmAngles = ROD_HOLD;
     let stiff = 1.2;
@@ -766,10 +781,10 @@ export class Fish implements Chore {
       setArm(P, 'L', FISH_CARRY, k, 1.5);
       P.headX = 0.25 * k;
     } else {
-      // and off they go with it
+      // and off they go with it (on real water, whoever sent them takes it from here)
       a = FISH_CARRY;
-      out.holdSpeed = false;
-      if (t - dt < S.held) out.depart = true;
+      out.holdSpeed = this.world;
+      if (t - dt < S.held && !this.world) out.depart = true;
       const fade = t > S.done ? 1 - smooth((t - S.done) / 0.4) : 1;
       w = fade;
       setArm(P, 'L', FISH_CARRY, fade, 1.5);

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Bench, LOG_L, LOG_R, type Log, type Piece, type Sawhorse, type Stack, type Woodpile } from './things';
+import { type Bench, type Crate, type Item, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Stack, type Store, type Woodpile } from './things';
+import type { Pond } from '../pond';
 import type { ItemPose } from '../armful';
 import { PIECE_L, PIECE_R } from '../firewood';
 import { type Obstacle, type Walker, wrap } from './walk';
@@ -30,6 +31,10 @@ export const INN_WANT = 8;
 export const PIECES_PER_LOG = 4;
 /** Pieces in an armful. */
 export const ARMFUL = 4;
+/** Fish caught before taking them to the rack. */
+export const CATCH = 3;
+/** The inn's larder wants at least this many dried fish. */
+export const LARDER_WANT = 4;
 
 export interface Village {
   forest: Forest;
@@ -46,11 +51,16 @@ export interface Village {
   /** Firewood: the stack by the sawhorse, the inn's stack by the kitchen, every piece. */
   yard: Stack;
   inn: Stack;
-  pieces: Piece[];
-  newPiece(): Piece;
-  removePiece(p: Piece): void;
+  /** Fish: the pond, the drying rack, the inn's larder crate. */
+  pond: Pond;
+  rack: Rack;
+  larder: Crate;
+  /** Every item (firewood and fish). */
+  items: Item[];
+  newItem(kind: Item['kind']): Item;
+  removeItem(it: Item): void;
   /** Bookkeeping for the overlay and the tests. */
-  stats: { felled: number; sawn: number; delivered: number; burned: number };
+  stats: { felled: number; sawn: number; delivered: number; burned: number; caught: number; dried: number; fishIn: number; eaten: number };
 }
 
 export interface Worker {
@@ -93,8 +103,8 @@ function besideLog(l: Log, fromX: number, fromZ: number) {
 export abstract class Job {
   step: Step = { kind: 'idle' };
   carrying: Log | null = null;
-  /** Firewood in their arms. */
-  armful: Piece[] = [];
+  /** What's in their arms. */
+  armful: Item[] = [];
   protected waitUntil = 0;
 
   constructor(readonly w: Worker, readonly role: string) {}
@@ -111,7 +121,7 @@ export abstract class Job {
     const a = this.w.actor;
     // an armful interrupted the same way: down it goes, where they stand
     if (this.armful.length && a.kind !== 'armful' && this.step.kind !== 'stacking') {
-      const to = this.step.to as Stack | undefined;
+      const to = this.step.to as Store | undefined;
       if (to) to.incoming = Math.max(0, to.incoming - this.armful.length);
       for (const p of this.armful) p.place = { at: 'ground', pos: p.mesh.position.clone().setY(PIECE_R * 0.5), quat: p.mesh.quaternion.clone() };
       this.armful = [];
@@ -143,16 +153,16 @@ export abstract class Job {
    * anyone can take. Promises them on both ends straight away (the source's
    * pieces are spoken for, the destination's room is taken).
    */
-  protected fetch(from: Stack, to: Stack, n: number) {
+  protected fetch(from: Store, to: Store, n: number, ok: (it: Item) => boolean = () => true) {
     from.reserved += n;
     to.incoming += n;
     const at = from.workSpot();
     this.go(at.x, at.z, at.yaw);
-    this.step = { kind: 'fetching', from, to, n };
+    this.step = { kind: 'fetching', from, to, n, ok };
   }
 
-  /** Gather these pieces (lying at these poses) into an armful and take them to a stack (room there already promised). */
-  protected gather(pieces: Piece[], from: ItemPose[], to: Stack) {
+  /** Gather these items (lying at these poses) into an armful and take them to a store (room there already promised). */
+  protected gather(pieces: Item[], from: ItemPose[], to: Store) {
     for (const p of pieces) p.place = { at: 'carried', by: this.w.i };
     this.armful = pieces;
     this.w.actor.start('armful', { items: { meshes: pieces.map((p) => p.mesh), from } });
@@ -162,13 +172,13 @@ export abstract class Job {
   private deliveryStep(v: Village) {
     const s = this.step;
     const a = this.w.actor;
-    const to = s.to as Stack;
+    const to = s.to as Store;
     switch (s.kind) {
       case 'fetching': {
         if (!this.arrived) return;
-        const from = s.from as Stack;
+        const from = s.from as Store;
         const n = s.n as number;
-        const slots = from.top(n);
+        const slots = from.top(n, s.ok as (it: Item) => boolean);
         from.reserved = Math.max(0, from.reserved - n);
         if (slots.length < n) to.incoming = Math.max(0, to.incoming - (n - slots.length));
         if (!slots.length) {
@@ -203,6 +213,7 @@ export abstract class Job {
         this.armful.forEach((p, k) => (p.place = { at: 'stack', stack: to, slot: slots[k] }));
         to.incoming = Math.max(0, to.incoming - this.armful.length);
         if (to === v.inn) v.stats.delivered += this.armful.length;
+        if (to === v.larder) v.stats.fishIn += this.armful.length;
         this.armful = [];
         this.step = { kind: 'idle' };
         return;
@@ -513,7 +524,7 @@ export class Woodworker extends Job {
 
   /** A log to saw, and room on the yard stack for what it makes. */
   private canSaw(v: Village) {
-    return !v.horse.log && !v.horse.pieces.length && v.pile.count > 0 && v.yard.room >= PIECES_PER_LOG;
+    return !v.horse.log && !v.horse.pieces.length && v.pile.ready > 0 && v.yard.room >= PIECES_PER_LOG;
   }
 
   /** How many pieces the inn could do with right now (and we have to bring). */
@@ -607,9 +618,9 @@ export class Woodworker extends Job {
         v.stats.sawn++;
         const axis = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
         const poses: ItemPose[] = [];
-        const pieces: Piece[] = [];
+        const pieces: Item[] = [];
         for (let k = 0; k < PIECES_PER_LOG; k++) {
-          const p = v.newPiece();
+          const p = v.newItem('wood');
           p.place = { at: 'horse' };
           const pos = horse.logAt.clone().addScaledVector(axis, (k - 1.5) * PIECE_L * 0.7);
           pos.y += (k % 2) * PIECE_R * 0.4;
@@ -632,3 +643,125 @@ const dist = (l: Log, w: Walker) => {
   const p = l.place as { x: number; z: number };
   return Math.hypot(p.x - w.x, p.z - w.z);
 };
+
+/**
+ * The fisher: while the drying rack has room for a catch, walk to the
+ * water's edge (somewhere on the side toward the rack), cast, and keep
+ * fishing until there are CATCH fish lying on the grass beside them; then
+ * gather them up and hang them on the rack.
+ */
+export class Fisher extends Job {
+  private caught: { item: Item; pose: ItemPose }[] = [];
+  private lastCatch: ItemPose | null = null;
+
+  constructor(w: Worker) {
+    super(w, 'fisher');
+  }
+
+  protected hasWork(v: Village) {
+    return v.rack.room >= CATCH;
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        if (this.hasWork(v)) {
+          v.rack.incoming += CATCH; // room on the rack for this catch
+          const at = this.waterSpot(v);
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to the water' };
+          return;
+        }
+        if (this.leisure(v)) return;
+        this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to the water': {
+        if (!this.arrived) return;
+        a.start('fish', { water: true });
+        this.step = { kind: 'fishing' };
+        return;
+      }
+      case 'fishing': {
+        if (a.kind === 'fish') {
+          this.lastCatch = a.choreOf('fish').catchPose();
+          return;
+        }
+        // one more: off the hook and onto the grass beside them
+        const k = this.caught.length;
+        const r = this.w.root;
+        const yaw = r.rotation.y;
+        const right = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+        const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+        const pos = r.position.clone().addScaledVector(right, 0.32 + k * 0.08).addScaledVector(back, 0.05 + k * 0.1).setY(0.035);
+        const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw + 0.4 * (k - 1)).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2));
+        const item = v.newItem('fish');
+        item.place = { at: 'ground', pos, quat };
+        if (this.lastCatch) item.tween = { pos: this.lastCatch.pos.clone(), quat: this.lastCatch.quat.clone(), t0: v.time, dur: 0.45 };
+        this.caught.push({ item, pose: { pos, quat } });
+        v.stats.caught++;
+        if (this.caught.length < CATCH) {
+          a.start('fish', { water: true });
+          return;
+        }
+        // enough: up they go, onto the rack
+        this.gather(this.caught.map((c) => c.item), this.caught.map((c) => c.pose), v.rack);
+        this.caught = [];
+        return;
+      }
+    }
+  }
+
+  /**
+   * Where to stand to fish: on the shore facing the middle of the pond, about
+   * 0.6 of their height back from the water (where the cast's 'bank' falls),
+   * on the side toward the rack, give or take.
+   */
+  private waterSpot(v: Village) {
+    const pond = v.pond;
+    const ang = Math.atan2(v.rack.x - pond.x, v.rack.z - pond.z) + (Math.random() - 0.5) * 1.6;
+    const dx = Math.sin(ang), dz = Math.cos(ang);
+    const H = (this.w.root.userData.height as number) ?? 1;
+    const d = pond.edge(dx, dz) + 0.62 * H - 0.05;
+    return { x: pond.x + dx * d, z: pond.z + dz * d, yaw: Math.atan2(-dx, -dz) };
+  }
+}
+
+/**
+ * The innkeeper: keeps the larder crate by the kitchen hatch stocked with
+ * dried fish, fetched from the rack an armful at a time. Otherwise, time on
+ * their hands (a bench outside the inn, a fiddle).
+ */
+export class Innkeeper extends Job {
+  constructor(w: Worker) {
+    super(w, 'innkeeper');
+  }
+
+  /** Dried fish on the rack nobody has come for yet. */
+  private dryOnRack(v: Village) {
+    return v.rack.items.filter((it) => it && it.place.at === 'stack' && it.dry >= 1).length - v.rack.reserved;
+  }
+
+  private larderWants(v: Village) {
+    const short = LARDER_WANT - v.larder.count - v.larder.incoming;
+    return short > 0 ? Math.min(ARMFUL, this.dryOnRack(v), v.larder.room) : 0;
+  }
+
+  protected hasWork(v: Village) {
+    return this.larderWants(v) > 0;
+  }
+
+  protected run(v: Village) {
+    if (this.step.kind !== 'idle' || v.time < this.waitUntil) return;
+    const n = this.larderWants(v);
+    if (n > 0) {
+      this.fetch(v.rack, v.larder, n, (it) => it.dry >= 1);
+      return;
+    }
+    if (this.leisure(v)) return;
+    this.waitUntil = v.time + 2;
+  }
+}

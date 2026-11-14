@@ -24,6 +24,7 @@ export const PALETTE = {
   shore: ['#a8a070'],
   stone: ['#8e8b85', '#a19c92', '#78756f'],
   fish: ['#a9c2cf', '#e0884a', '#5f7f96'],
+  stockfish: ['#c8a46c', '#9a7448'], // dried: body, fins and tail
   wood: ['#b07a46', '#94643a', '#c99a62'],
   food: ['#f1e2ac', '#eee8d8', '#e6b34a'], // apple flesh, fish bones, ale
   plaster: ['#efe3c4', '#e6d6b2'],

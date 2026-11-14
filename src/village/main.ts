@@ -11,10 +11,11 @@ import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
-import { Bench, LOG_L, LOG_R, type Log, type Piece, Sawhorse, Stack, Woodpile, makeLog } from './things';
+import { Bench, Crate, type Item, LOG_L, LOG_R, type Log, Rack, Sawhorse, Stack, type Store, Woodpile, makeFish, makeLog, setDry } from './things';
+import { Pond } from '../pond';
 import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
-import { type Job, Lumberjack, type Village, Woodworker } from './jobs';
+import { Fisher, Innkeeper, type Job, Lumberjack, type Village, Woodworker } from './jobs';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -46,19 +47,23 @@ const crowd = new Crowd(stage, settings);
 const SITES: Site[] = [
   { kind: 'cabin', x: -6.5, z: -7, yaw: 0.35 }, // the lumberjack's, by the forest
   { kind: 'cabin', x: 4.5, z: -6.5, yaw: -0.3 }, // the woodworker's
-  { kind: 'inn', x: 1, z: -14, yaw: 0 },
+  { kind: 'cabin', x: 15.5, z: -4, yaw: -0.9 }, // the fisher's, up from the pond
+  { kind: 'inn', x: 1, z: -14, yaw: 0 }, // (the innkeeper lives in)
 ];
 const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, 23, SITES);
 stage.scene.add(houses.group);
 const forest = new Forest(stage, -11.5, -1, 4.2, 26);
 stage.scene.add(forest.group);
+// a good-sized pond off to the east, for the fisher
+const pond = new Pond(stage.toon, stage.outline, 10, 2, 3.6, 5);
+stage.scene.add(pond.group);
 
 // ---------------------------------------------------------------- people
 
-type Role = 'lumberjack' | 'woodworker';
-const ROLES: Role[] = ['lumberjack', 'woodworker'];
+type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper';
+const ROLES: Role[] = ['lumberjack', 'woodworker', 'fisher', 'innkeeper'];
 /** What each plays in their spare time. */
-const INSTRUMENT: Record<Role, 'fiddle' | 'banjo'> = { lumberjack: 'fiddle', woodworker: 'banjo' };
+const INSTRUMENT: Record<Role, 'fiddle' | 'banjo' | null> = { lumberjack: 'fiddle', woodworker: 'banjo', fisher: null, innkeeper: 'fiddle' };
 const people = ROLES.map((_, i) => crowd.spawn(randomGenome(settings.seed * 100003 + 17 + i * 5), i));
 const r = mulberry32(settings.seed * 31 + 7);
 crowd.people = people;
@@ -67,6 +72,7 @@ crowd.anims = people.map((_, i) => new Animator(settings.seed * 977 + i));
 crowd.actors = people.map((p) => new Actor(p, crowd.kit));
 crowd.gazes = people.map((p, i) => new Gaze(p, i, mulberry32(settings.seed * 4243 + i)));
 const iWood = ROLES.indexOf('woodworker');
+for (const p of people) p.root.userData.height = p.dims.height;
 
 // the woodworker's own sawhorse, made to their height, and the pile beside it
 const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
@@ -79,48 +85,82 @@ const innStack = (() => {
   const at = new THREE.Vector3(b.half.x + 0.3, 0, 0.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
   return new Stack(stage, 'inn', b.x + at.x, b.z + at.z, b.yaw + Math.PI / 2);
 })();
-const pieces: Piece[] = [];
-let nextPieceId = 0;
-function newPiece(): Piece {
-  const mesh = makePiece(crowd.kit);
+// fish: a drying rack between the pond and the inn, and a larder crate by
+// the inn's kitchen hatch
+const rack = new Rack(stage, 'rack', 9.2, -4.4, 0.35);
+const larder = (() => {
+  const b = houses.buildings.find((h) => h.kind === 'inn')!;
+  const at = new THREE.Vector3(0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
+  return new Crate(stage, 'larder', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw);
+})();
+
+const items: Item[] = [];
+let nextItemId = 0;
+function newItem(kind: Item['kind']): Item {
+  const mesh = kind === 'wood' ? makePiece(crowd.kit) : makeFish(stage);
   stage.scene.add(mesh);
-  const p: Piece = { id: nextPieceId++, place: { at: 'horse' }, mesh };
-  pieces.push(p);
-  return p;
+  const it: Item = { id: nextItemId++, kind, place: { at: 'horse' }, mesh, dry: 0 };
+  items.push(it);
+  return it;
 }
-function removePiece(p: Piece) {
-  stage.scene.remove(p.mesh);
-  pieces.splice(pieces.indexOf(p), 1);
+function removeItem(it: Item) {
+  stage.scene.remove(it.mesh);
+  items.splice(items.indexOf(it), 1);
 }
-/** Put every stacked (or dropped) piece's mesh where its place says; carried ones are the armful's. */
-function placePieces() {
-  for (const p of pieces) {
-    const pl = p.place;
-    if (pl.at === 'stack') {
-      const w = pl.stack.slotWorld(pl.slot);
-      p.mesh.position.copy(w.pos);
-      p.mesh.quaternion.copy(w.quat);
-    } else if (pl.at === 'ground') {
-      p.mesh.position.copy(pl.pos);
-      p.mesh.quaternion.copy(pl.quat);
+/** Put every stored (or dropped) item's mesh where its place says (carried ones are the armful's), easing in any that just got there. */
+function placeItems() {
+  for (const it of items) {
+    const pl = it.place;
+    let pos: THREE.Vector3, quat: THREE.Quaternion;
+    if (pl.at === 'stack') ({ pos, quat } = pl.stack.slotWorld(pl.slot));
+    else if (pl.at === 'ground') ({ pos, quat } = pl);
+    else continue;
+    const tw = it.tween;
+    if (tw) {
+      const k = Math.min(1, (simTime - tw.t0) / tw.dur);
+      const e = k * k * (3 - 2 * k);
+      it.mesh.position.copy(tw.pos).lerp(pos, e);
+      it.mesh.position.y += Math.sin(Math.PI * k) * 0.12;
+      it.mesh.quaternion.copy(tw.quat).slerp(quat, e);
+      if (k >= 1) it.tween = undefined;
+    } else {
+      it.mesh.position.copy(pos);
+      it.mesh.quaternion.copy(quat);
     }
   }
 }
 // ?wood=n: start with some firewood in the yard; the inn starts with a little
-function stock(st: Stack, n: number) {
+// of everything (?innwood, ?fish: dried fish in the larder; ?rackfish: on the rack)
+function stock(st: Store, n: number, kind: Item['kind'] = 'wood', dry = 0) {
   for (const i of st.free(n)) {
-    const p = newPiece();
-    p.place = { at: 'stack', stack: st, slot: i };
-    st.items[i] = p;
+    const it = newItem(kind);
+    it.dry = dry;
+    if (kind === 'fish') setDry(it.mesh, dry >= 1);
+    it.place = { at: 'stack', stack: st, slot: i };
+    st.items[i] = it;
   }
 }
 stock(yard, num('wood', 0));
 stock(innStack, num('innwood', 3));
+stock(larder, num('fish', 2), 'fish', 1);
+stock(rack, num('rackfish', 0), 'fish', 0.6);
+/** Fish dry on the rack over this many seconds. */
+const DRY_TIME = 120;
+/** The inn's guests eat a fish every so often. */
+const EAT_EVERY = 50;
+let nextMeal = EAT_EVERY;
 /** The inn's kitchen fire burns a piece every so often. */
 const BURN_EVERY = 25;
 let nextBurn = BURN_EVERY;
 // and a bench of their height to sit on between logs, looking over the yard
 const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, crowd.actors[iWood].sitFit());
+// the innkeeper's, out front of the inn left of the door; the fisher's, looking over the pond
+const innBench = (() => {
+  const b = houses.buildings.find((h) => h.kind === 'inn')!;
+  const at = new THREE.Vector3(-1.7, 0, 2.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
+  return new Bench(stage, b.x + at.x, b.z + at.z, b.yaw + 0.15, crowd.actors[ROLES.indexOf('innkeeper')].sitFit());
+})();
+const pondBench = new Bench(stage, 5.2, 3.6, Math.PI / 2 + 0.25, crowd.actors[ROLES.indexOf('fisher')].sitFit());
 
 const logs: Log[] = [];
 let nextLogId = 0;
@@ -171,14 +211,21 @@ const horseObstacle: Obstacle = (() => {
   const mid = _v.set((t[0].x + t[1].x) / 2, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
   return { kind: 'box', x: horse.x + mid.x, z: horse.z + mid.z, yaw: horse.yaw, hx: Math.abs(t[0].x - t[1].x) / 2 + 0.08, hz: 0.2 };
 })();
-const benchObstacle: Obstacle = (() => {
-  const back = _v.set(0, 0, -0.06).applyAxisAngle(new THREE.Vector3(0, 1, 0), bench.yaw);
-  return { kind: 'box', x: bench.x + back.x, z: bench.z + back.z, yaw: bench.yaw, hx: 0.55, hz: bench.fit.depth / 2 + 0.06 };
-})();
+const benchObstacleOf = (b: Bench): Obstacle => {
+  const back = _v.set(0, 0, -0.06).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
+  return { kind: 'box', x: b.x + back.x, z: b.z + back.z, yaw: b.yaw, hx: 0.55, hz: b.fit.depth / 2 + 0.06 };
+};
+const benchObstacle = benchObstacleOf(bench);
+const innBenchObstacle = benchObstacleOf(innBench);
+const pondBenchObstacle = benchObstacleOf(pondBench);
+const pondObstacle: Obstacle = { kind: 'radial', x: pond.x, z: pond.z, r: (dx, dz) => pond.edge(dx, dz) + 0.08, maxR: pond.maxR + 0.1 };
+const rackObstacle: Obstacle = { kind: 'box', x: rack.x, z: rack.z, yaw: rack.yaw, hx: 0.95, hz: 0.3 };
+const larderObstacle: Obstacle = { kind: 'box', x: larder.x, z: larder.z, yaw: larder.yaw, hx: 0.27, hz: 0.2 };
+const stackObstacles: Obstacle[] = [yard, innStack].map((st) => ({ kind: 'box', x: st.x, z: st.z, yaw: st.yaw, hx: 0.18, hz: 0.28 }));
 const treeObstacles = new Map<number, Obstacle>();
 /** Everything solid right now. */
 function obstacles(): Obstacle[] {
-  const out = [...houseObstacles, pileObstacle, horseObstacle, benchObstacle];
+  const out = [...houseObstacles, pileObstacle, horseObstacle, benchObstacle, innBenchObstacle, pondBenchObstacle, pondObstacle, rackObstacle, larderObstacle, ...stackObstacles];
   for (const t of forest.trees) {
     if (t.state === 'felling') continue;
     let o = treeObstacles.get(t.id);
@@ -197,18 +244,26 @@ const village: Village = {
   removeLog,
   treeObstacle: (t) => treeObstacles.get(t.id) ?? null,
   horseObstacle,
-  benches: [{ bench, obstacle: benchObstacle }],
+  benches: [
+    { bench, obstacle: benchObstacle },
+    { bench: innBench, obstacle: innBenchObstacle },
+    { bench: pondBench, obstacle: pondBenchObstacle },
+  ],
   time: 0,
   yard,
   inn: innStack,
-  pieces,
-  newPiece,
-  removePiece,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0 },
+  pond,
+  rack,
+  larder,
+  items,
+  newItem,
+  removeItem,
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]] };
-  return ROLES[i] === 'lumberjack' ? new Lumberjack(w) : new Woodworker(w);
+  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper }[ROLES[i]];
+  return new J(w);
 });
 
 // ---------------------------------------------------------------- loop
@@ -240,15 +295,33 @@ function simulate(dt: number) {
   forest.update(simTime);
   if (simTime >= nextBurn) {
     nextBurn += BURN_EVERY;
-    const top = innStack.top(1).find((i) => innStack.items[i] && innStack.items[i]!.place.at === 'stack');
+    const top = innStack.top(1)[0];
     if (top !== undefined && innStack.available > 0) {
-      removePiece(innStack.items[top]!);
+      removeItem(innStack.items[top]!);
       innStack.items[top] = null;
       village.stats.burned++;
     }
   }
+  // fish dry on the rack; guests eat dried fish from the larder
+  for (const it of items) {
+    if (it.kind !== 'fish' || it.place.at !== 'stack' || it.place.stack !== rack || it.dry >= 1) continue;
+    it.dry = Math.min(1, it.dry + dt / DRY_TIME);
+    if (it.dry >= 1) {
+      setDry(it.mesh, true);
+      village.stats.dried++;
+    }
+  }
+  if (simTime >= nextMeal) {
+    nextMeal += EAT_EVERY;
+    const top = larder.top(1)[0];
+    if (top !== undefined && larder.available > 0) {
+      removeItem(larder.items[top]!);
+      larder.items[top] = null;
+      village.stats.eaten++;
+    }
+  }
   placeLogs();
-  placePieces();
+  placeItems();
 }
 
 stage.controls.target.set(num('tx', -2), 0.5, num('tz', -1));
@@ -260,7 +333,7 @@ if (!q.has('zoom')) {
 
 // ---------------------------------------------------------------- watching it
 
-const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚' };
+const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺' };
 const panel = document.createElement('div');
 panel.style.cssText = 'position:fixed;left:8px;bottom:30px;padding:6px 9px;background:#000a;color:#e8f4d8;font:12px/1.45 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;';
 document.body.appendChild(panel);
@@ -269,7 +342,7 @@ const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60))
 function updatePanel() {
   panel.style.display = settings.panel ? '' : 'none';
   if (!settings.panel) return;
-  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${ROLES[i].padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : ''}`);
+  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${ROLES[i].padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : j.armful.length ? ` (an armful of ${j.armful[0].kind === 'fish' ? 'fish' : 'firewood'})` : ''}`);
   const loose = logs.filter((l) => l.place.at === 'ground').length;
   const standing = forest.trees.filter((t) => t.state === 'standing').length;
   panel.textContent = [
@@ -277,6 +350,7 @@ function updatePanel() {
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
+    `fish: caught ${village.stats.caught} · rack ${rack.count}/${rack.slots.length} (${rack.items.filter((it) => it && it.dry >= 1).length} dry) · larder ${larder.count}/${larder.slots.length}${larder.incoming ? ` (+${larder.incoming} coming)` : ''} · eaten ${village.stats.eaten}`,
     `time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
   ].join('\n');
 }
@@ -339,6 +413,7 @@ function frame(start: number) {
   crowd.orientShadows();
   forest.orientShadows();
   houses.updateShadows(stage.lightWorld, look.shadowLength);
+  pond.update(simTime);
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
   if (frames % 6 === 0) updatePanel();

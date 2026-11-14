@@ -14,12 +14,13 @@ export class Pond {
   private layers: { mesh: THREE.Mesh; outer: () => THREE.Vector2[]; hole: (() => THREE.Vector2[]) | null }[] = [];
   private waterScale = 1;
   private deepScale = 0.55;
+  private radius: (t: number) => number;
 
   constructor(toon: THREE.Material, outline: THREE.Material, readonly x = 10, readonly z = 5, readonly R = 2.6, seed = 5) {
     const r = mulberry32(seed);
     // outline radius as a sum of a few low harmonics: a blob, never a star
     const harm = [2, 3, 4, 5].map((k) => ({ k, a: (0.22 / k) * (0.5 + r()), ph: r() * Math.PI * 2 }));
-    const radius = (t: number) => R * (1 + harm.reduce((s, h) => s + h.a * Math.sin(h.k * t + h.ph), 0)) * (1 + 0.25 * Math.cos(t)); // a bit oblong
+    const radius = (this.radius = (t: number) => R * (1 + harm.reduce((s, h) => s + h.a * Math.sin(h.k * t + h.ph), 0)) * (1 + 0.25 * Math.cos(t))); // a bit oblong
     const N = 30; // few enough segments that the edge reads as low-poly facets
 
     const ring = (grow: number, scale: number) => {
@@ -69,7 +70,7 @@ export class Pond {
           pos.setXYZ(k, v.x, v.y * 0.55, v.z); // flattened
         }
         g.rotateY(r() * Math.PI);
-        g.translate(x + Math.cos(t) * d, size * 0.2, z + Math.sin(t) * d); // sunk a little into the ground
+        g.translate(x + Math.cos(t) * d, size * 0.2, z - Math.sin(t) * d); // sunk a little into the ground (outline angle t is world (cos t, −sin t))
         parts.push({ geo: g, row: ROWS.stone[Math.floor(r() * ROWS.stone.length)] });
       }
     }
@@ -78,6 +79,18 @@ export class Pond {
     const hull = new THREE.Mesh(smooth, outline);
     mesh.raycast = hull.raycast = () => {};
     this.group.add(mesh, hull);
+  }
+
+  /** How far the water reaches from the middle in a world direction (dx, dz); the sandy shore goes 0.22 further. */
+  edge(dx: number, dz: number) {
+    return this.radius(Math.atan2(-dz, dx)) * this.waterScale;
+  }
+
+  /** The widest the water gets. */
+  get maxR() {
+    let m = 0;
+    for (let i = 0; i < 64; i++) m = Math.max(m, this.radius((i / 64) * Math.PI * 2));
+    return m;
   }
 
   private shapeGeo(outer: () => THREE.Vector2[], hole: (() => THREE.Vector2[]) | null) {

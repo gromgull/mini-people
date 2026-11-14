@@ -9,7 +9,9 @@
 
 export type Obstacle =
   | { kind: 'circle'; x: number; z: number; r: number }
-  | { kind: 'box'; x: number; z: number; yaw: number; hx: number; hz: number };
+  | { kind: 'box'; x: number; z: number; yaw: number; hx: number; hz: number }
+  /** A blob (the pond): its edge is r(dx, dz) out from the middle in direction (dx, dz); never more than maxR. */
+  | { kind: 'radial'; x: number; z: number; r: (dx: number, dz: number) => number; maxR: number };
 
 export interface Goal {
   x: number;
@@ -33,6 +35,11 @@ export const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Closest point on an obstacle's outline (or inside it) to (x, z), and the distance to its edge (negative = inside). */
 function nearest(o: Obstacle, x: number, z: number) {
+  if (o.kind === 'radial') {
+    const dx = x - o.x, dz = z - o.z;
+    const d = Math.hypot(dx, dz) || 1e-6;
+    return { nx: dx / d, nz: dz / d, gap: d - o.r(dx / d, dz / d) };
+  }
   if (o.kind === 'circle') {
     const dx = x - o.x, dz = z - o.z;
     const d = Math.hypot(dx, dz) || 1e-6;
@@ -142,7 +149,7 @@ export class Walker {
       if (o === g.ignore && !g.via) continue;
       const cx = o.x - this.x, cz = o.z - this.z;
       const along = cx * dx + cz * dz;
-      const size = o.kind === 'circle' ? o.r : Math.max(o.hx, o.hz);
+      const size = o.kind === 'circle' ? o.r : o.kind === 'radial' ? o.maxR : Math.max(o.hx, o.hz);
       if (along < -size || along > look + size) continue;
       // where the path passes the obstacle, how close does it come?
       const px = this.x + dx * Math.max(0, along), pz = this.z + dz * Math.max(0, along);

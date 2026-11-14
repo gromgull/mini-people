@@ -192,8 +192,9 @@ export class Actor {
   choreOf(kind: 'haul'): Haul;
   choreOf(kind: 'banjo'): Banjo;
   choreOf(kind: 'armful'): Armful;
-  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful'): Chore {
-    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful }[kind];
+  choreOf(kind: 'fish'): Fish;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish }[kind];
     return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
@@ -206,6 +207,8 @@ export class Actor {
       sawLog?: { r: number; len: number };
       /** Chopping: a real tree's shape (stands where it is; no conjured tree). */
       tree?: PineSpec;
+      /** Fishing: real water ahead (no conjured pool; ends once the fish is off the hook). */
+      water?: boolean;
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
       /** Armful: the things to gather (their meshes) and where each lies. */
@@ -249,6 +252,7 @@ export class Actor {
       const C = kind === 'chop' ? Chop : kind === 'pick' ? PickApple : Fish;
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
       if (kind === 'chop') (this.chore as Chop).aim(opts.tree ?? null);
+      if (kind === 'fish') (this.chore as Fish).aimWater(!!opts.water);
       this.chore.start();
     }
     if (kind === 'banjo') {
