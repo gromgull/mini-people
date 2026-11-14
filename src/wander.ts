@@ -69,6 +69,11 @@ export class Wander {
     return true;
   }
 
+  /** Head off somewhere (e.g. to take something they're carrying away). */
+  send(i: number, all: WanderState[]) {
+    this.pickTarget(all[i], all, wanderRadius(all.length, this.spread));
+  }
+
   private pickTarget(s: WanderState, all: WanderState[], R: number) {
     // mostly a nearby spot, sometimes across the square; never onto someone
     const far = this.rnd() < 0.3;

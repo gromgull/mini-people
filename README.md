@@ -57,7 +57,8 @@ Audio from the same genome, with no samples:
     acting.
 - **Actions:** wave, hammer, jump, trip, carry a box, sit on a bench, talk
   (with turn-taking, nods and gestures), saw a log, fiddle, dance, chop down a
-  pine, pick (and eat) an apple, and fish. Dancers and fiddlers share one beat.
+  pine, pick an apple, and fish. Apples and fish are carried off afterwards.
+  Dancers and fiddlers share one beat.
   Props are conjured and fitted to the person: the trunk stands where *their*
   axe lands, the apple hangs where *their* hand reaches.
 - **Faces:** googly eyes that look at each other, the camera, the cursor or

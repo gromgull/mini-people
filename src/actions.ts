@@ -132,6 +132,8 @@ export class Actor {
   bursts: { kind: BurstKind; at: THREE.Vector3 }[] = [];
   /** Where this action wants the eyes, in world space (null = let the gaze pick). */
   focus: THREE.Vector3 | null = null;
+  /** Set for one frame when the action wants them to walk off somewhere. */
+  depart = false;
   private chore: Chore | null = null;
   private chores: Partial<Record<ActionKind, Chore>> = {};
   /** Shared beat clock (beats since start), set by the caller every frame. */
@@ -545,6 +547,7 @@ export class Actor {
     this.events.length = 0;
     this.bursts.length = 0;
     this.focus = null;
+    this.depart = false;
     m.lockPhase = false;
     if (!this.kind) return null;
     if (this.stopNow) {

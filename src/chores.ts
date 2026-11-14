@@ -23,6 +23,10 @@ export interface ChoreOut {
   bursts: { kind: BurstKind; at: THREE.Vector3 }[];
   /** World point the eyes should follow, or null. */
   focus: THREE.Vector3 | null;
+  /** False lets them walk while the chore goes on (carrying something off). */
+  holdSpeed: boolean;
+  /** Set for one frame when they should head off somewhere (wander picks where). */
+  depart: boolean;
 }
 
 export interface Chore {
@@ -77,6 +81,8 @@ const CHOP_TURN = -1.2;
 // shoulder, swing through to the left, the blade biting the trunk on the way
 const AXE_READY = { spineY: -0.15, R: { x: -1.15, z: -0.2, elbow: 0.5 }, L: { x: -1.1, z: -0.3, elbow: 0.65 } };
 const AXE_WIND = { spineY: -1.05, R: { x: -1.6, z: -0.05, elbow: 1.15 }, L: { x: -1.5, z: -0.35, elbow: 1.3 } };
+// the left hand just stays low on the handle; the chest twist carries it round
+const AXE_LEFT: ArmAngles = { x: -0.95, z: -0.2, elbow: 0.7 };
 const AXE_STRIKE = { spineY: 0.35, R: { x: -1.12, z: -0.2, elbow: 0.2 }, L: { x: -1.08, z: -0.32, elbow: 0.4 } };
 
 export class Chop implements Chore {
@@ -140,10 +146,10 @@ export class Chop implements Chore {
     const bark = pick(ROWS.bark), needles = pick(ROWS.pine);
     const stumpG = new THREE.CylinderGeometry(rt * 0.96, rt * 1.1, this.cutY, 7).translate(0, this.cutY / 2, 0);
     this.stump = baked([{ geo: stumpG, row: bark }], this.kit);
-    const trunkTop = Math.max(this.cutY + 0.3 * H, 1.08 * H); // needles start above the head
+    const trunkTop = Math.max(this.cutY + 0.3 * H, 0.62 * H);
     const parts: Part[] = [{ geo: new THREE.CylinderGeometry(rt * 0.75, rt * 0.96, trunkTop - this.cutY + 0.1 * H, 7).translate(0, (trunkTop - this.cutY + 0.1 * H) / 2, 0), row: bark }];
     let y = trunkTop - this.cutY;
-    for (const [rad, h] of [[0.46, 0.66], [0.36, 0.58], [0.25, 0.52]]) {
+    for (const [rad, h] of [[0.52, 0.72], [0.4, 0.62], [0.27, 0.55]]) {
       const g = new THREE.ConeGeometry(rad * H, h * H, 7, 1).rotateY(Math.random() * Math.PI).translate(0, y + (h * H) / 2, 0);
       parts.push({ geo: g, row: needles });
       y += h * H * 0.55;
@@ -199,7 +205,7 @@ export class Chop implements Chore {
       }
       const e = smooth(t / lead);
       setArm(P, 'R', pose.R, e, stiff);
-      setArm(P, 'L', pose.L, e, stiff);
+      setArm(P, 'L', AXE_LEFT, e, 1.2);
       P.spineY = pose.spineY * e;
       P.spineX = 0.2 * e;
       P.crouch = CHOP_CROUCH * e;
@@ -223,7 +229,7 @@ export class Chop implements Chore {
       // step back from it: axe down, lean away, watch it go
       const k = smooth((t - (lead + CHOPS * T - T * 0.36)) / 0.6);
       setArm(P, 'R', mixArm(AXE_STRIKE.R, { x: -0.35, z: 0.1, elbow: 0.4 }, k), 1, 1.2);
-      setArm(P, 'L', AXE_STRIKE.L, 1 - k);
+      setArm(P, 'L', AXE_LEFT, 1 - k);
       P.spineY = AXE_STRIKE.spineY * (1 - k);
       P.spineX = lerp(0.2, -0.08, k);
       P.headX = this.landedAt < 0 ? -0.1 : 0.2;
@@ -281,7 +287,9 @@ function mix<T extends { spineY: number; R: ArmAngles; L: ArmAngles }>(a: T, b: 
 // ================================================================ pick an apple
 
 const REACH: ArmAngles = { x: -2.3, z: 0.2, elbow: 0.1 }; // up and out, toward the crown's edge
-const NEAR_MOUTH: ArmAngles = { x: -1.25, z: -0.05, elbow: 2.25 };
+const APPLE_CARRY: ArmAngles = { x: -0.4, z: 0.12, elbow: 1.2 }; // held out in front, forearm level
+/** How long they walk around with what they've got before it vanishes (for now). */
+const CARRY_TIME = 6;
 const TIPTOE = 0.03; // × height
 
 export class PickApple implements Chore {
@@ -291,8 +299,7 @@ export class PickApple implements Chore {
   private appleAt = new THREE.Vector3(); // its spot in the crown
   private built: THREE.Mesh[] = [];
   private picked = false;
-  private bites = 0;
-  private times = { reach: 0.45, grab: 1.3, tug: 1.35, snap: 1.95, down: 2.9, bite1: 3.6, bite2: 4.4, done: 5.4 };
+  private times = { reach: 0.45, grab: 1.3, tug: 1.35, snap: 1.95, down: 2.7 };
 
   constructor(private p: Person, private kit: PropKit) {
     const g = withRow(new THREE.IcosahedronGeometry(0.075, 1), ROWS.apple[0]);
@@ -357,7 +364,6 @@ export class PickApple implements Chore {
     this.tree.scale.setScalar(1e-3);
     this.tree.visible = true;
     this.picked = false;
-    this.bites = 0;
   }
 
   pre(t: number, dt: number, P: ActionPose, tempo: number, out: ChoreOut) {
@@ -366,13 +372,16 @@ export class PickApple implements Chore {
     const s = Math.sqrt(H);
     const slow = 1 / Math.sqrt(tempo);
     const at = (k: keyof typeof T) => T[k] * slow;
-    if (t > at('done') + 0.75) return false;
-    // side-on to the tree, like chopping, so the crown isn't over the face
-    P.spin = -0.85 * smooth(t / 0.4) * (1 - smooth((t - at('done') - 0.35) / 0.4));
-    const pop = t < 0.4 ? grow(t / 0.4) : t > at('done') ? Math.max(1e-3, 1 - smooth((t - at('done')) / 0.35)) : 1;
+    const done = at('down') + CARRY_TIME;
+    if (t > done + 0.4) return false;
+    // side-on to the tree while picking (so the crown isn't over the face),
+    // square again once the tree has gone and they set off
+    P.spin = -0.85 * smooth(t / 0.4) * (1 - smooth((t - at('snap') - 0.2) / (at('down') - at('snap') - 0.2)));
+    const pop = t < 0.4 ? grow(t / 0.4) : Math.max(1e-3, 1 - smooth((t - at('snap') - 0.25) / 0.35));
     this.tree.scale.setScalar(pop);
+    this.tree.visible = pop > 2e-3;
 
-    // the arm: up to the apple, a couple of tugs, then down to the mouth
+    // the arm: up to the apple, a couple of tugs, then down to carry it
     let a: ArmAngles = REACH;
     let w = 1;
     let lift = 0;
@@ -389,28 +398,21 @@ export class PickApple implements Chore {
       this.crown.rotation.set(0.04 * tug, 0, 0.03 * Math.sin(t * 30) * tug);
     } else if (t < at('down')) {
       const k = smooth((t - at('snap')) / (at('down') - at('snap')));
-      a = mixArm(REACH, NEAR_MOUTH, k);
+      a = mixArm(REACH, APPLE_CARRY, k);
       lift = TIPTOE * H * (1 - k);
       this.crown.rotation.set(0.05 * Math.sin((t - at('snap')) * 18) * (1 - k), 0, 0); // springs back
-    } else if (t < at('done')) {
-      a = NEAR_MOUTH;
-      // bites: up to the mouth, crunch, back a little to chew
-      for (const b of ['bite1', 'bite2'] as const) {
-        const u = (t - at(b)) / 0.35;
-        if (u > -1 && u < 1) a = { ...a, x: a.x - 0.25 * (1 - Math.abs(u)), elbow: a.elbow + 0.15 * (1 - Math.abs(u)) };
-      }
     } else {
-      a = NEAR_MOUTH;
-      w = 1 - smooth((t - at('done')) / 0.4);
+      // off they go with it (eating comes later)
+      a = APPLE_CARRY;
+      out.holdSpeed = false;
+      if (t - dt < at('down')) out.depart = true;
+      if (t > done) w = 1 - smooth((t - done) / 0.4);
     }
     setArm(P, 'R', a, w, 1.6);
     P.lift = lift;
     const up = t < at('snap') ? smooth((t - 0.2) / 0.5) : 1 - smooth((t - at('snap')) / 0.6);
-    P.headX = -0.45 * up + (t > at('down') ? 0.12 : 0);
+    P.headX = -0.45 * up;
     P.spineX = -0.1 * up;
-    if (t > at('down')) P.headZ = 0.12;
-    // chewing
-    if (t > at('bite1') && t < at('done')) P.headX += 0.035 * Math.sin(t * 28);
 
     if (!this.picked && t >= at('snap')) {
       this.picked = true;
@@ -423,17 +425,9 @@ export class PickApple implements Chore {
       this.apple.position.set(0, -d.handR * 1.5, d.handR * 0.6);
       this.apple.scale.setScalar(s);
     }
-    for (const b of ['bite1', 'bite2'] as const) {
-      if (this.bites < (b === 'bite1' ? 1 : 2) && t >= at(b)) {
-        this.bites++;
-        out.events.push('crunch');
-        this.apple.scale.multiplyScalar(0.84);
-        this.p.root.updateMatrixWorld(true);
-        out.bursts.push({ kind: 'crumbs', at: this.apple.getWorldPosition(new THREE.Vector3()) });
-      }
-    }
-    if (t > at('done')) this.apple.scale.setScalar(s * 0.7 * Math.max(1e-3, 1 - smooth((t - at('done')) / 0.3)));
-    out.focus = this.apple.getWorldPosition(new THREE.Vector3());
+    if (t > done) this.apple.scale.setScalar(s * Math.max(1e-3, 1 - smooth((t - done) / 0.3)));
+    // eyes on the apple until they're on their way
+    if (t < at('down') + 0.8) out.focus = this.apple.getWorldPosition(new THREE.Vector3());
     return true;
   }
 
@@ -475,6 +469,7 @@ const ROD_BACK: ArmAngles = { x: -2.7, z: 0.15, elbow: 0.55 };
 const ROD_FLICK: ArmAngles = { x: -1.3, z: 0.12, elbow: 0.3 };
 const ROD_STRIKE: ArmAngles = { x: -1.55, z: 0.12, elbow: 0.6 };
 const ROD_LIFT: ArmAngles = { x: -1.75, z: 0.1, elbow: 1.35 }; // the catch held up to look at
+const FISH_CARRY: ArmAngles = { x: -0.7, z: 0.16, elbow: 1.4 }; // both hands round the fish, in front
 const ROD_ANGLE = 0.7; // rod tilt up from the forearm line (rad)
 const G = 6; // gravity for the dangling end (lighter than real: slower, readable swings)
 const lineMat = new THREE.LineBasicMaterial({ color: '#1a1410' });
@@ -505,7 +500,12 @@ export class Fish implements Chore {
   private target = new THREE.Vector3(); // where the cast lands
   private bank = new THREE.Vector3(); // where the fish is lifted out
   private tipRoot = new THREE.Vector3();
-  private sched = { back: 0.45, flick: 1.05, release: 1.2, settle: 2.0, bite: 5, reel: 5.3, out: 7.8, done: 10 };
+  private sched = { back: 0.45, flick: 1.05, release: 1.2, settle: 2.0, bite: 5, reel: 5.3, out: 7.8, grab: 9.6, held: 10.1, done: 16 };
+  private heldAt = new THREE.Matrix4(); // the fish between the hands, in the chest's frame
+  private _m = new THREE.Matrix4();
+  private _p = new THREE.Vector3();
+  private _q = new THREE.Quaternion();
+  private _s = new THREE.Vector3();
   private nibbles: number[] = [];
   private lastTick = 0;
   private bitten = false;
@@ -632,7 +632,21 @@ export class Fish implements Chore {
     S.bite = S.settle + wait;
     S.reel = S.bite + 0.35;
     S.out = S.reel + 2.4;
-    S.done = S.out + 2.3;
+    S.grab = S.out + 1.8;
+    S.held = S.grab + 0.5;
+    S.done = S.held + CARRY_TIME;
+    // where the fish sits once it's off the hook: between the hands of the
+    // carrying pose, lying across the body
+    const d = p.dims;
+    const J = p.joints;
+    const mid = withFK(p, { R: FISH_CARRY, L: FISH_CARRY }, () => {
+      const hand = (w: THREE.Object3D) => J.spine.worldToLocal(w.localToWorld(new THREE.Vector3(0, -d.handR * 0.8, d.handR * 0.4)));
+      return hand(J.wristL).add(hand(J.wristR)).multiplyScalar(0.5);
+    });
+    // (the mouth is the fish's origin and its body runs back along −z, here the
+    // carrier's right: put the mouth by the left hand so the body spans the two)
+    mid.x += 0.11 * Math.sqrt(H);
+    this.heldAt.compose(mid, new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)), new THREE.Vector3(1, 1, 1));
     this.nibbles = [S.settle + wait * (0.35 + 0.2 * Math.random()), S.settle + wait * (0.7 + 0.15 * Math.random())];
     this.mode = 'dangle';
     this.len = 0.22 * H;
@@ -651,9 +665,11 @@ export class Fish implements Chore {
     const S = this.sched;
     if (t > S.done + 0.4) return false;
     const s = Math.sqrt(this.H);
-    const pop = t < 0.35 ? grow(t / 0.35) : t > S.done ? Math.max(1e-3, 1 - smooth((t - S.done) / 0.35)) : 1;
+    // rod and pool go once the fish is off the hook
+    const pop = t < 0.35 ? grow(t / 0.35) : Math.max(1e-3, 1 - smooth((t - S.grab) / 0.3));
     this.rod.scale.setScalar(s * pop);
     this.pool.scale.set(pop, 1, pop);
+    this.rod.visible = this.pool.visible = pop > 2e-3;
 
     let a: ArmAngles = ROD_HOLD;
     let stiff = 1.2;
@@ -689,14 +705,26 @@ export class Fish implements Chore {
         this.lastTick = t;
         out.events.push('tick');
       }
-    } else if (t < S.done) {
+    } else if (t < S.grab) {
       a = mixArm(ROD_STRIKE, ROD_LIFT, smooth((t - S.out) / 0.6));
       P.spineX = -0.1;
       P.headZ = 0.14 * smooth((t - S.out - 0.6) / 0.5);
       if (t - dt < S.out + 0.9 && t >= S.out + 0.9) out.events.push('hey');
+    } else if (t < S.held) {
+      // take it off the line in both hands
+      const k = smooth((t - S.grab) / (S.held - S.grab));
+      a = mixArm(ROD_LIFT, FISH_CARRY, k);
+      setArm(P, 'L', FISH_CARRY, k, 1.5);
+      P.headX = 0.25 * k;
     } else {
-      a = ROD_LIFT;
-      w = 1 - smooth((t - S.done) / 0.4);
+      // and off they go with it
+      a = FISH_CARRY;
+      out.holdSpeed = false;
+      if (t - dt < S.held) out.depart = true;
+      const fade = t > S.done ? 1 - smooth((t - S.done) / 0.4) : 1;
+      w = fade;
+      setArm(P, 'L', FISH_CARRY, fade, 1.5);
+      P.headX = 0.15 * (1 - smooth((t - S.held) / 1.2));
     }
     setArm(P, 'R', a, w, stiff);
 
@@ -730,8 +758,8 @@ export class Fish implements Chore {
       out.bursts.push({ kind: 'splash', at: this.p.root.localToWorld(this.end.clone()) });
       this.ripple(this.end, 1.4);
     }
-    // the eyes follow the float, then the fish
-    out.focus = this.p.root.localToWorld(this.end.clone());
+    // the eyes follow the float, then the fish (until they're walking off with it)
+    if (t < S.held + 0.8) out.focus = this.fish.visible ? this.fish.getWorldPosition(new THREE.Vector3()) : this.p.root.localToWorld(this.end.clone());
     return true;
   }
 
@@ -826,6 +854,16 @@ export class Fish implements Chore {
       this.fish.position.copy(this.end);
       this.fish.quaternion.setFromUnitVectors(_w.set(0, 0, 1), _v.subVectors(tip, this.end).normalize());
       this.fish.children[0].rotation.y = 0.5 * Math.sin(t * 17) * Math.max(0.3, 1 - (t - S.out) / 2.5);
+      if (t > S.grab) {
+        // from the line into the hands, then carried there (it flops now and then)
+        const k = smooth((t - S.grab) / (S.held - S.grab));
+        this._m.copy(p.root.matrixWorld).invert().multiply(p.joints.spine.matrixWorld).multiply(this.heldAt);
+        this._m.decompose(this._p, this._q, this._s);
+        this.fish.position.lerp(this._p, k);
+        this.fish.quaternion.slerp(this._q, k);
+        const flop = Math.max(0, Math.sin(t * 1.7)) ** 6;
+        this.fish.children[0].rotation.y = lerp(this.fish.children[0].rotation.y, 0.35 * Math.sin(t * 16) * flop, k);
+      }
     } else {
       this.bobber.position.copy(this.end);
       if (this.mode === 'float' || this.mode === 'reel') this.bobber.position.y = Math.max(this.bobber.position.y, -0.012);
@@ -840,8 +878,9 @@ export class Fish implements Chore {
     }
     const pop = t > S.done ? Math.max(1e-3, 1 - smooth((t - S.done) / 0.35)) : 1;
     this.fish.scale.setScalar(Math.sqrt(H) * pop);
-    this.bobber.scale.setScalar(Math.sqrt(H) * pop);
-    this.line.visible = pop > 0.05;
+    this.bobber.scale.setScalar(Math.sqrt(H));
+    // the line and float go with the rod
+    this.line.visible = this.bobber.visible = t < S.grab + 0.15;
 
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i];

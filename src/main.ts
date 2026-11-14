@@ -565,6 +565,7 @@ function simulate(dt: number) {
     let pose = a.pre(dt, m, st);
     const o = offsets[i];
     if (settings.mode === 'wander') {
+      if (a.depart) brain.send(i, wanders); // off somewhere with what they've got
       const plan = brain.think(i, wanders, { busy: a.busy, holdSpeed: a.holdSpeed || o.locked, speed: m.speed, prefSpeed: settings.speed * st.speedK }, simTime, dt);
       if (plan.act) {
         act(i, plan.act);
