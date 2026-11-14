@@ -35,7 +35,6 @@ export interface Genome {
   shorts: boolean;
   skirt: boolean;
   beard: number; // index into BEARD_STYLES
-  mouth: number; // index into MOUTH_STYLES
   lips: number; // palette index
   // personality (drives animation, not geometry)
   persona: Persona;
@@ -45,7 +44,9 @@ export const SHAPE_GENES = [
   'height', 'girth', 'belly', 'legs', 'arms', 'head', 'shoulders', 'neck', 'hands', 'feet', 'nose', 'noseWidth', 'noseLength', 'eyeSize', 'fem', 'bust',
 ] as const;
 
+/** The mouth's shapes: which one shows is up to what they're doing and what happens to them (see Crowd), not their genes. */
 export const MOUTH_STYLES = ['line', 'smile', 'frown', 'smirk', 'O'] as const;
+export type MouthShape = (typeof MOUTH_STYLES)[number];
 
 export const BEARD_STYLES = ['none', 'full', 'wizard', 'goatee', 'sideburns', 'moustache'] as const;
 
@@ -84,7 +85,6 @@ export function randomGenome(seed: number): Genome {
     noseWidth: 0.5,
     noseLength: 0.5,
     beard: 0,
-    mouth: 1,
     lips: 0,
     persona: { weight: 0, energy: 0, dainty: 0, posture: 0, swagger: 0, sloppy: 0 },
   };
@@ -100,7 +100,6 @@ export function randomGenome(seed: number): Genome {
   g.skirt = g.fem > 0.5 && r() < 0.4;
   g.noseWidth = bell(r);
   g.noseLength = bell(r);
-  // mouths: mostly content, some deadpan, a few grumpy, smug or startled
   // beards: mostly on masculine builds; grey/white hair leans wizard
   const beardR = r();
   const beardPick = r();
@@ -109,7 +108,7 @@ export function randomGenome(seed: number): Genome {
     const pool = grey ? [1, 2, 2, 2, 3, 4, 5] : [1, 1, 1, 2, 3, 3, 3, 4, 4, 5, 5];
     g.beard = pool[pickIndex(() => beardPick, pool.length)];
   }
-  g.mouth = [1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 3, 3, 4][pickIndex(r, 13)];
+  pickIndex(r, 13); // (was the mouth, now down to mood: still drawn, so the genes after it stay as they were)
   const lipR = r();
   g.lips = g.fem > 0.5 ? (lipR < 0.6 ? 3 + Math.floor(r() * 2) : 2) : Math.floor(lipR * 3); // 0–2 muted, 3–4 red
   // separate stream so adding personality doesn't reshuffle existing bodies

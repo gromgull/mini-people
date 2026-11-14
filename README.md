@@ -75,7 +75,12 @@ Audio from the same genome, with no samples:
   Props are conjured and fitted to the person: the trunk stands where *their*
   axe lands, the apple hangs where *their* hand reaches.
 - **Faces:** googly eyes that look at each other, the camera, the cursor or
-  whatever just happened, plus noses, mouths that gasp, and beards.
+  whatever just happened, plus noses and beards. The mouth shows the mood,
+  not a gene. It gasps at a fright and opens for a bite. It flaps while
+  they talk and smiles (or smirks) between words. It frowns for a while
+  after a fall or under a heavy log, and keeps a straight face at work, on
+  the way somewhere or waiting at the table. At their ease (idle, sat,
+  smoking, playing, dancing, fed) they smile.
 - **Look:** cel shading through a palette atlas, pixelation, outlines, banded
   haze toward a horizon, a sky and drifting clouds. There's also an optional
   "animate on twos" low frame rate.

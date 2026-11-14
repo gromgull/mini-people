@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { type BodyDims, type Genome, deriveBody } from './genome';
+import { type BodyDims, type Genome, MOUTH_STYLES, type MouthShape, deriveBody } from './genome';
 import { ROWS } from './palette';
 import { type Skin, bakeSkin } from './skin';
 
@@ -36,8 +36,8 @@ export interface Person {
   eyes: Eye[];
   /** Ponytail pivot (child of the head) that the animator swings, if any. */
   tail: THREE.Object3D | null;
-  /** Resting mouth and a startled 'O' (swapped in by the gaze system). */
-  mouth: { rest: THREE.Object3D; o: THREE.Object3D } | null;
+  /** Every shape the mouth can make (one shows at a time: see setMouth), and which one's showing. */
+  mouth: { shapes: Record<MouthShape, THREE.Object3D>; now: MouthShape } | null;
   dims: BodyDims;
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
@@ -47,6 +47,15 @@ export interface Person {
 }
 
 // ---------------------------------------------------------------- geometry helpers
+
+/** Show this mouth shape (and hide the one that was showing). */
+export function setMouth(p: Person, shape: MouthShape) {
+  const m = p.mouth;
+  if (!m || m.now === shape) return;
+  m.shapes[m.now].visible = false;
+  m.shapes[shape].visible = true;
+  m.now = shape;
+}
 
 export function withRow(geo: THREE.BufferGeometry, row: number): THREE.BufferGeometry {
   // drop uv: we don't use it and it lets us merge freely
@@ -288,7 +297,8 @@ export function buildPerson(
   }
 
   // mouth: a small dark shape on the face, in a lip colour; full beards push
-  // it out to sit on the beard. A hidden 'O' is kept for surprises.
+  // it out to sit on the beard. Every shape is built (all but one hidden):
+  // which shows is down to mood, not genes.
   let mouth: Person['mouth'] = null;
   {
     const hr0 = d.headR;
@@ -336,10 +346,12 @@ export function buildPerson(
       g.translate(0, hc + y * hr0, z * hr0);
       return g;
     };
-    const rest = part(head, place(shapeFor(genome.mouth)));
-    const o = part(head, place(shapeFor(4)));
-    o.visible = false;
-    mouth = { rest, o };
+    const shapes = {} as Record<MouthShape, THREE.Object3D>;
+    MOUTH_STYLES.forEach((name, k) => {
+      shapes[name] = part(head, place(shapeFor(k)));
+      shapes[name].visible = name === 'line';
+    });
+    mouth = { shapes, now: 'line' };
   }
 
   // facial hair (in the hair colour; on the head, so it follows nods and turns)

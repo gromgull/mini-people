@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import GUI from 'lil-gui';
 import type { Person } from './body';
-import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
+import { BEARD_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE } from './palette';
 import { PARTS_LAYER } from './skin';
 import { Trees } from './trees';
@@ -559,7 +559,6 @@ function select(i: number) {
   looks.add(g, 'skin', idx(PALETTE.skin.length)).onChange(rebuild);
   looks.add(g, 'hair', idx(PALETTE.hair.length)).onChange(rebuild);
   looks.add(g, 'hairStyle', Object.fromEntries(HAIR_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
-  looks.add(g, 'mouth', Object.fromEntries(MOUTH_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
   looks.add(g, 'lips', idx(PALETTE.lips.length)).onChange(rebuild);
   looks.add(g, 'beard', Object.fromEntries(BEARD_STYLES.map((n, j) => [n, j]))).onChange(rebuild);
   looks.add(g, 'shirt', idx(PALETTE.shirt.length)).onChange(rebuild);

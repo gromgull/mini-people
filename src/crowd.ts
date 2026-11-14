@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { type Person, buildPerson } from './body';
-import type { Genome } from './genome';
+import { type Person, buildPerson, setMouth } from './body';
+import type { Genome, MouthShape } from './genome';
 import { type GaitParams, type Motion, advance } from './gait';
 import { Animator } from './animate';
 import { styleFor } from './persona';
@@ -196,11 +196,7 @@ export class Crowd {
     a.post(dt, m, st);
     g.update(dt, simTime);
     const gasp = g.surprised || (a.kind === 'fall' && a.rootLocked);
-    if (p.mouth) {
-      // gasp while falling or while staring at someone else's drama
-      p.mouth.rest.visible = !gasp && !a.mouthOpen;
-      p.mouth.o.visible = gasp || a.mouthOpen;
-    }
+    if (p.mouth) setMouth(p, this.mouthFor(i, a, m, gasp, simTime));
     this.soundFor(i, p, m, a, g.surprised && !this.wasGasping[i]);
     this.wasGasping[i] = g.surprised;
     if (a.impact && a.hammerHead) {
@@ -234,6 +230,60 @@ export class Crowd {
   /** Point every drop shadow away from the light (after Stage.updateLight). */
   orientShadows() {
     for (const p of this.people) if (p.root.userData.shadow) this.stage.orient(p.root.userData.shadow, p.root.rotation.y);
+  }
+
+  // ------------------------------------------------------------ the face
+
+  private mood: { shape: MouthShape; since: number; talkUntil: number; frownUntil: number; fell: boolean }[] = [];
+
+  /**
+   * What the mouth does, from what they're up to and what's happening to
+   * them: an O for a fright or a bite; flapping while they talk, a smile (or
+   * a smirk) between; a frown after a fall or under a heavy log; a straight
+   * face for hard work, walking and waiting; a smile at their ease (idle,
+   * sat, smoking, playing, dancing, fed). Moods hold a moment, so faces don't
+   * flicker; frights, bites and speech show at once.
+   */
+  private mouthFor(i: number, a: Actor, m: Motion, gasp: boolean, now: number): MouthShape {
+    const md = (this.mood[i] ??= { shape: 'line', since: -1, talkUntil: 0, frownUntil: 0, fell: false });
+    // (a fall: the face stays sour a little while after they're up)
+    if (a.kind === 'fall') md.fell = true;
+    else if (md.fell) {
+      md.fell = false;
+      md.frownUntil = now + 2.5;
+    }
+    const to = a.talkingTo;
+    if (a.beat && to >= 0) md.talkUntil = now + 0.45;
+    const k = a.kind;
+    const working = k === 'saw' || k === 'chop' || k === 'hammer' || k === 'hold' || k === 'armful' || k === 'carry' || k === 'fish' || k === 'pick' || k === 'haul';
+    // (busy at their own work, nobody else's drama makes them gape)
+    if (working) gasp = false;
+    const speaking = this.sound.live ? this.sound.speaking(i) : now < md.talkUntil;
+    // at once: frights, bites, words
+    if (gasp || a.mouthOpen) return this.holdMouth(md, 'O', now, true);
+    if (to >= 0 && speaking) return Math.floor(now * 9 + i * 0.37) % 2 ? 'O' : 'line';
+    if (a.kind === 'fall' || now < md.frownUntil) return this.holdMouth(md, 'frown', now, true);
+    // moods
+    let want: MouthShape;
+    if (to >= 0) want = (i * 7 + to * 3) % 4 === 0 ? 'smirk' : 'smile';
+    else if (k === 'haul') want = 'frown'; // (a log on the shoulder is heavy)
+    else if (working) want = 'line';
+    else if (k === 'dine' || k === 'eat' || k === 'drink') {
+      // at table: fed, or with something in the tankard, is content; waiting isn't
+      const d = a.choreOf('dine');
+      want = d.ate > 0 || !d.needsRefill ? 'smile' : 'line';
+    }
+    else if (k) want = 'smile'; // playing, smoking, dancing, waving, sitting about…
+    else want = m.speed > 0.08 ? 'line' : 'smile'; // on their way somewhere; or at their ease
+    return this.holdMouth(md, want, now, false);
+  }
+
+  private holdMouth(md: { shape: MouthShape; since: number }, want: MouthShape, now: number, at_once: boolean): MouthShape {
+    if (want !== md.shape && (at_once || now - md.since > 0.6)) {
+      md.shape = want;
+      md.since = now;
+    }
+    return md.shape;
   }
 
   /** Turn this frame's motion and action cues for person i into sound. */
