@@ -69,6 +69,10 @@ Audio from the same genome, with no samples:
 - **Look:** cel shading through a palette atlas, pixelation, outlines, banded
   haze toward a horizon, a sky and drifting clouds. There's also an optional
   "animate on twos" low frame rate.
+- **Village:** a pine forest, an apple glade, a pond, a two-storey
+  half-timbered inn (chimney, a kitchen serving hatch, a sign over the door)
+  and a few log cabins that vary in size, roof, windows and trim. Buildings
+  cast their real silhouette as a shadow, following the sun.
 
 ## Controls
 
@@ -119,6 +123,8 @@ Handy for sharing a particular scene, e.g.
 | `flowers` | flower density, 0–1 (0 = none) |
 | `trees=0` | no forest or apple trees |
 | `pond=0` | no pond |
+| `houses=0` | no inn or cabins |
+| `tx`, `tz` | point the camera somewhere other than the middle |
 | `look` | where everyone looks: `auto` · `cursor` · `camera` · `selected` |
 | `mute` | start silent |
 | `nogui` | hide the panel |
@@ -166,6 +172,7 @@ once.
 | `src/wander.ts` | the roaming crowd: targets, steering, personal space |
 | `src/tune.ts` | AABB fiddle tunes with melody, harmony and bass parts |
 | `src/audio.ts` | all sound synthesis |
+| `src/trees.ts`, `src/pond.ts`, `src/houses.ts` | scenery: forest and glade, the pond, the inn and cabins (merged into a few draw calls) |
 | `src/materials.ts`, `src/palette.ts`, `src/environment.ts` | toon shading, colours, haze, sky, clouds |
 | `src/main.ts` | scene, modes, GUI, input and the main loop |
 

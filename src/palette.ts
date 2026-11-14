@@ -26,6 +26,12 @@ export const PALETTE = {
   fish: ['#a9c2cf', '#e0884a', '#5f7f96'],
   wood: ['#b07a46', '#94643a', '#c99a62'],
   food: ['#f1e2ac', '#eee8d8', '#e6b34a'], // apple flesh, fish bones, ale
+  plaster: ['#efe3c4', '#e6d6b2'],
+  timber: ['#4a3222', '#3c2a1e'],
+  log: ['#8d5d38', '#7a4f2f', '#9c6c42'],
+  roof: ['#a24a30', '#6e5a48', '#6f8442', '#7d6a55', '#86392a', '#57473a', '#5d7238'], // clay tiles, shingles, turf, weathered; then darker courses for tiles, shingles, turf
+  paint: ['#3d6e8c', '#8a3a32', '#4f7a40', '#c9a542'], // shutters and doors
+  pane: ['#2c3844', '#f4c86a'], // dark glass, lamplit
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

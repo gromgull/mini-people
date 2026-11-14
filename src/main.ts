@@ -10,6 +10,7 @@ import { Clouds, Sun, createSky } from './environment';
 import { type Caster, Trees } from './trees';
 import { daylight, sunAt } from './daylight';
 import { Pond } from './pond';
+import { Houses } from './houses';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -62,6 +63,7 @@ const settings = {
   sky: q.get('sky') !== '0',
   trees: q.get('trees') !== '0',
   pond: q.get('pond') !== '0',
+  houses: q.get('houses') !== '0',
   grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
@@ -130,8 +132,8 @@ camera.zoom = num('zoom', 1);
   camera.position.set(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r);
 }
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.5, 0);
-camera.position.y += 0.5;
+controls.target.set(num('tx', 0), 0.5, num('tz', 0)); // ?tx=&tz= look somewhere else (screenshots)
+camera.position.add(new THREE.Vector3(num('tx', 0), 0.5, num('tz', 0)));
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.49; // down to ~2° above the ground
 
@@ -169,6 +171,8 @@ const trees = new Trees(toon, outline, shadowGeo, shadowMat);
 scene.add(trees.group);
 const pond = new Pond(toon, outline);
 scene.add(pond.group);
+const houses = new Houses(toon, outline, shadowMat);
+scene.add(houses.group);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
 
@@ -862,6 +866,7 @@ grassF.add(settings.grass, 'flowers', 0, 1, 0.01).name('flowers');
 grassF.add(settings.grass, 'flowerSize', 0.03, 0.1, 0.005).name('flower size');
 grassF.add(settings, 'trees');
 grassF.add(settings, 'pond');
+grassF.add(settings, 'houses');
 
 // ---------------------------------------------------------------- picking
 
@@ -911,6 +916,7 @@ function updateShadows(light: THREE.Vector3) {
   };
   for (const p of people) if (p.root.userData.shadow) orient(p.root.userData.shadow, p.root.rotation.y);
   if (trees.group.visible) for (const c of trees.casters) orient(c, 0);
+  if (houses.group.visible) houses.updateShadows(light, settings.shadowLength);
 }
 
 const lightWorld = new THREE.Vector3(); // what shades the scene: the sun, or the moon once the sun is down
@@ -1024,6 +1030,7 @@ function frame() {
   toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
   trees.group.visible = settings.trees;
   pond.group.visible = settings.pond;
+  houses.group.visible = settings.houses;
   pond.update(simTime);
   updateShadows(lightWorld);
   toon.uniforms.uWrap.value = settings.wrap;
