@@ -186,7 +186,7 @@ export class Crowd {
     const a = this.actors[i];
     const g = this.gazes[i];
     const st = this.styleOf(p);
-    g.partner = a.kind === 'talk' ? a.partner : -1;
+    g.partner = a.talkingTo;
     g.aim(this.gazeWorld);
     this.anims[i].update(dt, p, m, st, p.root.rotation.y, pose, g.hint);
     a.post(dt, m, st);
@@ -254,7 +254,8 @@ export class Crowd {
     if (a.impact) sound.hammer(w);
     if (a.note) sound.fiddleNote(a.note.f, a.note.dur, w);
     if (a.pluck) sound.banjoNote(a.pluck.f, w);
-    if (a.beat && Math.random() < (a.partner >= 0 ? 0.55 : 0.2) && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
+    const to = a.talkingTo;
+    if (a.beat && Math.random() < (to >= 0 ? 0.55 : 0.2) && !(to >= 0 && sound.speaking(to)) && !sound.speaking(i)) sound.phrase(i, v, w);
     if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
     for (const e of a.events) {
       if (e === 'clap') sound.clap(w);

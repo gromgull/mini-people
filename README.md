@@ -166,11 +166,15 @@ So far it has one chain:
 - **The innkeeper** keeps the larder crate by the kitchen hatch stocked with
   dried fish fetched from the rack, using the same delivery job as the
   firewood. Guests eat one every so often.
-- **The apple picker** fetches the basket (wherever it was left), carries it
-  to a tree with ripe apples in reach, sets it down and picks into it one
-  apple at a time: they stand exactly where their stretch meets that apple,
-  and the arm is solved onto it. With five they carry the basket to the
-  cider mill and tip the apples into its hopper. Picked apples grow back.
+- **The apple pickers** (there are two, to keep the mill fed) each have
+  their own basket and step-ladder. A picker fetches the basket (wherever it
+  was left), carries it to a tree with ripe apples, sets it down and picks
+  into it one apple at a time: they stand exactly where their stretch meets
+  that apple, and the arm is solved onto it. The orchard's trees come in all
+  sizes, and for an apple out of reach they carry the step-ladder over, set
+  it down under the apple, step up, pick, and step down again. The ladder
+  stays where it was left. With five apples they carry the basket to the
+  cider mill and tip them into its hopper. Picked apples grow back.
 - **The miller** turns the mill's crank once the hopper holds twelve apples;
   the apples go down one by one, and a keg of cider stands full under the
   spout, which they carry to the keg rack.
@@ -193,6 +197,11 @@ So far it has one chain:
   sit down by however much their legs need for the real seat, reach for the
   real table top, and crouch to the real log, so a short woodworker saws
   standing tall and a tall one bends their knees.
+- **Talk:** people chat over whatever else they're doing, with gestures of
+  a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
+  on each other. Diners at a table talk in pairs while they wait for supper,
+  the innkeeper has a word as each plate or tankard goes down, and two
+  people meeting on their way now and then stop for a chat before going on.
 - **Smoke** rises from the inn's chimney while its fire has firewood, and
   thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
@@ -269,7 +278,7 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the basket, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
+| `src/village/` | the village: `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/smoke.ts` | chimney smoke |

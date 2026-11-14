@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, type Store, type Woodpile } from './things';
+import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -39,6 +39,8 @@ export const CATCH = 3;
 export const LARDER_WANT = 8;
 /** Apples in a basketful. */
 export const BASKET = 5;
+/** How far the step-ladder's top step stands ahead of the feet of someone about to climb it. */
+const LADDER_STEP = 0.3;
 /** Apples the mill turns into a keg. */
 export const MILL_BATCH = 12;
 /** Tankards of cider in a keg. */
@@ -71,9 +73,10 @@ export interface Village {
   pond: Pond;
   rack: Rack;
   larder: Crate;
-  /** Apples and cider: the orchard, the picker's basket, the mill, kegs at the mill and at the inn. */
+  /** Apples and cider: the orchard, the pickers' baskets (and step-ladders), the mill, kegs at the mill and at the inn. */
   orchard: Orchard;
-  basket: Basket;
+  baskets: Basket[];
+  ladders: StepLadder[];
   mill: CiderMill;
   millKegs: KegRack;
   innKegs: KegRack;
@@ -99,6 +102,8 @@ export interface Village {
   cameHome(i: number): void;
   /** Everyone (but the innkeeper) has had supper or gone to bed. */
   everyoneFed(): boolean;
+  /** Two people have a word: they stop where they are (if walking) and talk for a while. */
+  chat(i: number, j: number, seconds: number): void;
   /** Bookkeeping for the overlay and the tests. */
   stats: {
     felled: number; sawn: number; delivered: number; burned: number;
@@ -121,6 +126,8 @@ export interface Worker {
   instrument: 'fiddle' | 'banjo' | null;
   /** Their own front door (where they go in at night and come out in the morning). */
   home: { x: number; z: number; yaw: number };
+  /** A picker's own basket and step-ladder. */
+  gear?: { basket: Basket; ladder: StepLadder };
 }
 
 /** Steps that aren't work: sitting about and playing. */
@@ -159,6 +166,8 @@ export abstract class Job {
   /** What's in their arms. */
   armful: Item[] = [];
   protected waitUntil = 0;
+  /** Stopped where they are until then (simulation seconds): having a word with someone. */
+  holdUntil = 0;
 
   constructor(readonly w: Worker, readonly role: string) {}
 
@@ -288,6 +297,8 @@ export abstract class Job {
           this.armful = [];
           this.step = { kind: 'idle' };
           v.served();
+          const regular = v.seats[0].diner;
+          if (regular >= 0) v.chat(this.w.i, regular, 2 + Math.random());
           return;
         }
         const plateOf = v.seats.find((st) => st.plate === to);
@@ -295,6 +306,8 @@ export abstract class Job {
           this.armful = [];
           this.step = { kind: 'idle' };
           v.mealServed(plateOf);
+          // a word with them as it goes down
+          if (plateOf.diner >= 0) v.chat(this.w.i, plateOf.diner, 2 + Math.random());
           return;
         }
         this.armful = [];
@@ -1088,9 +1101,13 @@ export class Innkeeper extends Job {
 export class Picker extends Job {
   private apple: Apple | null = null;
   private lastPick: ItemPose | null = null;
+  readonly basket: Basket;
+  readonly ladder: StepLadder;
 
   constructor(w: Worker) {
     super(w, 'picker');
+    this.basket = w.gear!.basket;
+    this.ladder = w.gear!.ladder;
   }
 
   /** How high this person can pick (the apple at full stretch, on tiptoe). */
@@ -1098,37 +1115,46 @@ export class Picker extends Job {
     return this.w.actor.choreOf('pick').reach().y + 0.04;
   }
 
+  /** …and standing on the step-ladder. */
+  private ladderY() {
+    return this.reachY() + LADDER_H;
+  }
+
+  /** Does this apple need the ladder? */
+  private high(a: Apple) {
+    return a.pos.y > this.reachY();
+  }
+
   protected hasWork(v: Village) {
-    return v.mill.hopper.room >= BASKET && v.orchard.ripe(this.reachY()).length >= 2;
+    return v.mill.hopper.room >= BASKET && v.orchard.ripe(this.ladderY()).length >= 2;
   }
 
-  /** Take up the basket (from wherever it lies) in both arms. */
-  private takeBasket(v: Village) {
-    const b = v.basket.group;
-    this.w.actor.start('armful', { items: { meshes: [b], from: [{ pos: b.position.clone(), quat: b.quaternion.clone() }] } });
+  /** Take up something lying about (the basket, the ladder) in both arms. */
+  private takeUp(o: THREE.Object3D) {
+    this.w.actor.start('armful', { items: { meshes: [o], from: [{ pos: o.position.clone(), quat: o.quaternion.clone() }] } });
   }
 
-  /** Set it down beside us (right and a little ahead). */
+  /** Set the basket down beside us (right and a little ahead). */
   private setDownBasket() {
     const r = this.w.root;
     const yaw = r.rotation.y;
-    const pos = r.position.clone().add(new THREE.Vector3(-Math.cos(yaw) * 0.38 + Math.sin(yaw) * 0.1, 0, Math.sin(yaw) * 0.38 + Math.cos(yaw) * 0.1));
+    const pos = r.position.clone().setY(0).add(new THREE.Vector3(-Math.cos(yaw) * 0.38 + Math.sin(yaw) * 0.1, 0, Math.sin(yaw) * 0.38 + Math.cos(yaw) * 0.1));
     this.w.actor.choreOf('armful').putDown([{ pos, quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw) }]);
   }
 
-  private get carryingBasket() {
+  private get carryingSomething() {
     return this.w.actor.kind === 'armful' && this.w.actor.choreOf('armful').carrying;
   }
 
-  /** The nearest ripe apple in reach (on this tree first, if there's one left). */
+  /** The nearest ripe apple we can get at (on this tree first, if there's one left; ones that need the ladder count as further). */
   private nextApple(v: Village, tree = -1) {
     const me = this.w.walker;
-    const ripe = v.orchard.ripe(this.reachY());
-    const near = (a: Apple) => Math.hypot(a.pos.x - me.x, a.pos.z - me.z) - (a.tree === tree ? 10 : 0);
+    const ripe = v.orchard.ripe(this.ladderY());
+    const near = (a: Apple) => Math.hypot(a.pos.x - me.x, a.pos.z - me.z) - (a.tree === tree ? 10 : 0) + (this.high(a) ? 1.2 : 0);
     return ripe.length ? ripe.reduce((b, a) => (near(a) < near(b) ? a : b)) : null;
   }
 
-  /** Where to stand so the apple is right where a full stretch puts the hand, facing the tree. */
+  /** Where to stand (on the ground, or on the ladder) so the apple is right where a full stretch puts the hand, facing the tree. */
   private standFor(a: Apple, v: Village) {
     const t = v.orchard.trees[a.tree];
     const out = Math.atan2(a.pos.x - t.x, a.pos.z - t.z);
@@ -1139,10 +1165,15 @@ export class Picker extends Job {
     return { x: a.pos.x - (h.x * c + h.z * s), z: a.pos.z - (-h.x * s + h.z * c), yaw };
   }
 
+  /** At the foot of the ladder standing at `at`: a step back from it. */
+  private static foot(at: { x: number; z: number; yaw: number }) {
+    return { x: at.x - Math.sin(at.yaw) * LADDER_STEP, z: at.z - Math.cos(at.yaw) * LADDER_STEP, yaw: at.yaw };
+  }
+
   protected run(v: Village) {
     const s = this.step;
     const a = this.w.actor;
-    const basket = v.basket;
+    const basket = this.basket;
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
@@ -1159,12 +1190,12 @@ export class Picker extends Job {
       }
       case 'to basket': {
         if (!this.arrived) return;
-        this.takeBasket(v);
+        this.takeUp(basket.group);
         this.step = { kind: 'taking the basket' };
         return;
       }
       case 'taking the basket': {
-        if (!this.carryingBasket) return;
+        if (!this.carryingSomething) return;
         this.toNextApple(v, -1);
         return;
       }
@@ -1182,7 +1213,35 @@ export class Picker extends Job {
       }
       case 'to apple': {
         if (!this.arrived) return;
-        a.start('pick', { apple: this.apple!.pos });
+        a.start('pick', { apple: this.apple!.pos, standOn: s.ladder ? { h: LADDER_H, fwd: LADDER_STEP } : undefined });
+        this.step = { kind: 'picking' };
+        return;
+      }
+      // a high one: the step-ladder first
+      case 'to ladder': {
+        if (!this.arrived) return;
+        this.takeUp(this.ladder.group);
+        this.step = { kind: 'taking the ladder' };
+        return;
+      }
+      case 'taking the ladder': {
+        if (!this.carryingSomething) return;
+        const f = Picker.foot(this.standFor(this.apple!, v));
+        this.go(f.x, f.z, f.yaw);
+        this.step = { kind: 'carrying the ladder' };
+        return;
+      }
+      case 'carrying the ladder': {
+        if (!this.arrived) return;
+        const at = this.standFor(this.apple!, v);
+        const pose = StepLadder.pose(at.x, at.z, at.yaw);
+        a.choreOf('armful').putDown([pose]);
+        this.step = { kind: 'setting up the ladder' };
+        return;
+      }
+      case 'setting up the ladder': {
+        if (a.kind === 'armful') return;
+        a.start('pick', { apple: this.apple!.pos, standOn: { h: LADDER_H, fwd: LADDER_STEP } });
         this.step = { kind: 'picking' };
         return;
       }
@@ -1213,12 +1272,12 @@ export class Picker extends Job {
       }
       case 'to full basket': {
         if (!this.arrived) return;
-        this.takeBasket(v);
+        this.takeUp(basket.group);
         this.step = { kind: 'lifting the basket' };
         return;
       }
       case 'lifting the basket': {
-        if (!this.carryingBasket) return;
+        if (!this.carryingSomething) return;
         const at = v.mill.hopper.workSpot();
         this.go(at.x, at.z, at.yaw);
         this.step = { kind: 'to the mill' };
@@ -1280,7 +1339,7 @@ export class Picker extends Job {
     if (tree >= 0 && ap.tree !== tree) {
       // on to another tree: basket and all
       this.apple = null;
-      const at = v.basket.workSpot();
+      const at = this.basket.workSpot();
       this.go(at.x, at.z, at.yaw);
       this.step = { kind: 'to basket' };
       return;
@@ -1288,16 +1347,25 @@ export class Picker extends Job {
     ap.claimedBy = this.w.i;
     this.apple = ap;
     const at = this.standFor(ap, v);
-    this.go(at.x, at.z, at.yaw);
-    this.step = { kind: 'to apple' };
+    if (!this.high(ap)) {
+      this.go(at.x, at.z, at.yaw);
+      this.step = { kind: 'to apple' };
+      return;
+    }
+    // out of reach: up the ladder (fetching it over first, unless it's standing just right already)
+    const l = this.ladder.at;
+    if (Math.hypot(l.x - at.x, l.z - at.z) < 0.12 && Math.abs(wrap(l.yaw - at.yaw)) < 0.35) {
+      const f = Picker.foot(l);
+      this.go(f.x, f.z, f.yaw);
+      this.step = { kind: 'to apple', ladder: true };
+      return;
+    }
+    const w = this.ladder.workSpot();
+    this.go(w.x, w.z, w.yaw);
+    this.step = { kind: 'to ladder' };
   }
 }
 
-/**
- * The miller: when the hopper holds a batch (and there's room for a keg),
- * turn the crank, the apples going down one by one, until a keg of cider
- * stands full under the spout; then carry it to the keg rack.
- */
 export class Miller extends Job {
   private fed = 0;
   private turned = 0;

@@ -12,7 +12,7 @@ import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
 import { buildPerson } from '../body';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
+import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
 import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
@@ -60,9 +60,10 @@ const SITES: Site[] = [
   { kind: 'cabin', x: 15.5, z: -4, yaw: -0.9 }, // the fisher's, up from the pond
   { kind: 'inn', x: 1, z: -14, yaw: 0 }, // (the innkeeper lives in, and the regular has a room)
   { kind: 'cabin', x: 7.4, z: 9.6, yaw: 2.7 }, // the picker's and the miller's, past the mill
+  { kind: 'cabin', x: -8.6, z: 9.4, yaw: 1.9 }, // the other picker's, the far side of the orchard
 ];
-/** Which building each person lives in (index into SITES). */
-const HOME: Record<string, number> = { lumberjack: 0, woodworker: 1, fisher: 2, innkeeper: 3, regular: 3, picker: 4, miller: 4 };
+/** Which building each person lives in (index into SITES), by crowd index. */
+const HOME = [0, 1, 2, 3, 4, 4, 3, 5];
 const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, 23, SITES);
 stage.scene.add(houses.group);
 // smoke: the inn's kitchen chimney while its fire has wood, thin wisps from the cabins
@@ -80,7 +81,9 @@ stage.scene.add(forest.group);
 const orchard = new Orchard(stage, -2.8, 8.6, 3.3, 5);
 const mill = new CiderMill(stage, 2.8, 6.0, 0);
 const millKegs = new KegRack(stage, 'mill kegs', 1.2, 6.1, Math.PI / 2);
-const basket = new Basket(stage, 2.15, 6.85);
+// each picker's basket and step-ladder
+const baskets = [new Basket(stage, 2.15, 6.85), new Basket(stage, 1.5, 7.35)];
+const ladders = [new StepLadder(stage, 0.9, 7.9, 0.5), new StepLadder(stage, 0.2, 8.7, -0.3)];
 // a good-sized pond off to the east, for the fisher
 const pond = new Pond(stage.toon, stage.outline, 10, 2, 3.6, 5);
 stage.scene.add(pond.group);
@@ -88,7 +91,8 @@ stage.scene.add(pond.group);
 // ---------------------------------------------------------------- people
 
 type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'miller' | 'regular';
-const ROLES: Role[] = ['lumberjack', 'woodworker', 'fisher', 'innkeeper', 'picker', 'miller', 'regular'];
+// (two pickers, to keep the mill busy)
+const ROLES: Role[] = ['lumberjack', 'woodworker', 'fisher', 'innkeeper', 'picker', 'miller', 'regular', 'picker'];
 /** What each plays in their spare time. */
 const INSTRUMENT: Record<Role, 'fiddle' | 'banjo' | null> = { lumberjack: 'fiddle', woodworker: 'banjo', fisher: null, innkeeper: 'fiddle', picker: 'banjo', miller: null, regular: null };
 const people = ROLES.map((_, i) => crowd.spawn(randomGenome(settings.seed * 100003 + 17 + i * 5), i));
@@ -262,9 +266,9 @@ function placeLogs() {
 
 // everyone starts the day at their own door (the miller and the picker by the mill, the regular by the inn)
 const doorOf = (i: number) => {
-  const b = houses.buildings[HOME[ROLES[i]]];
+  const b = houses.buildings[HOME[i]];
   // (two living in one house come and go side by side)
-  const twin = ROLES.findIndex((r, j) => j < i && HOME[r] === HOME[ROLES[i]]) >= 0 ? 0.45 : 0;
+  const twin = HOME.some((h, j) => j < i && h === HOME[i]) ? 0.45 : 0;
   const at = b.door.clone().add(new THREE.Vector3(Math.cos(b.yaw), 0, -Math.sin(b.yaw)).multiplyScalar(twin));
   return { x: at.x, z: at.z, yaw: b.doorFacing };
 };
@@ -328,7 +332,8 @@ const village: Village = {
   rack,
   larder,
   orchard,
-  basket,
+  baskets,
+  ladders,
   mill,
   millKegs,
   innKegs,
@@ -354,9 +359,14 @@ const village: Village = {
     village.stats.meals++;
   },
   cameHome: (i) => {
-    litUntil[HOME[ROLES[i]]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
+    litUntil[HOME[i]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
   },
   everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
+  chat: (i, j, seconds) => {
+    // (only with someone who's there for it: not asleep, not walking off somewhere)
+    if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
+    chat(i, j, seconds);
+  },
   tankardSpot,
   served: () => {
     const mug = tankardSpot.items[0];
@@ -375,11 +385,85 @@ const village: Village = {
   removeItem,
   stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, meals: 0, hungry: 0, slept: 0 },
 };
+const pickers = ROLES.map((r, k) => (r === 'picker' ? k : -1)).filter((k) => k >= 0);
 const jobs: Job[] = people.map((p, i) => {
-  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], home: homes[i] };
+  const pk = pickers.indexOf(i);
+  const gear = pk >= 0 ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], home: homes[i], gear };
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
   return new J(w);
 });
+
+// ---------------------------------------------------------------- talk
+//
+// Chatting: the innkeeper has a word as a plate goes down; diners at the same
+// table talk while they wait; two people whose paths cross now and then stop
+// for a word before going on.
+
+/** Until when each person has had enough talking for now. */
+const chattedUntil = people.map(() => 0);
+/** Pairs that have just passed each other (so they're not asked again straight away). */
+const metUntil = new Map<number, number>();
+
+function chat(i: number, j: number, seconds: number) {
+  crowd.actors[i].chatWith(j, seconds);
+  crowd.actors[j].chatWith(i, seconds);
+  for (const k of [i, j]) {
+    jobs[k].holdUntil = Math.max(jobs[k].holdUntil, simTime + seconds);
+    chattedUntil[k] = simTime + seconds + 3 + Math.random() * 5;
+  }
+}
+
+/** Free to strike up a chat at the table: sat, between mouthfuls, not already talking. */
+function idleAtTable(i: number) {
+  const a = crowd.actors[i];
+  return a.kind === 'dine' && a.choreOf('dine').handsIdle && a.talkingTo < 0 && simTime >= chattedUntil[i];
+}
+
+/** Up for a word: about with empty hands, not busy at anything, not just stopped talking. */
+function free(i: number) {
+  const a = crowd.actors[i];
+  const j = jobs[i];
+  return !j.asleep && a.kind === null && !a.onSeat && !j.carrying && !j.armful.length && simTime >= chattedUntil[i] && simTime >= j.holdUntil;
+}
+
+function talk() {
+  // at the tables: pair up whoever is sat there idle
+  for (const t of tables) {
+    const idle = t.seats.filter((s) => s.diner >= 0 && idleAtTable(s.diner)).map((s) => s.diner);
+    if (idle.length < 2 || Math.random() > 0.02) continue;
+    const a = idle.splice(Math.floor(Math.random() * idle.length), 1)[0];
+    const b = idle[Math.floor(Math.random() * idle.length)];
+    chat(a, b, 3 + Math.random() * 4);
+  }
+  // in passing: by day, two people meeting on their way (each pair only now and then)
+  if (village.phase !== 'work') return;
+  for (let i = 0; i < people.length; i++) {
+    if (!free(i)) continue;
+    for (let j = i + 1; j < people.length; j++) {
+      // (one of them on their way past the other)
+      if (!free(j) || Math.max(crowd.motions[i].speed, crowd.motions[j].speed) < 0.3) continue;
+      const wi = walkers[i], wj = walkers[j];
+      if (Math.hypot(wi.x - wj.x, wi.z - wj.z) > 1.8) continue;
+      const key = i * 100 + j;
+      if (simTime < (metUntil.get(key) ?? 0)) continue;
+      metUntil.set(key, simTime + 45);
+      if (Math.random() < 0.7) chat(i, j, 3.5 + Math.random() * 2);
+    }
+  }
+}
+
+/** Held for a chat: stand and turn to face whoever they're talking to. */
+function faceTalker(i: number, dt: number) {
+  const to = crowd.actors[i].talkingTo;
+  if (to < 0) return;
+  const w = walkers[i], o = walkers[to];
+  const want = Math.atan2(o.x - w.x, o.z - w.z);
+  let err = want - w.yaw;
+  err = Math.atan2(Math.sin(err), Math.cos(err));
+  const step = 3 * dt;
+  w.yaw += Math.max(-step, Math.min(step, err));
+}
 
 // ---------------------------------------------------------------- loop
 
@@ -400,7 +484,11 @@ function simulate(dt: number) {
     const a = crowd.actors[i];
     const m = crowd.motions[i];
     jobs[i].tick(village);
-    m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, walkers, WALK_SPEED * crowd.styleOf(p).speedK);
+    if (jobs[i].holdUntil > simTime && !a.busy) {
+      // stopped for a word
+      m.targetSpeed = 0;
+      faceTalker(i, dt);
+    } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, walkers, WALK_SPEED * crowd.styleOf(p).speedK);
     crowd.advance(i, dt);
     if (!a.rootLocked) {
       w.move(m.speed, dt, obs, walkers);
@@ -412,6 +500,7 @@ function simulate(dt: number) {
     crowd.post(i, dt, simTime, pose);
   });
   crowd.endStep(dt);
+  talk();
   forest.update(simTime);
   orchard.update(simTime);
   // (the kitchen fire's banked while the inn's shut for the night)
@@ -439,7 +528,7 @@ function simulate(dt: number) {
   // lamps: lit for a while when someone gets home after dark; the inn's while it's open
   const dark = village.hours >= 17.5 || village.hours < 6.5;
   const innOpen = !jobs[ROLES.indexOf('innkeeper')].asleep || seats.some((st) => st.state !== 'free');
-  if (dark && innOpen) litUntil[HOME.innkeeper] = Math.max(litUntil[HOME.innkeeper], simTime + 0.75 * secPerHour(village.hours));
+  if (dark && innOpen) litUntil[HOME[ROLES.indexOf('innkeeper')]] = Math.max(litUntil[HOME[ROLES.indexOf('innkeeper')]], simTime + 0.75 * secPerHour(village.hours));
   litUntil.forEach((until, i) => {
     const on = dark && until > simTime;
     if (houses.isLit(i) !== on) houses.setLit(i, on);
@@ -476,7 +565,7 @@ function updatePanel() {
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
     `fish: caught ${village.stats.caught} · rack ${rack.count}/${rack.slots.length} (${rack.items.filter((it) => it && it.dry >= 1).length} dry) · larder ${larder.count}/${larder.slots.length}${larder.incoming ? ` (+${larder.incoming} coming)` : ''} · suppers served ${village.stats.meals}`,
-    `cider: picked ${village.stats.picked} · basket ${basket.count}/5 · hopper ${mill.hopper.count}/${mill.hopper.slots.length} · kegs made ${village.stats.kegs} · at the mill ${millKegs.count} · at the inn ${innKegs.count} (${innKegs.items.reduce((n, k) => n + (k ? k.dry : 0), 0)} tankards) · poured ${village.stats.poured} · sips ${village.stats.drunk}`,
+    `cider: picked ${village.stats.picked} · baskets ${baskets.map((b) => b.count).join('+')} · hopper ${mill.hopper.count}/${mill.hopper.slots.length} · kegs made ${village.stats.kegs} · at the mill ${millKegs.count} · at the inn ${innKegs.count} (${innKegs.items.reduce((n, k) => n + (k ? k.dry : 0), 0)} tankards) · poured ${village.stats.poured} · sips ${village.stats.drunk}`,
     `${String(Math.floor(village.hours)).padStart(2, '0')}:${String(Math.floor((village.hours % 1) * 60)).padStart(2, '0')} ${{ work: 'working', supper: 'supper at the inn', night: 'night' }[village.phase]} · meals ${village.stats.meals} · time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
   ].join('\n');
 }
@@ -543,7 +632,7 @@ function frame(start: number) {
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
   if (frames % 6 === 0) updatePanel();
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village }), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
+  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village }), follow: (i: number) => (follow = i), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
 }
 
 stage.resize();

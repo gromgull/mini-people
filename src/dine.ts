@@ -465,6 +465,11 @@ export class Dine implements Chore {
     return true;
   }
 
+  /** Sat at the table with nothing in hand to do (between courses, waiting): free to talk with them. */
+  get handsIdle() {
+    return this.scooted >= 1 && this.leaveAt === Infinity && (!this.cur || this.cur.kind === 'rest');
+  }
+
   private drinkK(u: number) {
     const lift = smooth((u - 0.9) / 0.7);
     const drink = smooth((u - 1.6) / 0.5) * (1 - smooth((u - 3.0) / 0.4));
@@ -637,8 +642,8 @@ export class Dine implements Chore {
     // arms: two-bone IK so the fists land where the props want them (never
     // through the table top)
     for (const f of [fistR, fistL]) f.y = Math.max(f.y, G.top + d.handR * 0.8);
-    this.reachTo('R', fistR, this.scooted);
-    this.reachTo('L', fistL, this.scooted);
+    this.reachTo('R', fistR, this.scooted * (1 - out.gesturing.R));
+    this.reachTo('L', fistL, this.scooted * (1 - out.gesturing.L));
   }
 
   private reachTo(side: 'L' | 'R', fist: THREE.Vector3, w: number) {

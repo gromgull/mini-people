@@ -214,6 +214,8 @@ export class Actor {
       tree?: PineSpec;
       /** Picking: a real apple, where it hangs (world); no conjured tree; ends once it's in the hand. */
       apple?: THREE.Vector3;
+      /** Picking: climb onto this first (its height, how far ahead it stands). */
+      standOn?: { h: number; fwd: number };
       /** Fishing: real water ahead (no conjured pool; ends once the fish is off the hook). */
       water?: boolean;
       /** Hauling: a real log's mesh, where it lies, its radius. */
@@ -264,7 +266,7 @@ export class Actor {
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
       if (kind === 'chop') (this.chore as Chop).aim(opts.tree ?? null);
       if (kind === 'fish') (this.chore as Fish).aimWater(!!opts.water);
-      if (kind === 'pick') (this.chore as PickApple).aimAt(opts.apple ?? null);
+      if (kind === 'pick') (this.chore as PickApple).aimAt(opts.apple ?? null, opts.standOn ?? null);
       this.chore.start();
     }
     if (kind === 'banjo') {
@@ -790,7 +792,101 @@ export class Actor {
 
   /** Before the animator: returns overrides (or null when idle). */
   pre(dt: number, m: Motion, st: Style): ActionPose | null {
-    return this.applyPosture(dt, this.preAction(dt, m, st), st.tempo);
+    this.clock += dt;
+    return this.applyChat(dt, this.applyPosture(dt, this.preAction(dt, m, st), st.tempo), st.tempo);
+  }
+
+  // ------------------------------------------------------------ chatting
+  //
+  // Talking can go on over whatever else they're doing (waiting at a table,
+  // stood in the lane): beats of a free hand, nods and shakes, a voice, and
+  // eyes on whoever they're talking to. The talk action is the same thing
+  // done standing with both hands.
+
+  private clock = 0;
+  private chat = { partner: -1, until: 0, next: 0, side: 'R' as 'L' | 'R', x: -0.5, z: 0.3, elbow: 1.2, k: { L: 0, R: 0 }, e: 0, head: 0, headUntil: 0 };
+  /** How far each arm is given over to a chat gesture (0…1): a chore's own hand-work yields that much. */
+  gesturing = { L: 0, R: 0 };
+
+  /** Chat with someone (crowd index) for a while, over whatever else is going on. */
+  chatWith(partner: number, seconds: number) {
+    const c = this.chat;
+    if (c.partner !== partner || this.clock >= c.until) c.next = this.clock + 0.2 + Math.random() * 0.4;
+    c.partner = partner;
+    c.until = this.clock + seconds;
+  }
+
+  stopChat() {
+    this.chat.until = Math.min(this.chat.until, this.clock);
+  }
+
+  /** Who they're talking to (talk action or a chat), −1 = nobody. */
+  get talkingTo() {
+    if (this.kind === 'talk') return this.partner;
+    return this.chat.partner >= 0 && this.clock < this.chat.until ? this.chat.partner : -1;
+  }
+
+  /** Can this arm gesture now? (Free, resting on the thighs, or on the table between courses.) */
+  private armFree(P: ActionPose, sd: 'L' | 'R') {
+    if (this.kind === null) return true;
+    if (isDine(this.kind)) return (this.chore as Dine).handsIdle;
+    return P.arms[sd].w < 0.01;
+  }
+
+  private applyChat(dt: number, pose: ActionPose | null, tempo: number): ActionPose | null {
+    const c = this.chat;
+    const on = this.kind !== 'talk' && c.partner >= 0 && this.clock < c.until;
+    c.e = on ? Math.min(1, c.e + dt / 0.35) : Math.max(0, c.e - dt / 0.5);
+    if (c.e === 0 && c.k.L === 0 && c.k.R === 0) {
+      this.gesturing.L = this.gesturing.R = 0;
+      if (!on && c.partner >= 0 && this.clock >= c.until) c.partner = -1;
+      return pose;
+    }
+    const P = pose ?? this.pose;
+    if (!pose) {
+      P.crouch = P.sitZ = P.lift = P.spineY = P.spineZ = P.spin = P.fwd = P.spineX = P.headX = P.headY = P.headZ = 0;
+      Object.assign(P.arms.L, arm());
+      Object.assign(P.arms.R, arm());
+    }
+    const t = this.clock;
+    if (on && t >= c.next) {
+      c.next = t + (0.45 + Math.random() * 0.6) / tempo;
+      this.beat = true;
+      // mostly one hand, now and then nothing but a look
+      if (Math.random() < 0.8) {
+        c.side = Math.random() < 0.6 ? 'R' : 'L';
+        c.x = -0.3 - Math.random() * 0.55;
+        c.z = 0.12 + Math.random() * 0.4;
+        c.elbow = 1.0 + Math.random() * 0.9;
+      } else c.side = c.side === 'R' ? 'L' : 'R';
+      if (t > c.headUntil && Math.random() < 0.6) {
+        c.head = Math.floor(Math.random() * 3) + 1;
+        c.headUntil = t + 0.5 + Math.random() * 0.5;
+      }
+    }
+    const ph = t * Math.PI * 2;
+    for (const sd of ['L', 'R'] as const) {
+      const want = on && sd === c.side && this.armFree(P, sd) ? 1 : 0;
+      c.k[sd] = want > c.k[sd] ? Math.min(1, c.k[sd] + dt / 0.3) : Math.max(0, c.k[sd] - dt / 0.4);
+      const g = smooth(c.k[sd]) * c.e;
+      this.gesturing[sd] = g;
+      if (g <= 0) continue;
+      const A = P.arms[sd];
+      const flick = 0.12 * Math.sin(ph * 2.3 * tempo + (sd === 'L' ? 0 : 1.7));
+      const tw = A.w; // whatever the arm was doing, blended out under the gesture
+      A.x = lerp(tw > 0 ? A.x : c.x, c.x + flick * 0.5, g);
+      A.z = lerp(tw > 0 ? A.z : c.z, c.z, g);
+      A.elbow = lerp(tw > 0 ? A.elbow : c.elbow, c.elbow + flick, g);
+      A.stiff = lerp(tw > 0 ? (A.stiff ?? 1) : 1.6, 1.6, g);
+      A.w = Math.max(tw, g);
+    }
+    const headOn = t < c.headUntil ? Math.sin(Math.PI * (1 - (c.headUntil - t) / 0.9)) : 0;
+    const hk = Math.max(0, headOn) * c.e;
+    if (c.head === 1) P.headX += 0.2 * Math.sin(ph * 2.6) * hk;
+    if (c.head === 2) P.headY += 0.35 * Math.sin(ph * 2.2) * hk;
+    if (c.head === 3) P.headZ += 0.18 * hk;
+    P.spineX += 0.03 * Math.sin(ph * 0.7) * c.e;
+    return P;
   }
 
   private preAction(dt: number, m: Motion, st: Style): ActionPose | null {

@@ -34,6 +34,8 @@ export interface ChoreOut {
   readonly beatTime: number;
   /** A plucked string this frame (banjo). */
   pluck: { f: number } | null;
+  /** How far each arm is taken by a chat gesture (0…1): hand-work yields that much. */
+  readonly gesturing: { L: number; R: number };
 }
 
 export interface Chore {
@@ -353,9 +355,16 @@ export class PickApple implements Chore {
   private world: THREE.Vector3 | null = null;
   private wReach = 0;
 
-  /** Pick this real apple on the next start (stand where reach() says), or null to conjure. */
-  aimAt(apple: THREE.Vector3 | null) {
+  /**
+   * Standing on something to pick (a step-ladder): its height, and how far
+   * ahead of the feet it stands (a step up onto it first, a step back down after).
+   */
+  private standOn: { h: number; fwd: number } | null = null;
+
+  /** Pick this real apple on the next start (stand where reach() says), or null to conjure; `standOn` to climb onto something first. */
+  aimAt(apple: THREE.Vector3 | null, standOn: { h: number; fwd: number } | null = null) {
     this.world = apple ? apple.clone() : null;
+    this.standOn = apple ? standOn : null;
   }
 
   /** Where the apple is at full stretch, in this person's root frame (stand so the real apple is there). */
@@ -450,15 +459,40 @@ export class PickApple implements Chore {
     this.picked = false;
   }
 
-  pre(t: number, dt: number, P: ActionPose, tempo: number, out: ChoreOut) {
+  pre(t0: number, dt: number, P: ActionPose, tempo: number, out: ChoreOut) {
     const T = this.times;
     const H = this.p.dims.height;
     const s = Math.sqrt(H);
     const slow = 1 / Math.sqrt(tempo);
     const at = (k: keyof typeof T) => T[k] * slow;
-    // (a real apple: done once it's down in the hand; whoever sent them takes it from there)
-    const done = this.world ? at('down') : at('down') + CARRY_TIME;
+    // standing on something: a step up first (the rest waits for it), a step down at the end
+    const so = this.standOn;
+    const stepT = so ? 0.75 * slow : 0;
+    const t = t0 - stepT;
+    // (a real apple: done once it's down in the hand, and back on the ground; whoever sent them takes it from there)
+    const done = this.world ? at('down') + stepT : at('down') + CARRY_TIME;
     if (t > done + (this.world ? 0 : 0.4)) return false;
+    let up = 0;
+    if (so) {
+      const k = t < 0 ? smooth(t0 / stepT) : t < at('down') ? 1 : 1 - smooth((t - at('down')) / stepT);
+      const stepping = (t < 0 || t > at('down')) ? Math.sin(Math.PI * k) : 0;
+      up = k;
+      P.fwd = so.fwd * k;
+      P.crouch = 0.1 * stepping; // knees bend into each step
+      P.spineX = 0.15 * stepping;
+      if (t < 0 && t0 - dt <= stepT * 0.55 && t0 > stepT * 0.55) out.events.push('creak');
+      if (t > at('down') && t - dt <= at('down') + stepT * 0.6 && t > at('down') + stepT * 0.6) out.events.push('thunk');
+      if (t < 0 || t > at('down')) {
+        // (still: on the way up or down, arms by the sides)
+        P.lift = so.h * k + 0.03 * stepping;
+        out.focus = t < 0 ? this.apple.getWorldPosition(new THREE.Vector3()) : null;
+        if (t > at('down')) {
+          setArm(P, 'R', APPLE_CARRY, 1, 1.6);
+          if (t > done - 0.05 && t - dt <= done - 0.05) out.depart = true;
+        }
+        return true;
+      }
+    }
     this.wReach = t < at('reach') ? 0 : t < at('grab') ? smooth((t - at('reach')) / (at('grab') - at('reach'))) : t < at('snap') ? 1 : 1 - smooth((t - at('snap')) / (at('down') - at('snap')));
     if (!this.world) {
       // side-on to the tree while picking (so the crown isn't over the face),
@@ -497,10 +531,10 @@ export class PickApple implements Chore {
       if (t > done) w = 1 - smooth((t - done) / 0.4);
     }
     setArm(P, 'R', a, w, 1.6);
-    P.lift = lift;
-    const up = t < at('snap') ? smooth((t - 0.2) / 0.5) : 1 - smooth((t - at('snap')) / 0.6);
-    P.headX = -0.45 * up;
-    P.spineX = -0.1 * up;
+    P.lift = lift + (so ? so.h * up : 0);
+    const look = t < at('snap') ? smooth((t - 0.2) / 0.5) : 1 - smooth((t - at('snap')) / 0.6);
+    P.headX = -0.45 * look;
+    P.spineX = -0.1 * look;
 
     if (!this.picked && t >= at('snap')) {
       this.picked = true;
@@ -521,10 +555,13 @@ export class PickApple implements Chore {
 
   post() {
     // a real apple hangs wherever it hangs: put the fist right under it
-    if (!this.world || this.picked || this.wReach <= 0) return;
+    if (!this.world || this.picked) return;
     const p = this.p;
     const d = p.dims;
     p.root.updateMatrixWorld(true);
+    // (the root moves as they step up: keep the apple where it hangs)
+    this.apple.position.copy(p.root.worldToLocal(this.world.clone()));
+    if (this.wReach <= 0) return;
     const apple = this.apple.position.clone();
     const sh = p.root.worldToLocal(p.joints.shoulderR.getWorldPosition(new THREE.Vector3()));
     const fist = apple.addScaledVector(apple.clone().sub(sh).normalize(), -d.handR * 1.1);

@@ -7,9 +7,9 @@ import type { Stage } from '../stage';
 import { type Caster, type Part, bake, scatter, wobble } from '../trees';
 
 /**
- * The orchard: low apple trees (the crown starts about waist high, so the
- * apples hang within reach) and every apple a thing of its own that can be
- * picked, leaving a gap that grows back. Trees are one merged mesh; the
+ * The orchard: apple trees of all sizes, from low ones whose apples hang
+ * within reach to old ones that need the step-ladder, and every apple a
+ * thing of its own that can be picked, leaving a gap that grows back. Trees are one merged mesh; the
  * apples are instanced, each shown, hidden, or growing.
  */
 
@@ -40,7 +40,7 @@ export class Orchard {
     const r = mulberry32(seed);
     const parts: Part[] = [];
     for (const spot of scatter(r, cx, cz, R, n, 2.5)) {
-      const s = 0.9 + r() * 0.2;
+      const s = 0.8 + r() * 0.6; // young and low to old and tall
       const trunkH = 0.72 * s;
       const CR = 0.5 * s;
       const cy = trunkH + CR * 0.45;
@@ -58,9 +58,9 @@ export class Orchard {
       parts.push({ geo: crown, row: ROWS.leaf[Math.floor(r() * 3)] });
       const ti = this.trees.length;
       // apples round the lower, outer crown, just proud of the leaves
-      for (let k = 0; k < 9; k++) {
+      for (let k = 0, n = Math.round(9 * s); k < n; k++) {
         const az = r() * Math.PI * 2;
-        const el = -0.55 + r() * 0.8; // the lower half, in reach
+        const el = -0.55 + r() * 1.0; // round the middle and below (the top's for the birds)
         const dir = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
         const d = CR * (1 + 0.2 * wob(dir)) + APPLE_R * 0.4;
         const p = new THREE.Vector3(spot.x + dir.x * d, cy + dir.y * d * 0.85, spot.z + dir.z * d);

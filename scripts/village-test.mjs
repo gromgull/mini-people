@@ -64,7 +64,7 @@ const result = await page.evaluate((secs) => {
       if (p.at === 'stack' && p.stack.items[p.slot] !== pc) say(`piece ${pc.id} says ${p.stack.name} slot ${p.slot}, slot has ${p.stack.items[p.slot]?.id}`);
       if (p.at === 'carried' && !d.jobs[p.by]?.armful.includes(pc)) say(`piece ${pc.id} says carried by ${p.by}, who doesn't have it`);
     }
-    for (const st of [v.yard, v.inn, v.rack, v.larder, v.basket, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot]) {
+    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot]) {
       st.items.forEach((pc, i) => {
         if (!pc) return;
         if (!v.items.includes(pc)) say(`${st.name} slot ${i} holds a piece that no longer exists`);
@@ -112,7 +112,7 @@ if (result.stats.poured < 1) problems.push('nobody was served cider');
 if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
-  if (result.stats.slept < 7) problems.push(`only ${result.stats.slept} went to bed`);
+  if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
   if (result.asleep > 0) problems.push(`${result.asleep} still asleep in the morning`);
 }
 problems.push(...errors);

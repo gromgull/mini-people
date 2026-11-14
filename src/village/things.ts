@@ -614,3 +614,65 @@ export class Spot extends Store {
 export function makeLog(stage: Stage) {
   return outlined(logGeometry(), stage);
 }
+
+/** How high the step-ladder's top step is. */
+export const LADDER_H = 0.42;
+
+/**
+ * A little step-ladder for the orchard: an A-frame, two treads up one side
+ * and a top step to stand on. Its origin is halfway up, over the top step
+ * (so it sits in the arms by its middle when carried); stand on the top
+ * step facing local +z, having climbed up from −z.
+ */
+export class StepLadder {
+  readonly group = new THREE.Group();
+
+  constructor(stage: Stage, x: number, z: number, yaw: number) {
+    const H = LADDER_H, W = 0.3;
+    const parts: Part[] = [];
+    const beam = (a: THREE.Vector3, b: THREE.Vector3, w: number, d: number, row: number) => {
+      const len = a.distanceTo(b);
+      const g = new THREE.BoxGeometry(w, len, d).rotateX(Math.atan2(b.z - a.z, b.y - a.y));
+      const m = a.clone().add(b).multiplyScalar(0.5);
+      parts.push({ geo: g.translate(m.x, m.y - H / 2, m.z), row });
+    };
+    const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    for (const sx of [-1, 1]) {
+      const x = (sx * W) / 2;
+      beam(v(x, 0, -0.2), v(x, H, -0.05), 0.035, 0.04, ROWS.wood[1]); // the climbing side
+      beam(v(x * 0.9, 0, 0.17), v(x * 0.9, H - 0.02, 0.03), 0.03, 0.03, ROWS.wood[2]); // the back legs
+    }
+    // treads, and the top step
+    beam(v(0, H * 0.5 - 0.012, -0.125 - 0.06), v(0, H * 0.5 + 0.012, -0.125 + 0.06), W, 0.02, ROWS.wood[0]);
+    parts.push({ geo: new THREE.BoxGeometry(W + 0.04, 0.03, 0.17).translate(0, H - 0.015 - H / 2, 0), row: ROWS.wood[0] });
+    // a cross-brace at the back
+    parts.push({ geo: new THREE.BoxGeometry(W * 0.9, 0.025, 0.02).translate(0, H * 0.3 - H / 2, 0.11), row: ROWS.wood[2] });
+    this.group.add(outlined(bake(parts), stage));
+    this.group.position.set(x, H / 2, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  /** Where it stands (on the ground, its top step's middle) and which way. */
+  get at() {
+    return { x: this.group.position.x, z: this.group.position.z, yaw: this.yaw };
+  }
+
+  /** Which way it faces (from the quaternion: the carry sets that, and rotation.y can flip). */
+  get yaw() {
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion);
+    return Math.atan2(f.x, f.z);
+  }
+
+  /** Stand here (facing its side) to take it up. */
+  workSpot() {
+    const p = this.group.position;
+    const yaw = this.yaw + Math.PI / 2;
+    return { x: p.x + Math.sin(yaw) * 0.38, z: p.z + Math.cos(yaw) * 0.38, yaw: yaw + Math.PI };
+  }
+
+  /** Its pose standing at (x, z) facing yaw (for putting it down). */
+  static pose(x: number, z: number, yaw: number) {
+    return { pos: new THREE.Vector3(x, LADDER_H / 2, z), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw) };
+  }
+}
