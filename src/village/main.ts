@@ -11,7 +11,7 @@ import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
-import { LOG_L, LOG_R, type Log, Sawhorse, Woodpile, makeLog } from './things';
+import { Bench, LOG_L, LOG_R, type Log, Sawhorse, Woodpile, makeLog } from './things';
 import { type Obstacle, Walker } from './walk';
 import { type Job, Lumberjack, type Village, Woodworker } from './jobs';
 
@@ -67,6 +67,8 @@ const iWood = ROLES.indexOf('woodworker');
 // the woodworker's own sawhorse, made to their height, and the pile beside it
 const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
 const pile = new Woodpile(stage, -3.7, 0.9, 0.35);
+// and a bench of their height to sit on between logs, looking over the yard
+const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, crowd.actors[iWood].sitFit());
 
 const logs: Log[] = [];
 let nextLogId = 0;
@@ -117,10 +119,14 @@ const horseObstacle: Obstacle = (() => {
   const mid = _v.set((t[0].x + t[1].x) / 2, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
   return { kind: 'box', x: horse.x + mid.x, z: horse.z + mid.z, yaw: horse.yaw, hx: Math.abs(t[0].x - t[1].x) / 2 + 0.08, hz: 0.2 };
 })();
+const benchObstacle: Obstacle = (() => {
+  const back = _v.set(0, 0, -0.06).applyAxisAngle(new THREE.Vector3(0, 1, 0), bench.yaw);
+  return { kind: 'box', x: bench.x + back.x, z: bench.z + back.z, yaw: bench.yaw, hx: 0.55, hz: bench.fit.depth / 2 + 0.06 };
+})();
 const treeObstacles = new Map<number, Obstacle>();
 /** Everything solid right now. */
 function obstacles(): Obstacle[] {
-  const out = [...houseObstacles, pileObstacle, horseObstacle];
+  const out = [...houseObstacles, pileObstacle, horseObstacle, benchObstacle];
   for (const t of forest.trees) {
     if (t.state === 'felling') continue;
     let o = treeObstacles.get(t.id);
@@ -139,6 +145,8 @@ const village: Village = {
   removeLog,
   treeObstacle: (t) => treeObstacles.get(t.id) ?? null,
   horseObstacle,
+  bench,
+  benchObstacle,
   time: 0,
   stats: { felled: 0, sawn: 0 },
 };

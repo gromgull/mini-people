@@ -149,7 +149,9 @@ So far it has one chain:
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
   logs and a stump), then carry each log to the pile on their shoulder.
 - **The woodworker** carries logs from the pile to their own sawhorse, which
-  is built to their height, and saws them.
+  is built to their height, and saws them. Between logs they often go and
+  sit on their bench (also built to their height) and get up again when a
+  log comes in.
 - **Stumps grow back:** a sapling appears after about a minute and becomes a
   full tree over about two more.
 

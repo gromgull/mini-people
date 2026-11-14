@@ -142,6 +142,48 @@ export class Sawhorse {
   }
 }
 
+/**
+ * A plank bench with a back, built to its owner's knee height (Actor.sitFit),
+ * long enough for two. Its (x, z) is the middle of the seat; yaw is the way a
+ * sitter faces.
+ */
+export class Bench {
+  readonly group = new THREE.Group();
+  claimedBy = -1;
+
+  constructor(
+    stage: Stage,
+    readonly x: number,
+    readonly z: number,
+    readonly yaw: number,
+    readonly fit: { h: number; benchZ: number; depth: number },
+  ) {
+    const { h, depth } = fit;
+    const L = 1.05;
+    const t = 0.035;
+    const parts: Part[] = [{ geo: new THREE.BoxGeometry(L, t, depth).translate(0, h - t / 2, 0), row: ROWS.log[2] }];
+    for (const s of [-1, 1]) {
+      parts.push({ geo: new THREE.BoxGeometry(0.035, h - t, depth * 0.85).translate(s * (L / 2 - 0.1), (h - t) / 2, 0), row: ROWS.log[1] });
+      // back posts rising from behind the seat
+      parts.push({ geo: new THREE.BoxGeometry(0.04, 0.42, 0.035).translate(s * (L / 2 - 0.1), h + 0.17, -depth / 2 + 0.01), row: ROWS.log[1] });
+    }
+    parts.push({ geo: new THREE.BoxGeometry(L - 0.06, 0.09, 0.025).translate(0, h + 0.28, -depth / 2 - 0.005), row: ROWS.log[2] });
+    parts.push({ geo: new THREE.BoxGeometry(L - 0.06, 0.06, 0.025).translate(0, h + 0.12, -depth / 2 - 0.005), row: ROWS.log[2] });
+    this.group.add(outlined(bake(parts), stage));
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  /** Where to stand (facing away from the bench) to sit down on it; `along` picks a place along it. */
+  sitSpot(along = 0) {
+    const fwd = -this.fit.benchZ; // the bench is this far behind the sitter's feet
+    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    // local (along, 0, fwd) turned by yaw
+    return { x: this.x + along * c + fwd * s, z: this.z - along * s + fwd * c, yaw: this.yaw };
+  }
+}
+
 /** Make a log mesh (added to the scene by the caller). */
 export function makeLog(stage: Stage) {
   return outlined(logGeometry(), stage);

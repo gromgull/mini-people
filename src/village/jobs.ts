@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { LOG_L, LOG_R, type Log, type Sawhorse, type Woodpile } from './things';
+import { type Bench, LOG_L, LOG_R, type Log, type Sawhorse, type Woodpile } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
 
 /**
@@ -32,6 +32,8 @@ export interface Village {
   removeLog(l: Log): void;
   treeObstacle(t: Tree): Obstacle | null;
   horseObstacle: Obstacle;
+  bench: Bench;
+  benchObstacle: Obstacle;
   time: number;
   /** Bookkeeping for the overlay and the tests. */
   stats: { felled: number; sawn: number };
@@ -100,9 +102,14 @@ export abstract class Job {
   /** Undo bookkeeping after an interrupted carry. */
   protected dropped(_v: Village) {}
 
-  /** Walk to (x, z) and face yaw. With `ignore`, approach from 0.55 behind (along yaw) and step in, ignoring that obstacle only for the last step. */
-  protected go(x: number, z: number, yaw: number | null, ignore: Obstacle | null = null) {
-    const via = ignore && yaw !== null ? { x: x - Math.sin(yaw) * 0.55, z: z - Math.cos(yaw) * 0.55 } : null;
+  /**
+   * Walk to (x, z) and face yaw. With `ignore`, approach from 0.55 behind
+   * (or ahead, for a bench you back onto) and step in, ignoring that obstacle
+   * only for the last step.
+   */
+  protected go(x: number, z: number, yaw: number | null, ignore: Obstacle | null = null, from: 'behind' | 'ahead' = 'behind') {
+    const k = from === 'behind' ? -0.55 : 0.55;
+    const via = ignore && yaw !== null ? { x: x + Math.sin(yaw) * k, z: z + Math.cos(yaw) * k } : null;
     this.w.walker.go({ x, z, yaw, ignore, via });
   }
 
@@ -171,9 +178,10 @@ export class Lumberjack extends Job {
       case 'to tree': {
         if (!this.arrived) return;
         const t = this.tree!;
-        v.forest.fell(t);
+        const spec = v.forest.specOf(t);
+        v.forest.fell(t, a.choreOf('chop').fit(spec.rt).cutY);
         this.spawned = false;
-        a.start('chop', { tree: v.forest.specOf(t) });
+        a.start('chop', { tree: spec });
         this.step = { kind: 'chopping' };
         return;
       }
@@ -293,8 +301,15 @@ export class Lumberjack extends Job {
 }
 
 export class Woodworker extends Job {
+  /** Not before then will they go and sit down again. */
+  private restAfter = 0;
+
   constructor(w: Worker) {
     super(w, 'woodworker');
+  }
+
+  private workWaiting(v: Village) {
+    return !v.horse.log && v.pile.count > 0;
   }
 
   protected run(v: Village) {
@@ -304,17 +319,61 @@ export class Woodworker extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (!horse.log && v.pile.count > 0) {
+        if (this.workWaiting(v)) {
           const spot = v.pile.workSpot(_v, 0.3);
           this.go(spot.x, spot.z, facing(spot.x, spot.z, v.pile.x, v.pile.z));
           this.step = { kind: 'to pile' };
           return;
         }
-        // nothing to do: wait at the sawhorse
+        // nothing to do: now and then go and sit on the bench for a bit
+        if (v.time >= this.restAfter && v.bench.claimedBy < 0) {
+          if (Math.random() < 0.6) {
+            v.bench.claimedBy = this.w.i;
+            const at = v.bench.sitSpot(0.22);
+            this.go(at.x, at.z, at.yaw, v.benchObstacle, 'ahead');
+            this.step = { kind: 'to bench' };
+            return;
+          }
+          this.restAfter = v.time + 8;
+        }
+        // otherwise wait at the sawhorse
         const at = horse.sawSpot();
         const w = this.w.walker;
         if (Math.hypot(w.x - at.x, w.z - at.z) > 0.3 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw, v.horseObstacle);
         this.waitUntil = v.time + 1;
+        return;
+      }
+      case 'to bench': {
+        if (this.workWaiting(v)) {
+          // a log's come in: never mind
+          v.bench.claimedBy = -1;
+          this.w.walker.stop();
+          this.step = { kind: 'idle' };
+          return;
+        }
+        if (!this.arrived) return;
+        a.start('sit', { onBench: true });
+        this.step = { kind: 'sitting' };
+        return;
+      }
+      case 'sitting': {
+        if (!a.busy) {
+          // (knocked off it somehow)
+          v.bench.claimedBy = -1;
+          this.step = { kind: 'idle' };
+          return;
+        }
+        if (this.workWaiting(v)) {
+          a.standUp();
+          this.step = { kind: 'getting up' };
+        }
+        return;
+      }
+      case 'getting up': {
+        if (a.busy) return;
+        v.bench.claimedBy = -1;
+        this.restAfter = v.time + 10;
+        this.step = { kind: 'idle' };
         return;
       }
       case 'to pile': {

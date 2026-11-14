@@ -181,6 +181,8 @@ export class Actor {
 
   /** Sawing a real log on a real sawhorse (village): its size; no conjured trestles. */
   private sawLog: { r: number; len: number } | null = null;
+  /** Sitting on a real bench (village): stay seated until standUp(). */
+  private sitOn: { until: number } | null = null;
 
   /** This person's chore of a kind (made on first use): for fitting props before starting it. */
   choreOf(kind: 'chop'): Chop;
@@ -200,6 +202,8 @@ export class Actor {
       tree?: PineSpec;
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
+      /** Sitting: on a real bench (no conjured one), until standUp(). */
+      onBench?: boolean;
     } = {},
   ) {
     if (this.kind === 'fall') return; // let them finish falling/getting up
@@ -213,6 +217,7 @@ export class Actor {
     this.holdSpeed = kind !== 'wave' && kind !== 'jump';
     this.stopNow = kind === 'fall';
     this.sawLog = opts.sawLog ?? null;
+    this.sitOn = kind === 'sit' && opts.onBench ? { until: Infinity } : null;
     this.lastU = 0;
     this.lastStroke = -1;
     if (kind === 'hammer') this.showHammer(true);
@@ -545,9 +550,34 @@ export class Actor {
     this.box.visible = true;
   }
 
+  /**
+   * The seat that fits this person: knee height, far enough behind their feet
+   * that the thighs lie on it; how far the hips go back (z) and down (crouch,
+   * × leg length) to sit on it; where the bench's middle is (root frame), and
+   * its depth.
+   */
+  sitFit() {
+    const d = this.p.dims;
+    const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
+    const h = d.footH + d.shinLen * 0.92;
+    const z = d.thighLen * 0.85;
+    return { h, z, crouch: (standY - (h + d.hipBelow * 0.9)) / d.legLen, benchZ: -z - d.thighLen * 0.05, depth: d.thighLen * 1.1 };
+  }
+
+  /** Get up off a real bench (see start's `sitOn`). */
+  standUp() {
+    if (this.kind === 'sit' && this.sitOn) this.sitOn.until = Math.min(this.sitOn.until, this.t);
+  }
+
   private makeBench() {
     const p = this.p;
     const d = p.dims;
+    if (this.sitOn) {
+      // a real bench is there: just the numbers
+      const f = this.sitFit();
+      Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
+      return;
+    }
     if (!this.bench) {
       const g = boxGeo();
       this.bench = new THREE.Group();
@@ -767,17 +797,18 @@ export class Actor {
       }
 
       case 'sit': {
-        const tIn = 0.35; // bench appears
+        const tIn = this.sitOn ? 0 : 0.35; // bench appears (a real one is already there)
         const tDown = 0.9 / Math.sqrt(tempo);
-        const tSit = 6;
         const tUp = 0.8 / Math.sqrt(tempo);
-        const dur = tIn + tDown + tSit + tUp + 0.25;
+        // when they get up: after a while, or (on a real bench) when told to
+        const upAt = this.sitOn ? Math.max(this.sitOn.until, tIn + tDown) : tIn + tDown + 6;
+        const dur = upAt + tUp + 0.25;
         if (t >= dur) return this.finish();
         let k = 0; // 0 standing → 1 seated
         if (t < tIn) k = 0;
         else if (t < tIn + tDown) k = smooth((t - tIn) / tDown);
-        else if (t < tIn + tDown + tSit) k = 1;
-        else k = 1 - smooth((t - tIn - tDown - tSit) / tUp);
+        else if (t < upAt) k = 1;
+        else k = 1 - smooth((t - upAt) / tUp);
         const moving = k > 0 && k < 1 ? Math.sin(Math.PI * k) : 0;
         if (this.crossed(tIn + tDown * 0.85)) this.events.push('creak');
         // push the hips back first, then drop: reads as lowering onto a seat
@@ -787,7 +818,7 @@ export class Actor {
         P.spineX = 0.45 * moving - 0.04 * k; // lean forward to balance, then sit up
         P.headX = -0.2 * moving;
         const pop = t < tIn ? smooth(t / tIn) : t > dur - 0.25 ? smooth((dur - t) / 0.25) : 1;
-        if (this.bench) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
+        if (this.bench && !this.sitOn) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
         for (const sd of ['L', 'R'] as const) {
           // hands rest on the thighs; push off them when moving
           Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });

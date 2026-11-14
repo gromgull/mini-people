@@ -8,7 +8,8 @@
 //   - every log is in exactly one place, and the containers agree with it
 //     (pile slots, the sawhorse, the person carrying it)
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
-//   - nobody sits in the same (non-idle) step for more than 90 s
+//   - nobody stays in the same step for more than 90 s (waiting about and
+//     sitting on the bench don't count)
 //   - positions are finite
 //   - by the end, trees have been felled and logs sawn
 import { createServer } from 'vite';
@@ -68,7 +69,7 @@ const result = await page.evaluate((secs) => {
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (j.doing !== 'idle' && s - at > 90) {
+      else if (j.doing !== 'idle' && j.doing !== 'sitting' && s - at > 90) {
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
         since.set(i, [j.doing, s]);
       }

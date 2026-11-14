@@ -96,9 +96,10 @@ export class Forest {
     return scaleSpec(this.specs[t.variant], t.k);
   }
 
-  /** The chop has taken over drawing it. */
-  fell(t: Tree) {
+  /** The chop has taken over drawing everything above the cut; the stump (cut at cutH) is still ours. */
+  fell(t: Tree, cutH: number) {
     t.state = 'felling';
+    t.stumpH = cutH;
     this.dirty = true;
   }
 
