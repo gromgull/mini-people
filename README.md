@@ -79,6 +79,7 @@ Audio from the same genome, with no samples:
 | `1`–`9`, `0` | wave / hammer / jump / trip / carry / sit / talk / saw / fiddle / dance |
 | `C` / `A` / `F` | chop a tree / pick an apple / fish |
 | `T` / `E` / `D` | sit at a table / eat / drink |
+| `S` | show / hide the fps overlay |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
 
@@ -106,6 +107,7 @@ Handy for sharing a particular scene, e.g.
 | `px` | pixel size |
 | `fps` | animate on twos (e.g. 10) |
 | `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
+| `stats` | start with the fps / frame time / draw call overlay on |
 | `merge` | `0` draws every body part separately (about 37 draw calls per person instead of 3), for comparison |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |

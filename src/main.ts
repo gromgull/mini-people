@@ -52,6 +52,7 @@ const settings = {
   speed: num('speed', WALK_SPEED),
   animFps: num('fps', 0), // 0 = smooth; 8–12 = classic sprite feel
   maxFps: num('maxfps', 30), // render cap; 0 = every display refresh (60/120 Hz)
+  stats: q.has('stats'), // fps / frame time / draw calls overlay
   follow: q.has('follow'),
   paused: q.has('paused'),
   gait: { ...defaultGait },
@@ -780,6 +781,7 @@ window.addEventListener('keydown', (e) => {
   if (k) act(selected, k);
   if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);
+  if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) statsCtl.setValue(!settings.stats);
 });
 
 let selFolder: GUI | null = null;
@@ -829,6 +831,7 @@ const look = gui.addFolder('Look');
 const refill = () => fillAtlas(atlas, settings.ramp);
 look.add(settings, 'pixelSize', 1, 8, 1).name('pixel size').onChange(resize);
 look.add(settings, 'maxFps', { '15': 15, '24': 24, '30': 30, '60': 60, uncapped: 0 }).name('max fps');
+const statsCtl = look.add(settings, 'stats').name('show fps  [S]');
 look.add(settings, 'sky').name('sky & horizon');
 look.add(settings.ramp, 'bands', 1, 5, 1).onChange(refill);
 look.add(settings.ramp, 'smooth').onChange(refill);
@@ -1041,11 +1044,46 @@ function frame() {
   updateLabels();
   renderer.setRenderTarget(rt);
   renderer.render(scene, camera);
+  const sceneCalls = renderer.info.render.calls;
+  const sceneTris = renderer.info.render.triangles;
   renderer.setRenderTarget(null);
   renderer.render(blitScene, blitCam);
 
+  stats.frame(frameStart, sceneCalls, sceneTris);
   if (++frames === 2) (window as any).__mini = { ready: true, renderer, camera, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
 }
+
+// ---------------------------------------------------------------- stats overlay
+
+/**
+ * fps (frames actually drawn), frame time (CPU ms spent simulating and
+ * submitting a frame: the headroom under the fps cap) and the scene pass's
+ * draw calls and triangles. Averaged over half a second.
+ */
+const stats = (() => {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;left:8px;top:8px;padding:4px 7px;background:#000a;color:#e8f4d8;font:12px/1.35 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;z-index:10;';
+  document.body.appendChild(el);
+  let n = 0, ms = 0, worst = 0, since = performance.now();
+  return {
+    frame(start: number, calls: number, tris: number) {
+      el.style.display = settings.stats ? '' : 'none';
+      if (!settings.stats) return;
+      const now = performance.now();
+      const took = now - (start || now);
+      n++;
+      ms += took;
+      worst = Math.max(worst, took);
+      if (now - since < 500) return;
+      const fps = (n * 1000) / (now - since);
+      el.textContent = `${fps.toFixed(0)} fps${settings.maxFps ? ` (cap ${settings.maxFps})` : ''}\n${(ms / n).toFixed(1)} ms/frame (worst ${worst.toFixed(1)})\n${calls} draw calls\n${(tris / 1000).toFixed(0)}k triangles · ${people.length} people`;
+      n = 0;
+      ms = 0;
+      worst = 0;
+      since = now;
+    },
+  };
+})();
 
 resize();
 rebuildAll();
@@ -1058,12 +1096,13 @@ if (q.has('select')) {
   if (q.has('focus')) focusSelected();
 }
 // Render at most settings.maxFps: pixel art gains nothing from 120 fps, and
-// each frame is ~2300 draw calls, so the cap is most of the CPU cost. rAF keeps
+// simulating and drawing a crowd isn't free, so the cap saves most of the CPU. rAF keeps
 // ticking at the display rate and frames that come too soon are skipped. The
 // schedule advances in fixed steps (not "now"), so on refresh rates that don't
 // divide evenly (75, 144 Hz…) the average still lands on the cap; a little slack
 // keeps 60/120 Hz on an exact every-2nd/4th rhythm.
 let lastRenderAt = -Infinity;
+let frameStart = 0;
 function loop(now: number) {
   requestAnimationFrame(loop);
   if (settings.maxFps > 0) {
@@ -1071,6 +1110,7 @@ function loop(now: number) {
     if (now - lastRenderAt < step - 2) return;
     lastRenderAt = Math.max(lastRenderAt + step, now - step); // don't bank up time after a stall
   } else lastRenderAt = now;
+  frameStart = performance.now();
   frame();
 }
 frame();
