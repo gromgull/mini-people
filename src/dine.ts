@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { type Person, withRow } from './body';
-import { type ActionPose, type ArmAngles, type PropKit, lerp, smooth } from './actionkit';
+import { type ActionPose, type ArmAngles, type PropKit, lerp, reachFist, smooth } from './actionkit';
 import { type Chore, type ChoreOut, baked, disposeMesh, grow, mergeTwo, mixArm, pick, setArm, simpleMesh } from './chores';
-import { twoBoneIK } from './ik';
 import { ROWS } from './palette';
 import type { Part } from './trees';
 
@@ -41,9 +40,6 @@ const _a = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _u = new THREE.Vector3();
-const _pole = new THREE.Vector3();
-const _qU = new THREE.Quaternion();
-const _qM = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
 const _X = new THREE.Vector3(1, 0, 0);
 const _Y = new THREE.Vector3(0, 1, 0);
@@ -530,22 +526,8 @@ export class Dine implements Chore {
     this.reachTo('L', fistL, this.scooted);
   }
 
-  /** Solve one arm so its fist (the hand ball) sits at `fist` (root frame). */
   private reachTo(side: 'L' | 'R', fist: THREE.Vector3, w: number) {
-    if (w <= 1e-3) return;
-    const p = this.p;
-    const J = p.joints;
-    const d = p.dims;
-    const sh = side === 'R' ? J.shoulderR : J.shoulderL;
-    const el = side === 'R' ? J.elbowR : J.elbowL;
-    const tgt = J.spine.worldToLocal(p.root.localToWorld(_t.copy(fist)));
-    const dir = _u.subVectors(tgt, sh.position).normalize();
-    tgt.addScaledVector(dir, -d.handR * 0.7); // the hand ball hangs past the wrist
-    _pole.set(side === 'R' ? -0.75 : 0.75, -1, -0.35);
-    twoBoneIK(sh.position, tgt, _pole, d.upperArmLen, d.foreArmLen, _qU, _qM);
-    sh.quaternion.slerp(_qU, w);
-    el.quaternion.slerp(_qM, w);
-    p.root.updateMatrixWorld(true);
+    reachFist(this.p, side, fist, w);
   }
 
   hide() {

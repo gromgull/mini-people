@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { type Person, withRow } from './body';
 import { type ActionPose, type ArmAngles, type PropKit, inRoot, lerp, smooth, withFK } from './actionkit';
 import { ROWS } from './palette';
-import { type Part, bake, wobble } from './trees';
+import { type Part, type PineSpec, bake, pineParts, wobble } from './trees';
 
 /**
  * Chores with conjured scenery: chopping down a pine, picking an apple, and
@@ -107,6 +107,9 @@ export class Chop implements Chore {
   private lastU = -1;
   private chops = 0;
   private end = Infinity;
+  private t = 0;
+  /** A real tree to fell (village): set with aim() before start. */
+  private world: PineSpec | null = null;
 
   constructor(private p: Person, private kit: PropKit) {
     const s = Math.sqrt(p.dims.height);
@@ -130,7 +133,17 @@ export class Chop implements Chore {
     p.root.add(this.tree);
   }
 
-  start() {
+  /** Fell this real tree (its shape) on the next start, instead of conjuring one. */
+  aim(spec: PineSpec | null) {
+    this.world = spec;
+  }
+
+  /**
+   * Where a trunk of radius rt has to stand (this person's root frame) for
+   * the axe to bite it, and how high the cut is: the edge at the strike pose
+   * (plain FK), moved on along the swing by half the trunk.
+   */
+  fit(rt: number) {
     const p = this.p;
     const d = p.dims;
     const H = d.height;
@@ -138,24 +151,51 @@ export class Chop implements Chore {
     const at = (spineY: number) => withFK(p, { ...AXE_STRIKE, spineX: 0.2, spineY }, () => inRoot(p, this.edge, _v.set(0, 0, 0), new THREE.Vector3()));
     const hit = at(AXE_STRIKE.spineY);
     const dir = hit.clone().sub(at(AXE_STRIKE.spineY - 0.25)).setY(0).normalize();
-    this.cutY = Math.max(0.15 * H, hit.y - CHOP_CROUCH * d.legLen);
-    const rt = 0.05 * H;
+    const cutY = Math.max(0.15 * H, hit.y - CHOP_CROUCH * d.legLen);
     const c = hit.clone().addScaledVector(dir, rt * 0.55).setY(0);
     if (c.length() < 0.22 * H) c.setLength(0.22 * H); // never through the chopper's own belly
+    return { c, cutY };
+  }
+
+  /** Once the felled tree starts to go (shrinking away), where its trunk lies: world point and direction. */
+  fallen() {
+    if (this.landedAt < 0 || this.t <= this.end) return null;
+    this.p.root.updateMatrixWorld(true);
+    const base = this.tree.localToWorld(this.top.position.clone());
+    const dir = this.away.clone().transformDirection(this.p.root.matrixWorld).setY(0).normalize();
+    return { base, dir, cutY: this.cutY };
+  }
+
+  start() {
+    const p = this.p;
+    const d = p.dims;
+    const H = d.height;
+    const spec = this.world;
+    const rt = spec ? spec.rt : 0.05 * H;
+    const { c, cutY } = this.fit(rt);
+    this.cutY = cutY;
 
     // build the pine: a stump, and the rest of it hinged at the cut
     disposeMesh(this.stump);
     disposeMesh(this.upper);
-    const bark = pick(ROWS.bark), needles = pick(ROWS.pine);
-    const stumpG = new THREE.CylinderGeometry(rt * 0.96, rt * 1.1, this.cutY, 7).translate(0, this.cutY / 2, 0);
-    this.stump = baked([{ geo: stumpG, row: bark }], this.kit);
-    const trunkTop = Math.max(this.cutY + 0.3 * H, 0.62 * H);
-    const parts: Part[] = [{ geo: new THREE.CylinderGeometry(rt * 0.75, rt * 0.96, trunkTop - this.cutY + 0.1 * H, 7).translate(0, (trunkTop - this.cutY + 0.1 * H) / 2, 0), row: bark }];
-    let y = trunkTop - this.cutY;
-    for (const [rad, h] of [[0.52, 0.72], [0.4, 0.62], [0.27, 0.55]]) {
-      const g = new THREE.ConeGeometry(rad * H, h * H, 7, 1).rotateY(Math.random() * Math.PI).translate(0, y + (h * H) / 2, 0);
-      parts.push({ geo: g, row: needles });
-      y += h * H * 0.55;
+    let parts: Part[];
+    if (spec) {
+      // a real tree: exactly its shape above the cut (the forest draws the stump)
+      parts = pineParts(spec, this.cutY);
+      this.stump = baked([{ geo: new THREE.CylinderGeometry(rt, rt, 0.01, 5), row: spec.bark }], this.kit);
+      this.stump.visible = false;
+    } else {
+      const bark = pick(ROWS.bark), needles = pick(ROWS.pine);
+      const stumpG = new THREE.CylinderGeometry(rt * 0.96, rt * 1.1, this.cutY, 7).translate(0, this.cutY / 2, 0);
+      this.stump = baked([{ geo: stumpG, row: bark }], this.kit);
+      const trunkTop = Math.max(this.cutY + 0.3 * H, 0.62 * H);
+      parts = [{ geo: new THREE.CylinderGeometry(rt * 0.75, rt * 0.96, trunkTop - this.cutY + 0.1 * H, 7).translate(0, (trunkTop - this.cutY + 0.1 * H) / 2, 0), row: bark }];
+      let y = trunkTop - this.cutY;
+      for (const [rad, h] of [[0.52, 0.72], [0.4, 0.62], [0.27, 0.55]]) {
+        const g = new THREE.ConeGeometry(rad * H, h * H, 7, 1).rotateY(Math.random() * Math.PI).translate(0, y + (h * H) / 2, 0);
+        parts.push({ geo: g, row: needles });
+        y += h * H * 0.55;
+      }
     }
     this.upper = baked(parts, this.kit);
     this.tree.add(this.stump);
@@ -163,7 +203,7 @@ export class Chop implements Chore {
     this.top.position.set(0, this.cutY, 0);
     this.top.quaternion.identity();
     this.tree.position.copy(c);
-    this.tree.scale.setScalar(1e-3);
+    this.tree.scale.setScalar(spec ? 1 : 1e-3);
     this.tree.visible = true;
     // it falls away from the chopper
     const away = c.clone().normalize();
@@ -183,11 +223,13 @@ export class Chop implements Chore {
   pre(t: number, dt: number, P: ActionPose, tempo: number, out: ChoreOut) {
     const lead = 0.5;
     const T = 1.0 / tempo;
+    this.t = t;
     if (t > this.end + 0.7) return false;
     // turn side-on to the tree first (the whole root turns, tree and all), so
-    // from the front you see the chopper, not a trunk in their face
-    P.spin = CHOP_TURN * smooth(t / 0.4) * (1 - smooth((t - this.end - 0.35) / 0.35));
-    const pop = t < 0.4 ? grow(t / 0.4) : t > this.end ? Math.max(1e-3, 1 - smooth((t - this.end) / 0.35)) : 1;
+    // from the front you see the chopper, not a trunk in their face (a real
+    // tree stays put: the chopper walked up side-on already)
+    if (!this.world) P.spin = CHOP_TURN * smooth(t / 0.4) * (1 - smooth((t - this.end - 0.35) / 0.35));
+    const pop = t < 0.4 && !this.world ? grow(t / 0.4) : t > this.end ? Math.max(1e-3, 1 - smooth((t - this.end) / 0.35)) : 1;
     this.tree.scale.setScalar(pop);
     this.axe.scale.setScalar(Math.sqrt(this.p.dims.height) * Math.max(0.001, Math.min(1, t / 0.25, pop)));
 

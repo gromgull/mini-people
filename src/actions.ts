@@ -9,11 +9,13 @@ import { twoBoneIK } from './ik';
 import { type ActionPose, type PropKit, arm, envelope, lerp, mesh, smooth } from './actionkit';
 import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from './chores';
 import { type DineAsk, Dine } from './dine';
+import { Haul, type LogSpot } from './haul';
+import type { PineSpec } from './trees';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
 const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -82,7 +84,7 @@ function sawGeo() {
   const blade = withRow(new THREE.BoxGeometry(0.005, 0.3, 0.06), ROWS.shoes[3]);
   blade.translate(0, -0.18, 0.012);
   // half a log (unit length along +x from the cut, radius 1), bark + pale end
-  const log = withRow(new THREE.CylinderGeometry(1, 1, 1, 9), ROWS.shoes[0]);
+  const log = withRow(new THREE.CylinderGeometry(1, 1, 1, 9), ROWS.bark[0]);
   log.rotateZ(Math.PI / 2);
   log.translate(0.5, 0, 0);
   const end = withRow(new THREE.CircleGeometry(0.86, 9), ROWS.pants[6]);
@@ -180,7 +182,26 @@ export class Actor {
   /** Sawing a real log on a real sawhorse (village): its size; no conjured trestles. */
   private sawLog: { r: number; len: number } | null = null;
 
-  start(kind: ActionKind, opts: { push?: THREE.Vector3; side?: 'L' | 'R'; sawLog?: { r: number; len: number } } = {}) {
+  /** This person's chore of a kind (made on first use): for fitting props before starting it. */
+  choreOf(kind: 'chop'): Chop;
+  choreOf(kind: 'haul'): Haul;
+  choreOf(kind: 'chop' | 'haul'): Chore {
+    return (this.chores[kind] ??= kind === 'chop' ? new Chop(this.p, this.kit) : new Haul(this.p, this.kit));
+  }
+
+  start(
+    kind: ActionKind,
+    opts: {
+      push?: THREE.Vector3;
+      side?: 'L' | 'R';
+      /** Sawing: a real log's size (no conjured trestles). */
+      sawLog?: { r: number; len: number };
+      /** Chopping: a real tree's shape (stands where it is; no conjured tree). */
+      tree?: PineSpec;
+      /** Hauling: a real log's mesh, where it lies, its radius. */
+      log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
+    } = {},
+  ) {
     if (this.kind === 'fall') return; // let them finish falling/getting up
     // already at the table: have that next instead of getting up and sitting down again
     if (isDine(kind) && this.kind && isDine(this.kind) && (this.chore as Dine).want(kind)) return;
@@ -207,7 +228,14 @@ export class Actor {
     if (kind === 'chop' || kind === 'pick' || kind === 'fish') {
       const C = kind === 'chop' ? Chop : kind === 'pick' ? PickApple : Fish;
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
+      if (kind === 'chop') (this.chore as Chop).aim(opts.tree ?? null);
       this.chore.start();
+    }
+    if (kind === 'haul') {
+      const h = this.choreOf('haul');
+      if (opts.log) h.aim(opts.log.mesh, opts.log.from, opts.log.r);
+      this.chore = h;
+      h.start();
     }
     if (isDine(kind)) {
       // one table for all three: it's the same sitting down, just a different meal

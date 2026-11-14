@@ -477,7 +477,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]'], ['haul', '🪵 haul a log  [H]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -531,7 +531,7 @@ labBtn('fiddle tune', () => {
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
-  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink' } as const)[e.key.toLowerCase() as 'c'];
+  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink', h: 'haul' } as const)[e.key.toLowerCase() as 'c'];
   if (k) act(selected, k);
   if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);

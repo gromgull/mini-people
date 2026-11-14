@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Person } from './body';
+import { twoBoneIK } from './ik';
 
 /** Shared bits for actions: pose types, easing, and prop meshes. */
 
@@ -81,4 +82,32 @@ export function withFK<T>(p: Person, pose: { spineX?: number; spineY?: number; R
 /** A point in some object's frame, expressed in the person's root frame. */
 export function inRoot(p: Person, obj: THREE.Object3D, local: THREE.Vector3, out = new THREE.Vector3()) {
   return p.root.worldToLocal(obj.localToWorld(out.copy(local)));
+}
+
+const _t = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _pole = new THREE.Vector3();
+const _qU = new THREE.Quaternion();
+const _qM = new THREE.Quaternion();
+
+/**
+ * Solve one arm (after the animator) so its fist, the hand ball, sits at
+ * `fist` (root frame), blended in by w. Elbows point out, down and a little
+ * back unless `pole` (spine frame) says otherwise.
+ */
+export function reachFist(p: Person, side: 'L' | 'R', fist: THREE.Vector3, w: number, pole?: THREE.Vector3) {
+  if (w <= 1e-3) return;
+  const J = p.joints;
+  const d = p.dims;
+  const sh = side === 'R' ? J.shoulderR : J.shoulderL;
+  const el = side === 'R' ? J.elbowR : J.elbowL;
+  const tgt = J.spine.worldToLocal(p.root.localToWorld(_t.copy(fist)));
+  const dir = _u.subVectors(tgt, sh.position).normalize();
+  tgt.addScaledVector(dir, -d.handR * 0.7); // the hand ball hangs past the wrist
+  if (pole) _pole.copy(pole);
+  else _pole.set(side === 'R' ? -0.75 : 0.75, -1, -0.35);
+  twoBoneIK(sh.position, tgt, _pole, d.upperArmLen, d.foreArmLen, _qU, _qM);
+  sh.quaternion.slerp(_qU, w);
+  el.quaternion.slerp(_qM, w);
+  p.root.updateMatrixWorld(true);
 }

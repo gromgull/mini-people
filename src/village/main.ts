@@ -10,7 +10,8 @@ import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
 import { LOG_L, LOG_R, type Log, Sawhorse, Woodpile, makeLog } from './things';
-import { type Goal, type Obstacle, Walker } from './walk';
+import { type Obstacle, Walker } from './walk';
+import { type Job, Lumberjack, type Village, Woodworker } from './jobs';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -68,20 +69,19 @@ let nextLogId = 0;
 function newLog(): Log {
   const mesh = makeLog(stage);
   stage.scene.add(mesh);
-  const log: Log = { id: nextLogId++, place: { at: 'ground', x: 0, z: 0, yaw: 0 }, mesh };
+  const log: Log = { id: nextLogId++, place: { at: 'ground', x: 0, z: 0, yaw: 0 }, mesh, claimedBy: -1 };
   logs.push(log);
   return log;
 }
-// (a few to look at while the jobs aren't in yet)
-for (let i = 0; i < 3; i++) {
+function removeLog(l: Log) {
+  stage.scene.remove(l.mesh);
+  logs.splice(logs.indexOf(l), 1);
+}
+// ?logs=n: start with some in the pile
+for (let i = 0; i < Math.min(pile.slots.length, num('logs', 0)); i++) {
   const l = newLog();
   l.place = { at: 'pile', slot: i };
   pile.logs[i] = l;
-}
-{
-  const l = newLog();
-  l.place = { at: 'horse' };
-  horse.log = l;
 }
 
 const _v = new THREE.Vector3();
@@ -111,7 +111,7 @@ const pileObstacle: Obstacle = { kind: 'box', x: pile.x, z: pile.z, yaw: pile.ya
 const horseObstacle: Obstacle = (() => {
   const t = horse.fit.trestles;
   const mid = _v.set((t[0].x + t[1].x) / 2, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
-  return { kind: 'box', x: horse.x + mid.x, z: horse.z + mid.z, yaw: horse.yaw, hx: Math.abs(t[0].x - t[1].x) / 2 + 0.08, hz: 0.14 };
+  return { kind: 'box', x: horse.x + mid.x, z: horse.z + mid.z, yaw: horse.yaw, hx: Math.abs(t[0].x - t[1].x) / 2 + 0.08, hz: 0.2 };
 })();
 const treeObstacles = new Map<number, Obstacle>();
 /** Everything solid right now. */
@@ -126,26 +126,29 @@ function obstacles(): Obstacle[] {
   }
   return out;
 }
-/** Which way to face so a point is straight ahead. */
-const facing = (fromX: number, fromZ: number, toX: number, toZ: number) => Math.atan2(toX - fromX, toZ - fromZ);
-
-// (step 2: a patrol to try the walking — pile, a tree, the sawhorse)
-const patrol: (() => Goal)[] = [
-  () => { const w = pile.workSpot(_v); return { x: w.x, z: w.z, yaw: facing(w.x, w.z, pile.x, pile.z) }; },
-  () => {
-    const t = forest.standing()[5];
-    const o = treeObstacles.get(t.id) ?? null;
-    return { x: t.x + 0.45, z: t.z + 0.1, yaw: facing(t.x + 0.45, t.z + 0.1, t.x, t.z), ignore: o };
-  },
-  () => { const s = horse.sawSpot(); return { x: s.x + 0.6, z: s.z - 0.4, yaw: s.yaw }; },
-];
-const legs = people.map((_, i) => i);
+const village: Village = {
+  forest,
+  pile,
+  horse,
+  logs,
+  newLog,
+  removeLog,
+  treeObstacle: (t) => treeObstacles.get(t.id) ?? null,
+  horseObstacle,
+  time: 0,
+  stats: { felled: 0, sawn: 0 },
+};
+const jobs: Job[] = people.map((p, i) => {
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root };
+  return ROLES[i] === 'lumberjack' ? new Lumberjack(w) : new Woodworker(w);
+});
 
 // ---------------------------------------------------------------- loop
 
 let simTime = 0;
 function simulate(dt: number) {
   simTime += dt;
+  village.time = simTime;
   crowd.beginStep(simTime, null, -1);
   const obs = obstacles();
   people.forEach((p, i) => {
@@ -153,11 +156,7 @@ function simulate(dt: number) {
     const w = walkers[i];
     const a = crowd.actors[i];
     const m = crowd.motions[i];
-    if (!w.goal || (w.arrived && !a.busy)) {
-      if (w.arrived) a.start('wave');
-      legs[i] = (legs[i] + 1) % patrol.length;
-      w.go(patrol[legs[i]]());
-    }
+    jobs[i].tick(village);
     m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, walkers, WALK_SPEED * crowd.styleOf(p).speedK);
     crowd.advance(i, dt);
     if (!a.rootLocked) {
@@ -181,12 +180,24 @@ if (!q.has('zoom')) {
   stage.camera.updateProjectionMatrix();
 }
 
+/** ?follow=i: keep person i in the middle of the view. */
+let follow = q.has('follow') ? num('follow', 0) : -1;
+function focusOn(i: number, k: number) {
+  const p = people[i];
+  if (!p) return;
+  const c = stage.controls;
+  const off = stage.camera.position.clone().sub(c.target);
+  c.target.lerp(new THREE.Vector3(p.root.position.x, p.dims.height * 0.5, p.root.position.z), k);
+  stage.camera.position.copy(c.target).add(off);
+}
+
 let frames = 0;
 function frame(start: number) {
   const dt = stage.delta();
   crowd.frameTick();
   if (!settings.paused) simulate(dt);
   crowd.sweep();
+  if (follow >= 0) focusOn(follow, frames === 0 ? 1 : 1 - Math.exp(-dt * 4));
   stage.controls.update();
   stage.updateLight(dt, settings.paused);
   crowd.orientShadows();
@@ -194,7 +205,7 @@ function frame(start: number) {
   houses.updateShadows(stage.lightWorld, look.shadowLength);
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest }), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
+  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village }), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
 }
 
 stage.resize();

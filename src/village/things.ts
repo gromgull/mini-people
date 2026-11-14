@@ -19,6 +19,8 @@ export interface Log {
   id: number;
   place: LogPlace;
   mesh: THREE.Object3D;
+  /** Someone's on their way to pick it up (−1 = nobody). */
+  claimedBy: number;
 }
 
 let logGeo: { flat: THREE.BufferGeometry; smooth: THREE.BufferGeometry } | null = null;
@@ -87,10 +89,10 @@ export class Woodpile {
     return out.copy(this.slots[i]).applyMatrix4(this.group.matrixWorld);
   }
 
-  /** Stand here (and face the pile) to put a log on it or take one off. */
-  workSpot(out = new THREE.Vector3()) {
+  /** Stand here (and face the pile) to put a log on it or take one off; `along` shifts it along the pile. */
+  workSpot(out = new THREE.Vector3(), along = 0) {
     // in front of the pile's long side
-    return out.set(this.x, 0, this.z).add(new THREE.Vector3(0, 0, 0.62).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw));
+    return out.set(this.x, 0, this.z).add(new THREE.Vector3(along, 0, 0.62).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw));
   }
 }
 
