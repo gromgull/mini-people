@@ -58,6 +58,9 @@ Audio from the same genome, with no samples:
 - **Actions:** wave, hammer, jump, trip, carry a box, sit on a bench, talk
   (with turn-taking, nods and gestures), saw a log, fiddle, dance, chop down a
   pine, pick an apple, and fish. Apples and fish are carried off afterwards.
+  Sit down at a farmhouse table (shuffling the bench in) to eat an apple or a
+  fish, or to drink from a tankard; asking for more while seated adds to the
+  meal instead of getting up.
   Dancers and fiddlers share one beat.
   Props are conjured and fitted to the person: the trunk stands where *their*
   axe lands, the apple hangs where *their* hand reaches.
@@ -75,6 +78,7 @@ Audio from the same genome, with no samples:
 | shift + click | shove them |
 | `1`–`9`, `0` | wave / hammer / jump / trip / carry / sit / talk / saw / fiddle / dance |
 | `C` / `A` / `F` | chop a tree / pick an apple / fish |
+| `T` / `E` / `D` | sit at a table / eat / drink |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
 
@@ -152,6 +156,7 @@ once.
 | `src/springs.ts`, `src/ik.ts`, `src/ragdoll.ts` | secondary motion, inverse kinematics, falling over |
 | `src/actions.ts` | the action runner: each action's props and pose layers |
 | `src/chores.ts` | chopping, apple picking and fishing, with their conjured trees, pool and catch |
+| `src/dine.ts` | the table and benches, sitting down at them, eating and drinking (props lead, IK arms follow) |
 | `src/actionkit.ts` | shared action helpers: pose types, easing, FK prop fitting |
 | `src/gaze.ts` | eyes and head: who looks at whom |
 | `src/wander.ts` | the roaming crowd: targets, steering, personal space |

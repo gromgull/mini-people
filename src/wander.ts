@@ -29,7 +29,7 @@ const TURN_RATE = 3.2; // rad/s
 const TURN_FIRST = 0.6; // further off than this → turn on the spot before walking
 const PERSONAL = 0.55;
 const MIN_GAP = 0.36; // hard minimum distance a walker keeps from anyone // neighbours closer than this push us away
-const ACTIONS: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall', 'talk', 'talk', 'talk', 'saw', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'pick', 'fish'];
+const ACTIONS: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall', 'talk', 'talk', 'talk', 'saw', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'pick', 'fish', 'dine', 'eat', 'drink'];
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 

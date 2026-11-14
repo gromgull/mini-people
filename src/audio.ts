@@ -316,7 +316,7 @@ export class Sound {
    * Sounds of the outdoor chores: axe, falling tree, leaves, apples, and
    * fishing (cast, float, splashes, the reel's ratchet).
    */
-  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick', w: Where) {
+  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape', w: Where) {
     // the reel's ratchet ticks fast and quietly: not worth a rate-limit token
     if (!this.live || (kind !== 'tick' && !this.allow('tools'))) return;
     const t = this.ctx!.currentTime + 0.003;
@@ -382,6 +382,34 @@ export class Sound {
         break;
       case 'tick':
         this.noiseSrc(t, 0.01).connect(this.filter('bandpass', 4200, 4)).connect(this.env(t, 0.16, 0.0005, 0.006)).connect(o);
+        break;
+      case 'munch':
+        // chewing with the mouth shut: soft, dull, wet little squelches
+        for (let k = 0; k < 3; k++) {
+          const tk = t + k * rand(0.17, 0.22);
+          this.noiseSrc(tk, 0.06).connect(this.filter('bandpass', rand(450, 750), 2)).connect(this.env(tk, rand(0.35, 0.5), 0.008, 0.05)).connect(o);
+          this.tone('sine', tk, rand(140, 170), 90, 0.05).connect(this.env(tk, 0.25, 0.005, 0.04)).connect(o);
+        }
+        break;
+      case 'gulp': {
+        // a swallow: a throaty "glk", a low bloop dropping in pitch
+        this.noiseSrc(t, 0.03).connect(this.filter('bandpass', 900, 3)).connect(this.env(t, 0.25, 0.002, 0.02)).connect(o);
+        const f = rand(210, 250);
+        this.tone('sine', t + 0.02, f, f * 0.55, 0.12).connect(this.filter('lowpass', 900, 1)).connect(this.env(t + 0.02, 0.7, 0.01, 0.1)).connect(o);
+        break;
+      }
+      case 'clunk': {
+        // a tankard set down on wood: dull knock plus a faint ring of the hoops
+        this.tone('sine', t, 180, 90, 0.1).connect(this.env(t, 0.7, 0.002, 0.08)).connect(o);
+        this.noiseSrc(t, 0.03).connect(this.filter('bandpass', 1100, 2)).connect(this.env(t, 0.4, 0.001, 0.025)).connect(o);
+        const f = rand(1150, 1300);
+        [1, 2.7].forEach((k, i) => this.tone('triangle', t, f * k, f * k * 0.99, 0.15).connect(this.env(t, [0.08, 0.04][i], 0.001, 0.12)).connect(o));
+        break;
+      }
+      case 'scrape':
+        // a bench dragged a few inches over the ground
+        this.noiseSweep(t, o, 700, 420, 2.5, 1.1, 0.02, 0.2);
+        this.noiseSrc(t, 0.2).connect(this.filter('lowpass', 300, 1)).connect(this.env(t, 0.6, 0.02, 0.16)).connect(o);
         break;
     }
   }
@@ -648,7 +676,7 @@ export class Sound {
   }
 
   /** Little vocal reactions in the person's own voice. */
-  exclaim(kind: 'oof' | 'hup' | 'grunt' | 'gasp' | 'hey', v: Voice, w: Where) {
+  exclaim(kind: 'oof' | 'hup' | 'grunt' | 'gasp' | 'hey' | 'ahh' | 'mmm', v: Voice, w: Where) {
     if (!this.live || !this.allow('voices')) return;
     const t = this.ctx!.currentTime + 0.01;
     const o = this.out('voices', w);
@@ -666,6 +694,16 @@ export class Sound {
       case 'hey':
         this.syllable(t, 0.09, v.f0 * 1.15, VOWELS[1], v, o, 0.35, 1.0);
         this.syllable(t + 0.1, 0.16, v.f0 * 1.35, VOWELS[2], v, o, 0.38, 0.85);
+        break;
+      case 'ahh':
+        // after a good long drink: an open, falling, breathy "aah"
+        this.noiseSrc(t, 0.12).connect(this.filter('bandpass', 1500 * v.formant, 1)).connect(this.env(t, 0.06, 0.02, 0.1)).connect(o);
+        this.syllable(t + 0.04, 0.45, v.f0 * 1.2, VOWELS[0], v, o, 0.4, 0.7);
+        break;
+      case 'mmm':
+        // satisfied, mouth shut: a hum that rises then settles
+        this.hum(t, 0.4, v.f0 * 1.05, v, o, 0.5, 1.15);
+        this.hum(t + 0.42, 0.3, v.f0 * 1.15, v, o, 0.45, 0.85);
         break;
       case 'gasp': {
         // a sharp inhale (rising noise) with a hint of "oh"

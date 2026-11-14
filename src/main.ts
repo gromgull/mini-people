@@ -313,7 +313,7 @@ function baseTransform(i: number) {
  * root (ragdoll, getting up) we leave it alone; when it lets go we capture the
  * difference as an offset and ease it away, so nobody snaps back to the path.
  */
-function placeOne(i: number, lift = 0, spin = 0) {
+function placeOne(i: number, lift = 0, spin = 0, fwd = 0) {
   const p = people[i];
   const a = actors[i];
   const o = offsets[i];
@@ -339,8 +339,9 @@ function placeOne(i: number, lift = 0, spin = 0) {
     o.z = p.root.position.z - b.z;
     o.yaw = Math.atan2(Math.sin(p.root.rotation.y - b.yaw), Math.cos(p.root.rotation.y - b.yaw));
   }
-  p.root.position.set(b.x + o.x, lift, b.z + o.z);
-  p.root.rotation.y = b.yaw + o.yaw + spin;
+  const yaw = b.yaw + o.yaw + spin;
+  p.root.position.set(b.x + o.x + Math.sin(yaw) * fwd, lift, b.z + o.z + Math.cos(yaw) * fwd);
+  p.root.rotation.y = yaw;
 }
 
 function placeAll() {
@@ -449,11 +450,11 @@ const gazeWorld: GazeWorld = {
 };
 
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish'];
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish') && settings.mode === 'parade') kind = 'wave';
+  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish' || kind === 'dine' || kind === 'eat' || kind === 'drink') && settings.mode === 'parade') kind = 'wave';
   const a = actors[i];
   if (!a) return;
   if (kind === 'talk') return startTalk(i);
@@ -528,7 +529,7 @@ function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
     else if (e === 'thunk') sound.thunk(w, 1);
     else if (e === 'log') sound.thunk(w, 0.8);
     else if (e === 'creak') sound.creak(w);
-    else if (e === 'oof' || e === 'hup' || e === 'grunt' || e === 'hey') sound.exclaim(e, v, w);
+    else if (e === 'oof' || e === 'hup' || e === 'grunt' || e === 'hey' || e === 'ahh' || e === 'mmm') sound.exclaim(e, v, w);
     else sound.chore(e, w);
   }
 }
@@ -590,7 +591,7 @@ function simulate(dt: number) {
         o.z -= o.z * k;
       }
     }
-    placeOne(i, pose?.lift ?? 0, pose?.spin ?? 0);
+    placeOne(i, pose?.lift ?? 0, pose?.spin ?? 0, pose?.fwd ?? 0);
     gazes[i].partner = a.kind === 'talk' ? a.partner : -1;
     gazes[i].aim(gazeWorld);
     anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
@@ -599,8 +600,8 @@ function simulate(dt: number) {
     const gasp = gazes[i].surprised || (a.kind === 'fall' && a.rootLocked);
     if (p.mouth) {
       // gasp while falling or while staring at someone else's drama
-      p.mouth.rest.visible = !gasp;
-      p.mouth.o.visible = gasp;
+      p.mouth.rest.visible = !gasp && !a.mouthOpen;
+      p.mouth.o.visible = gasp || a.mouthOpen;
     }
     soundFor(i, p, m, a, gazes[i].surprised && !wasGasping[i]);
     wasGasping[i] = gazes[i].surprised;
@@ -718,7 +719,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -772,7 +773,7 @@ labBtn('fiddle tune', () => {
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
-  const k2 = ({ c: 'chop', a: 'pick', f: 'fish' } as const)[e.key.toLowerCase() as 'c'];
+  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink' } as const)[e.key.toLowerCase() as 'c'];
   if (k) act(selected, k);
   if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);

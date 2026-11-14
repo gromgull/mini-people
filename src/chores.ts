@@ -14,7 +14,8 @@ import { type Part, bake, wobble } from './trees';
 
 export type ActEvent =
   | 'oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log' | 'clap'
-  | 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick';
+  | 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick'
+  | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'ahh' | 'mmm';
 export type BurstKind = 'chips' | 'leaves' | 'splash' | 'crumbs';
 
 /** What a chore reports back each frame (the Actor carries these). */
@@ -27,6 +28,8 @@ export interface ChoreOut {
   holdSpeed: boolean;
   /** Set for one frame when they should head off somewhere (wander picks where). */
   depart: boolean;
+  /** Mouth open this frame (biting, chewing). */
+  mouthOpen: boolean;
 }
 
 export interface Chore {
@@ -39,17 +42,17 @@ export interface Chore {
   dispose(): void;
 }
 
-const pick = <T>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
-const setArm = (P: ActionPose, side: 'L' | 'R', a: ArmAngles, w: number, stiff = 1) => Object.assign(P.arms[side], { w, x: a.x, z: a.z, elbow: a.elbow, stiff });
-const mixArm = (a: ArmAngles, b: ArmAngles, k: number): ArmAngles => ({ x: lerp(a.x, b.x, k), z: lerp(a.z, b.z, k), elbow: lerp(a.elbow, b.elbow, k) });
+export const pick = <T>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
+export const setArm = (P: ActionPose, side: 'L' | 'R', a: ArmAngles, w: number, stiff = 1) => Object.assign(P.arms[side], { w, x: a.x, z: a.z, elbow: a.elbow, stiff });
+export const mixArm = (a: ArmAngles, b: ArmAngles, k: number): ArmAngles => ({ x: lerp(a.x, b.x, k), z: lerp(a.z, b.z, k), elbow: lerp(a.elbow, b.elbow, k) });
 /** Pop-in scale 0 → 1 that overshoots a little (ease-out-back). */
-const grow = (k: number) => {
+export const grow = (k: number) => {
   const c = Math.min(1, Math.max(0, k)) - 1;
   return Math.max(1e-3, 1 + 2.7 * c ** 3 + 1.7 * c ** 2);
 };
 
 /** A toon mesh from a faceted geometry, outlined by its smooth twin (see trees.ts `bake`). */
-function baked(parts: Part[], kit: PropKit) {
+export function baked(parts: Part[], kit: PropKit) {
   const { flat, smooth: hullGeo } = bake(parts);
   const m = new THREE.Mesh(flat, kit.toon);
   const o = new THREE.Mesh(hullGeo, kit.outline);
@@ -57,11 +60,11 @@ function baked(parts: Part[], kit: PropKit) {
   m.add(o);
   return m;
 }
-function disposeMesh(m: THREE.Object3D | null) {
+export function disposeMesh(m: THREE.Object3D | null) {
   m?.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
   m?.removeFromParent();
 }
-function simpleMesh(geo: THREE.BufferGeometry, kit: PropKit) {
+export function simpleMesh(geo: THREE.BufferGeometry, kit: PropKit) {
   const m = new THREE.Mesh(geo, kit.toon);
   const o = new THREE.Mesh(geo, kit.outline);
   m.raycast = o.raycast = () => {};
@@ -446,7 +449,7 @@ export class PickApple implements Chore {
   }
 }
 
-function mergeTwo(a: THREE.BufferGeometry, b: THREE.BufferGeometry) {
+export function mergeTwo(a: THREE.BufferGeometry, b: THREE.BufferGeometry) {
   const ai = a.index ? a.toNonIndexed() : a;
   const bi = b.index ? b.toNonIndexed() : b;
   const g = new THREE.BufferGeometry();

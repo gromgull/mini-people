@@ -8,9 +8,12 @@ import { Ragdoll } from './ragdoll';
 import { twoBoneIK } from './ik';
 import { type ActionPose, type PropKit, arm, envelope, lerp, mesh, smooth } from './actionkit';
 import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from './chores';
+import { type DineAsk, Dine } from './dine';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish'] as const;
+const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
+
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -107,7 +110,7 @@ export class Actor {
   impact = false; // set on the frame a hammer blow lands
   hammerHead: THREE.Object3D | null = null;
 
-  private pose: ActionPose = { crouch: 0, sitZ: 0, lift: 0, spineY: 0, spineZ: 0, spin: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
+  private pose: ActionPose = { crouch: 0, sitZ: 0, lift: 0, spineY: 0, spineZ: 0, spin: 0, fwd: 0, spineX: 0, headX: 0, headY: 0, headZ: 0, arms: { L: arm(), R: arm() } };
   private side: 'L' | 'R' = 'R';
   private push = new THREE.Vector3();
   private stopNow = false;
@@ -134,6 +137,8 @@ export class Actor {
   focus: THREE.Vector3 | null = null;
   /** Set for one frame when the action wants them to walk off somewhere. */
   depart = false;
+  /** Mouth open this frame (biting, chewing). */
+  mouthOpen = false;
   private chore: Chore | null = null;
   private chores: Partial<Record<ActionKind, Chore>> = {};
   /** Shared beat clock (beats since start), set by the caller every frame. */
@@ -171,6 +176,8 @@ export class Actor {
 
   start(kind: ActionKind, opts: { push?: THREE.Vector3; side?: 'L' | 'R' } = {}) {
     if (this.kind === 'fall') return; // let them finish falling/getting up
+    // already at the table: have that next instead of getting up and sitting down again
+    if (isDine(kind) && this.kind && isDine(this.kind) && (this.chore as Dine).want(kind)) return;
     this.stop();
     this.kind = kind;
     this.t = 0;
@@ -194,6 +201,13 @@ export class Actor {
       const C = kind === 'chop' ? Chop : kind === 'pick' ? PickApple : Fish;
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
       this.chore.start();
+    }
+    if (isDine(kind)) {
+      // one table for all three: it's the same sitting down, just a different meal
+      const d = (this.chores.dine ??= new Dine(this.p, this.kit)) as Dine;
+      d.plan(kind);
+      this.chore = d;
+      d.start();
     }
     if (kind === 'dance') {
       this.dance.lastBar = -1;
@@ -547,6 +561,7 @@ export class Actor {
     this.events.length = 0;
     this.bursts.length = 0;
     this.focus = null;
+    this.mouthOpen = false;
     this.depart = false;
     m.lockPhase = false;
     if (!this.kind) return null;
@@ -557,7 +572,7 @@ export class Actor {
     this.prevT = this.t;
     this.t += dt;
     const P = this.pose;
-    P.crouch = P.sitZ = P.lift = P.spineY = P.spineZ = P.spin = P.spineX = P.headX = P.headY = P.headZ = 0;
+    P.crouch = P.sitZ = P.lift = P.spineY = P.spineZ = P.spin = P.fwd = P.spineX = P.headX = P.headY = P.headZ = 0;
     Object.assign(P.arms.L, arm());
     Object.assign(P.arms.R, arm());
     const d = this.p.dims;

@@ -24,6 +24,7 @@ export interface ActionPose {
   spineY: number; // chest twist
   spineZ: number; // side bend
   spin: number; // extra facing (rad) on top of wherever the person faces
+  fwd: number; // root slid forward along the facing (shuffling up to a table)
   arms: { L: ArmOverride; R: ArmOverride };
 }
 
