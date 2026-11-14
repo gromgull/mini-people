@@ -12,7 +12,7 @@ import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
 import { buildPerson } from '../body';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
+import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
 import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
@@ -191,9 +191,9 @@ stock(innKegs, num('kegs', 1), 'keg', SERVINGS);
 /** Fish dry on the rack over this many seconds. */
 const DRY_TIME = 120;
 
-/** The inn's kitchen fire burns a piece every so often. */
-const BURN_EVERY = 25;
-let nextBurn = BURN_EVERY;
+/** The inn's kitchen fire burns a piece every so often (game hours: the slow evening burns no faster per hour). */
+const BURN_EVERY = 1.25;
+let burnClock = 0;
 // and a bench of their height to sit on between logs, looking over the yard
 const bench = new Bench(stage, L.bench.x, L.bench.z, L.bench.yaw, reference.sitFit());
 // the innkeeper's, out front of the inn left of the door; the fisher's, looking over the pond
@@ -218,6 +218,8 @@ const tables = [
   })(),
 ];
 const seats = tables.flatMap((t) => t.seats);
+// the street-lamp by the tables, which the innkeeper lights at dusk
+const lamp = new StreetLamp(stage, L.lamp.x, L.lamp.z, L.lamp.yaw);
 const fromSeat = (x: number, z: number) => new THREE.Vector3(x, 0, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), SEAT.yaw).add(new THREE.Vector3(SEAT.x, 0, SEAT.z));
 const tankardSpot = (() => {
   const at = fromSeat(table.tankAt.x, table.tankAt.z).setY(table.tankAt.y);
@@ -301,10 +303,11 @@ const millObstacles: Obstacle[] = [
   ...[millKegs, innKegs].map((k): Obstacle => ({ kind: 'box', x: k.x, z: k.z, yaw: k.yaw, hx: 0.17, hz: 0.25 })),
   ...orchard.trees.map((t): Obstacle => ({ kind: 'circle', x: t.x, z: t.z, r: 0.12 })),
 ];
+const lampObstacle: Obstacle = { kind: 'circle', x: lamp.x, z: lamp.z, r: 0.1 };
 const treeObstacles = new Map<number, Obstacle>();
 /** Everything solid right now. */
 function obstacles(): Obstacle[] {
-  const out = [...houseObstacles, pileObstacle, horseObstacle, benchObstacle, innBenchObstacle, pondBenchObstacle, pondObstacle, rackObstacle, larderObstacle, ...stackObstacles, ...millObstacles];
+  const out = [...houseObstacles, lampObstacle, pileObstacle, horseObstacle, benchObstacle, innBenchObstacle, pondBenchObstacle, pondObstacle, rackObstacle, larderObstacle, ...stackObstacles, ...millObstacles];
   for (const t of forest.trees) {
     if (t.state === 'felling') continue;
     let o = treeObstacles.get(t.id);
@@ -365,6 +368,8 @@ const village: Village = {
     litUntil[HOME[i]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
   },
   everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
+  lamp,
+  greenSpot: (i) => greenSpot(i),
   chat: (i, j, seconds) => {
     // (only with someone who's there for it: not asleep, not walking off somewhere)
     if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
@@ -386,7 +391,7 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, meals: 0, hungry: 0, slept: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
 };
 const pickers = ROLES.map((r, k) => (r === 'picker' ? k : -1)).filter((k) => k >= 0);
 const jobs: Job[] = people.map((p, i) => {
@@ -396,6 +401,32 @@ const jobs: Job[] = people.map((p, i) => {
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
   return new J(w);
 });
+
+// ---------------------------------------------------------------- the green
+
+/**
+ * Where each person stands on the green of an evening: the band in an arc
+ * on the side toward the tables, facing in; everyone else in the middle,
+ * spread out enough to dance.
+ */
+function greenSpot(i: number) {
+  const G = L.green;
+  const band = ROLES.map((r, k) => (INSTRUMENT[r] ? k : -1)).filter((k) => k >= 0);
+  const k = band.indexOf(i);
+  let a: number, r: number;
+  if (k >= 0) {
+    a = G.yaw + (k - (band.length - 1) / 2) * 0.5;
+    r = G.R * 0.9;
+  } else {
+    const j = ROLES.map((r2, k2) => (INSTRUMENT[r2] ? -1 : k2)).filter((k2) => k2 >= 0).indexOf(i);
+    a = G.yaw + Math.PI + (j - 0.5) * 1.4;
+    r = 0.45 + 0.25 * (j % 2);
+  }
+  const x = G.x + Math.sin(a) * r, z = G.z + Math.cos(a) * r;
+  // the band faces the middle; dancers face the band
+  const facing = k >= 0 ? a + Math.PI : Math.atan2(G.x + Math.sin(G.yaw) * G.R - x, G.z + Math.cos(G.yaw) * G.R - z);
+  return { x, z, yaw: facing };
+}
 
 // ---------------------------------------------------------------- talk
 //
@@ -507,9 +538,9 @@ function simulate(dt: number) {
   forest.update(simTime);
   orchard.update(simTime);
   // (the kitchen fire's banked while the inn's shut for the night)
-  if (simTime >= nextBurn && jobs[ROLES.indexOf('innkeeper')].asleep) nextBurn = simTime + BURN_EVERY;
-  if (simTime >= nextBurn) {
-    nextBurn += BURN_EVERY;
+  if (!jobs[ROLES.indexOf('innkeeper')].asleep) burnClock += dt / secPerHour(village.hours);
+  if (burnClock >= BURN_EVERY) {
+    burnClock -= BURN_EVERY;
     const top = innStack.top(1)[0];
     if (top !== undefined && innStack.available > 0) {
       removeItem(innStack.items[top]!);

@@ -746,6 +746,7 @@ export class Actor {
     if (this.kind === 'banjo') this.choreOf('banjo').stopAt(end);
     if (this.kind === 'bass') this.choreOf('bass').stopAt(end);
     if (this.kind === 'pipe') this.choreOf('pipe').stopAt(this.t + 0.2);
+    if (this.kind === 'dance') this.beats.dur = Math.min(this.beats.dur, this.t + (now ? 0.4 : 1.2));
   }
 
   private makeBench() {

@@ -676,3 +676,60 @@ export class StepLadder {
     return { pos: new THREE.Vector3(x, LADDER_H / 2, z), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw) };
   }
 }
+
+/** Where the lantern hangs (local: out along +z from the post, this high). */
+const LANTERN = { y: 0.95, out: 0.3 };
+
+/**
+ * The street-lamp by the inn's tables: a post with an arm and a lantern
+ * hanging from it, low enough for the innkeeper to reach up to. Lit, its
+ * glass glows and it lights the scene round it (the stage's lamp); the
+ * innkeeper lights it at dusk and puts it out on the way to bed.
+ */
+export class StreetLamp {
+  readonly group = new THREE.Group();
+  private glass: THREE.Mesh;
+  private glassOff = new THREE.MeshBasicMaterial({ color: '#3a3428' });
+  private glassOn = new THREE.MeshBasicMaterial({ color: '#ffd27a' });
+  lit = false;
+
+  constructor(private stage: Stage, readonly x: number, readonly z: number, readonly yaw: number) {
+    const dark = ROWS.timber[0];
+    const iron = ROWS.shoes[1];
+    const top = LANTERN.y + 0.42;
+    const parts: Part[] = [
+      { geo: new THREE.BoxGeometry(0.07, top, 0.07).translate(0, top / 2, 0), row: dark }, // the post
+      { geo: new THREE.BoxGeometry(0.16, 0.06, 0.16).translate(0, 0.03, 0), row: dark }, // its foot
+      { geo: new THREE.BoxGeometry(0.04, 0.04, LANTERN.out + 0.06).translate(0, top - 0.06, LANTERN.out / 2), row: iron }, // the arm
+      { geo: new THREE.BoxGeometry(0.012, 0.16, 0.012).translate(0, top - 0.14, LANTERN.out), row: iron }, // what it hangs from
+      { geo: new THREE.ConeGeometry(0.1, 0.08, 4).rotateY(Math.PI / 4).translate(0, LANTERN.y + 0.13, LANTERN.out), row: iron }, // the lantern's cap
+      { geo: new THREE.BoxGeometry(0.12, 0.025, 0.12).translate(0, LANTERN.y - 0.1, LANTERN.out), row: iron }, // and base
+    ];
+    this.group.add(outlined(bake(parts), stage));
+    this.glass = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.17, 0.1).translate(0, LANTERN.y, LANTERN.out), this.glassOff);
+    this.glass.raycast = () => {};
+    this.group.add(this.glass);
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+    stage.lamp.at.copy(this.lantern);
+  }
+
+  /** The lantern's middle (world). */
+  get lantern() {
+    return new THREE.Vector3(Math.sin(this.yaw) * LANTERN.out, LANTERN.y, Math.cos(this.yaw) * LANTERN.out).add(new THREE.Vector3(this.x, 0, this.z));
+  }
+
+  /** Where to stand to reach up to the lantern: just past it, facing the post. */
+  get stand() {
+    const d = LANTERN.out + 0.22;
+    return { x: this.x + Math.sin(this.yaw) * d, z: this.z + Math.cos(this.yaw) * d, yaw: this.yaw + Math.PI };
+  }
+
+  set(on: boolean) {
+    this.lit = on;
+    this.glass.material = on ? this.glassOn : this.glassOff;
+    this.stage.lamp.color.setRGB(...((on ? [1.25, 0.86, 0.5] : [0, 0, 0]) as [number, number, number]));
+    this.stage.lamp.range = 9;
+  }
+}

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type Woodpile } from './things';
+import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -47,10 +47,15 @@ export const MILL_BATCH = 12;
 export const SERVINGS = 8;
 /** The inn wants this many kegs on hand. */
 export const INN_KEGS = 2;
-/** The day: work from WAKE, supper at the inn from SUPPER, everyone home by NIGHT (hours). */
+/**
+ * The day: work from WAKE, supper at the inn from SUPPER (then music and a
+ * dance on the green), everyone home by NIGHT (hours). The innkeeper lights
+ * the street-lamp at LAMP_AT.
+ */
 export const WAKE = 6.5;
-export const SUPPER = 17;
-export const NIGHT = 21.5;
+export const SUPPER = 16;
+export const NIGHT = 22;
+export const LAMP_AT = 17.6;
 export type Phase = 'work' | 'supper' | 'night';
 export const phaseAt = (h: number): Phase => (h >= WAKE && h < SUPPER ? 'work' : h >= SUPPER && h < NIGHT ? 'supper' : 'night');
 
@@ -102,6 +107,10 @@ export interface Village {
   cameHome(i: number): void;
   /** Everyone (but the innkeeper) has had supper or gone to bed. */
   everyoneFed(): boolean;
+  /** The street-lamp by the tables. */
+  lamp: StreetLamp;
+  /** Where this person stands on the green of an evening (the band in an arc at one side, dancers in the middle). */
+  greenSpot(i: number): { x: number; z: number; yaw: number };
   /** Two people have a word: they stop where they are (if walking) and talk for a while. */
   chat(i: number, j: number, seconds: number): void;
   /** Bookkeeping for the overlay and the tests. */
@@ -110,6 +119,8 @@ export interface Village {
     caught: number; dried: number; fishIn: number; eaten: number;
     picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
     meals: number; hungry: number; slept: number;
+    /** Tunes struck up and dances begun on the green; times the lamp was lit. */
+    evening: number; lamps: number;
   };
   /** Every item (firewood, fish, apples, kegs, tankards). */
   items: Item[];
@@ -136,8 +147,8 @@ export interface Worker {
 const LEISURE = new Set(['to bench', 'sitting', 'playing', 'smoking', 'getting up']);
 /** Steps of moving an armful from one place to a stack. */
 const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
-/** Steps of the evening: supper at the inn, home, sleep. */
-const EVENING = new Set(['to supper', 'waiting for supper', 'eating', 'leaving the table', 'going home']);
+/** Steps of the evening: supper at the inn, music and dancing on the green, home, sleep. */
+const EVENING = new Set(['to supper', 'waiting for supper', 'eating', 'leaving the table', 'to the dance', 'at the dance', 'going home']);
 
 type Step = { kind: string; [k: string]: unknown };
 
@@ -390,7 +401,40 @@ export abstract class Job {
           seat.diner = -1;
           this.seat = null;
         }
-        this.goHome();
+        // fed, and the evening's young: off to the green
+        if (v.phase === 'supper') this.toDance(v);
+        else this.goHome();
+        return;
+      }
+      case 'to the dance': {
+        if (v.phase === 'night') this.goHome();
+        else if (this.arrived) {
+          this.step = { kind: 'at the dance' };
+          this.nextTune = v.time + 0.5 + Math.random() * 2;
+          this.wasPlaying = false;
+        }
+        return;
+      }
+      case 'at the dance': {
+        // bedtime: finish the tune (or the dance), then home
+        if (v.phase === 'night') {
+          if (a.busy) a.stopPlaying();
+          else this.goHome();
+          return;
+        }
+        if (a.busy) {
+          this.wasPlaying = true;
+          return;
+        }
+        if (this.wasPlaying) {
+          // a breather between tunes (hardly any once the whole village is out)
+          this.wasPlaying = false;
+          this.nextTune = v.time + (v.everyoneFed() ? 0.3 + Math.random() * 0.7 : 1 + Math.random() * 3);
+        }
+        if (v.time < this.nextTune || this.danceBreak(v)) return;
+        if (this.w.instrument) a.start(this.w.instrument, { phrases: 2 + Math.floor(Math.random() * 2) });
+        else a.start('dance');
+        v.stats.evening++;
         return;
       }
       case 'going home': {
@@ -404,6 +448,18 @@ export abstract class Job {
         return;
       }
     }
+  }
+
+  /** Off to the green: the band's spot in the arc if they play, else among the dancers. */
+  protected toDance(v: Village) {
+    const at = v.greenSpot(this.w.i);
+    this.go(at.x, at.z, at.yaw);
+    this.step = { kind: 'to the dance' };
+  }
+
+  /** Something to see to before the next tune (the innkeeper's lamp)? Returns whether they went off to it. */
+  protected danceBreak(_v: Village) {
+    return false;
   }
 
   /** Morning: out of the door, a new day. */
@@ -756,8 +812,11 @@ export class Woodworker extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        // the inn nearly out of firewood: that comes before sawing more
-        const urgent = v.inn.count + v.inn.incoming < 3 ? this.innWants(v) : 0;
+        // the inn nearly out of firewood, or the evening coming on (the
+        // fire burns all through supper and the dance): that comes before
+        // sawing more
+        const stockUp = v.hours >= SUPPER - 2 || v.inn.count + v.inn.incoming < 3;
+        const urgent = stockUp ? this.innWants(v) : 0;
         if (urgent > 0) {
           this.fetch(v.yard, v.inn, urgent);
           return;
@@ -977,14 +1036,56 @@ export class Innkeeper extends Job {
     return this.refill(v) || this.larderWants(v) > 0 || this.kegsWanted(v) > 0;
   }
 
-  /** The innkeeper doesn't sit down to supper: they cook it, then go to bed once everyone's fed. */
+  /**
+   * The innkeeper doesn't sit down to supper: they cook it, and once
+   * everyone's fed they take their fiddle out to the green with the rest.
+   * Bed at night (the lamp out first).
+   */
   protected eveningStarts(v: Village) {
-    if (v.phase === 'night' || (v.hours >= SUPPER + 1 && v.everyoneFed() && !this.seatWaiting(v))) {
+    if (v.phase === 'night') {
       this.ateToday = true; // (a bite in the kitchen)
       this.goHome();
       return true;
     }
+    if (v.hours >= SUPPER + 1 && v.everyoneFed() && !this.seatWaiting(v) && !this.lampWanted(v)) {
+      this.ateToday = true;
+      this.toDance(v);
+      return true;
+    }
     return false;
+  }
+
+  private village: Village | null = null;
+
+  tick(v: Village) {
+    this.village = v;
+    super.tick(v);
+  }
+
+  /** Dusk, and the lamp not lit yet. */
+  private lampWanted(v: Village) {
+    return v.phase === 'supper' && v.hours >= LAMP_AT && !v.lamp.lit;
+  }
+
+  /** Over to the lamp, to light it or put it out; then on to `then`. */
+  private toLamp(v: Village, then: 'idle' | 'dance' | 'home') {
+    const at = v.lamp.stand;
+    this.go(at.x, at.z, at.yaw);
+    this.step = { kind: 'to the lamp', light: !v.lamp.lit, then };
+  }
+
+  /** Between tunes on the green: if it's got dark and the lamp's not lit, go and light it. */
+  protected danceBreak(v: Village) {
+    if (!this.lampWanted(v)) return false;
+    this.toLamp(v, 'dance');
+    return true;
+  }
+
+  /** Home to bed, putting the lamp out on the way if it's still lit. */
+  protected goHome() {
+    const v = this.village;
+    if (v?.lamp.lit) this.toLamp(v, 'home');
+    else super.goHome();
   }
 
   /** Someone sat down to supper who's not been served (and nobody's cooking for). */
@@ -996,6 +1097,32 @@ export class Innkeeper extends Job {
     const s = this.step;
     const a = this.w.actor;
     switch (s.kind) {
+      case 'to the lamp': {
+        if (!this.arrived) return;
+        // reach up to the lantern (the other hand on the post)
+        const lantern = v.lamp.lantern;
+        const post = new THREE.Vector3(v.lamp.x, 0.75, v.lamp.z);
+        a.start('hold', { hold: { right: () => lantern.clone().setY(lantern.y - 0.06), left: () => post, lean: -0.08 } });
+        this.step = { ...s, kind: s.light ? 'lighting the lamp' : 'putting out the lamp', until: v.time + 1.5 };
+        return;
+      }
+      case 'lighting the lamp':
+      case 'putting out the lamp': {
+        if (v.time < (s.until as number)) return;
+        if (a.kind === 'hold') {
+          if (s.light !== v.lamp.lit) {
+            v.lamp.set(!!s.light);
+            if (s.light) v.stats.lamps++;
+          }
+          a.choreOf('hold').release();
+          return;
+        }
+        if (a.busy) return;
+        if (s.then === 'home') super.goHome();
+        else if (s.then === 'dance') this.toDance(v);
+        else this.step = { kind: 'idle' };
+        return;
+      }
       case 'to the hatch': {
         if (!this.arrived) return;
         const seat = s.seat as Seat;
@@ -1071,6 +1198,11 @@ export class Innkeeper extends Job {
       }
     }
     if (s.kind !== 'idle' || v.time < this.waitUntil) return;
+    // dusk: the lamp first (it's quick), then back to the cooking
+    if (this.lampWanted(v)) {
+      this.toLamp(v, 'idle');
+      return;
+    }
     // supper: cook for whoever's sat down, one plate at a time
     if (v.phase !== 'work') {
       const seat = this.seatWaiting(v);

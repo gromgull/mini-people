@@ -40,6 +40,35 @@ const FOG_GLSL = /* glsl */ `
 `;
 
 /**
+ * One lamp (the street-lamp by the inn's tables): a warm point light on top
+ * of the sun, in view space, falling off to nothing at uLampR and banded like
+ * the toon ramps. Off when its colour is black. Its uniforms are shared by
+ * every material that's lit by it.
+ */
+export const createLampUniforms = () => ({
+  uLampView: { value: new THREE.Vector3() },
+  uLampColor: { value: new THREE.Color(0, 0, 0) },
+  uLampR: { value: 7 },
+});
+export type LampUniforms = ReturnType<typeof createLampUniforms>;
+const LAMP_GLSL = /* glsl */ `
+  uniform vec3 uLampView;
+  uniform vec3 uLampColor;
+  uniform float uLampR;
+  varying vec3 vView;
+  // how much of the lamp lands here (0 … 1, in a few flat bands)
+  float lampK(vec3 n) {
+    if (uLampColor.r + uLampColor.g + uLampColor.b <= 0.0) return 0.0;
+    vec3 L = uLampView - vView;
+    float d = length(L);
+    float fall = clamp(1.0 - d / uLampR, 0.0, 1.0);
+    fall *= fall;
+    float ndl = clamp((dot(n, L / max(d, 1e-3)) + 0.4) / 1.4, 0.0, 1.0);
+    return floor(fall * ndl * 4.0 + 0.35) / 4.0;
+  }
+`;
+
+/**
  * Rigid skinning for merged characters (see skin.ts): every vertex belongs to
  * exactly one part, and the part's matrix (relative to the character root)
  * comes from a uniform array. Without SKINNED this is a no-op. Instanced
@@ -87,10 +116,11 @@ export function skinnedVariant(base: THREE.ShaderMaterial) {
  * One shared toon material for everything: lighting picks the column,
  * the per-vertex `aRow` attribute picks the colour ramp in the atlas.
  */
-export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = createFog(1e9)) {
+export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = createFog(1e9), lamp: LampUniforms = createLampUniforms()) {
   return new THREE.ShaderMaterial({
     uniforms: {
       ...fog,
+      ...lamp,
       uAtlas: { value: atlas },
       uRows: { value: ROW_COUNT },
       uLightView: { value: new THREE.Vector3(0, 1, 0) },
@@ -102,6 +132,7 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
       varying vec3 vN;
       varying float vRow;
       varying vec3 vWorld;
+      varying vec3 vView;
       ${SKIN_GLSL}
       void main() {
         vec3 pos = skinPos();
@@ -109,6 +140,7 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
         vRow = aRow;
         vec4 wp = modelMatrix * vec4(pos, 1.0);
         vWorld = wp.xyz;
+        vView = (viewMatrix * wp).xyz;
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -121,12 +153,17 @@ export function createToonMaterial(atlas: THREE.Texture, fog: FogUniforms = crea
       varying vec3 vN;
       varying float vRow;
       ${FOG_GLSL}
+      ${LAMP_GLSL}
       void main() {
         float haze = fogAmount();
-        float ndl = dot(normalize(vN), uLightView);
+        vec3 n = normalize(vN);
+        float ndl = dot(n, uLightView);
         // wrapped lambert: uWrap=0 → plain lambert, 1 → half-lambert
         float u = clamp((ndl + uWrap) / (1.0 + uWrap), 0.001, 0.999);
-        vec3 c = texture2D(uAtlas, vec2(u, (vRow + 0.5) / uRows)).rgb * uTint;
+        float row = (vRow + 0.5) / uRows;
+        vec3 c = texture2D(uAtlas, vec2(u, row)).rgb * uTint;
+        // the lamp: its colour on the lit end of the ramp
+        c += texture2D(uAtlas, vec2(0.97, row)).rgb * uLampColor * lampK(n);
         gl_FragColor = vec4(mix(c, uHaze, haze), 1.0);
       }
     `,
@@ -200,10 +237,11 @@ export const defaultGrass: GrassSettings = { enabled: true, scale: 7, ragged: 0.
  * a coarse density map (bare stretches, then clumps). Each is three triangular
  * petals at a random rotation, somewhere between pink and lilac.
  */
-export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row: number) {
+export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row: number, lamp: LampUniforms = createLampUniforms()) {
   return new THREE.ShaderMaterial({
     uniforms: {
       ...fog,
+      ...lamp,
       uAtlas: { value: atlas },
       uRow: { value: (row + 0.5) / ROW_COUNT },
       uLightView: { value: new THREE.Vector3(0, 1, 0) },
@@ -223,10 +261,12 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
     vertexShader: /* glsl */ `
       varying vec3 vN;
       varying vec3 vWorld;
+      varying vec3 vView;
       void main() {
         vN = normalize(normalMatrix * normal);
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorld = wp.xyz;
+        vView = (viewMatrix * wp).xyz;
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -248,6 +288,7 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
       uniform vec3 uLight;
       varying vec3 vN;
       ${FOG_GLSL}
+      ${LAMP_GLSL}
 
       float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float vnoise(vec2 p) {
@@ -326,6 +367,10 @@ export function createGroundMaterial(atlas: THREE.Texture, fog: FogUniforms, row
         vec4 fl = flower(p);
         c = mix(c, fl.rgb * lit, fl.a);
         c *= uTint;
+        // the lamp: the ground as full light has it (patches, flowers and all)
+        vec3 full = texture2D(uAtlas, vec2(0.999, uRow)).rgb * mix(vec3(1.0), k, uContrast);
+        full = mix(full, fl.rgb, fl.a);
+        c += full * uLampColor * lampK(normalize(vN));
 
         gl_FragColor = vec4(mix(c, uHaze, haze), 1.0);
       }

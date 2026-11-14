@@ -10,10 +10,11 @@
 //     stacks' promised room and pieces add up
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
 //   - nobody stays in the same step for more than 90 s (waiting about,
-//     sitting on a bench, playing, smoking, waiting for supper and sleeping don't
+//     sitting on a bench, playing, smoking, waiting for supper, at the dance and sleeping don't
 //     count; nor does the regular)
-//   - over a whole day (900 s from 08:00): suppers served, everyone in bed,
-//     and everyone up again in the morning
+//   - over a whole day (900 s from 08:00): suppers served, the lamp lit,
+//     music and dancing on the green, everyone in bed, and everyone up
+//     again in the morning
 //   - positions are finite
 //   - by the end, trees have been felled, logs sawn, firewood delivered, fish
 //     caught, and (given time to dry) dried fish brought to the larder; apples
@@ -90,7 +91,7 @@ const result = await page.evaluate((secs) => {
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (!['idle', 'sitting', 'playing', 'smoking', 'asleep', 'waiting for supper'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
+      else if (!['idle', 'sitting', 'playing', 'smoking', 'asleep', 'waiting for supper', 'at the dance'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
         since.set(i, [j.doing, s]);
       }
@@ -113,12 +114,14 @@ if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
   if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
+  if (result.stats.lamps < 1) problems.push('nobody lit the lamp');
+  if (result.stats.evening < 6) problems.push(`only ${result.stats.evening} tunes and dances on the green`);
   if (result.asleep > 0) problems.push(`${result.asleep} still asleep in the morning`);
 }
 problems.push(...errors);
 console.log(`${seconds}s simulated (seed ${seed}): felled ${result.stats.felled}, sawn ${result.stats.sawn}, logs about ${result.logs}, pile ${result.pile}, trees standing ${result.standing}/${result.trees}`);
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
-console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
+console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);
 console.log(problems.length ? `✗ ${problems.length} problem(s):\n  ${problems.join('\n  ')}` : '✓ consistent throughout');

@@ -9,7 +9,8 @@ import type { Site } from '../houses';
  * little arrangement that works together:
  *   forest  – the pines, the lumberjack's cabin
  *   pond    – the pond, the fisher's cabin, the fisher's bench
- *   inn     – the inn (facing the yard), its two tables and its kegs
+ *   inn     – the inn (facing the yard), its two tables, its kegs, the
+ *             street-lamp, and the green in front where they dance of an evening
  *   orchard – the apple trees, the cider mill and its kegs, the pickers'
  *             baskets and ladders, the picker/miller cabin and the other picker's
  *
@@ -54,6 +55,10 @@ export interface Layout {
   innKegs: Pose;
   /** The inn's two tables (the first is the regular's). */
   tables: Pose[];
+  /** The street-lamp by the tables (its arm and lantern out along its yaw). */
+  lamp: Pose;
+  /** The green, where the band plays and everyone dances after supper; the band stands toward `yaw`. */
+  green: Round & { yaw: number };
   /** Seeds for the things that grow their own shapes. */
   seeds: { houses: number; forest: number; orchard: number; pond: number };
 }
@@ -89,6 +94,8 @@ const TEMPLATE: Record<string, Piece> = {
   table1: P('inn', 2.8, -8.25, 0, 1.4),
   innKegs: P('inn', 4.9, -11.2, -Math.PI / 2, 0.6),
   innFront: P('inn', -0.7, -11.7, 0, 0.9), // (the inn's bench and the door step: room to come and go)
+  lamp: P('inn', 1.0, -6.6, Math.atan2(2.0, -2.5), 0.4),
+  green: P('inn', 1.2, -4.4, Math.atan2(1.7, -4.1), 2.0, 2.0), // (the band with the tables behind them)
   orchard: P('orchard', -2.8, 8.6, 0, 3.8, 3.3),
   mill: P('orchard', 2.8, 6.0, 0, 0.9),
   millKegs: P('orchard', 1.2, 6.1, Math.PI / 2, 0.5),
@@ -120,7 +127,7 @@ export function makeLayout(seed: number): Layout {
   const r = mulberry32(seed * 7907 + 3);
   const rr = (a: number, b: number) => a + (b - a) * r();
   let placed: Record<string, Piece> | null = null;
-  for (let attempt = 0; attempt < 400 && !placed; attempt++) placed = tryLayout(rr);
+  for (let attempt = 0; attempt < 2000 && !placed; attempt++) placed = tryLayout(rr);
   // (never yet needed: the original village, as it was)
   placed ??= TEMPLATE;
   const g = (k: string) => placed![k];
@@ -143,6 +150,8 @@ export function makeLayout(seed: number): Layout {
     rack: pose('rack'),
     innKegs: pose('innKegs'),
     tables: [pose('table0'), pose('table1')],
+    lamp: pose('lamp'),
+    green: { ...round('green'), yaw: g('green').yaw },
     seeds: { houses: Math.floor(r() * 1e6), forest: Math.floor(r() * 1e6), orchard: Math.floor(r() * 1e6), pond: Math.floor(r() * 1e6) },
   };
 }

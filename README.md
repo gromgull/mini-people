@@ -154,13 +154,14 @@ Handy for sharing a particular scene, e.g.
 
 The layout comes from the seed (`?seed=n`), along with the villagers. A
 woodyard sits in the middle, with four districts around it: the forest with
-the lumberjack's cabin; the pond with the fisher's cabin, drying rack and
-bench; the inn with its tables and kegs; and the orchard with the cider
-mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
-their order around the yard and gives each district its own direction,
-distance and turn. Each district keeps its own arrangement, so everything
-still works. The woodworker's cabin goes in the widest gap between
-districts, and a layout where anything overlaps is thrown away and redrawn.
+the lumberjack's cabin; the pond with the fisher's cabin and bench; the inn
+with its tables, kegs, street-lamp and the green where they dance; and the
+orchard with the cider mill, the pickers' baskets and ladders and their
+cabins. Each seed shuffles their order around the yard and gives each
+district its own direction, distance and turn. Each district keeps its own
+arrangement, so everything still works. The woodworker's cabin goes in the
+widest gap between districts, the drying rack on the way from the pond to
+the inn, and a layout where anything overlaps is thrown away and redrawn.
 Building looks, the forest, the orchard and the pond's shape vary with the
 seed too.
 
@@ -207,13 +208,21 @@ So far it has one chain:
   so often, and wait when the tankard's empty.
 - **The day:** the village keeps its own clock on simulation time (a day is
   12 real minutes at ×1, `?daymin=` to change it; the evening runs at half
-  speed). Work runs from 06:30. At 17:00 everyone finishes what they're doing
+  speed). Work runs from 06:30. At 16:00 everyone finishes what they're doing
   and goes to the inn for supper. There are two tables and eight places. The
-  innkeeper cooks
-  dried fish from the larder at the kitchen hatch and brings the plates out
-  one by one. Having eaten, people walk home and go in; their lamps glow for
-  an hour and a half. By 21:30 everyone's in (hungry, if supper didn't
-  reach them). At 06:30 they come out again.
+  innkeeper cooks dried fish from the larder at the kitchen hatch and brings
+  the plates out one by one.
+- **The street-lamp:** at dusk the innkeeper goes over to the lamp by the
+  tables (between plates, if they're serving) and reaches up to light it.
+  Its warm light really lights the tables, the diners and the green, in
+  toon bands, and the lantern glows. They put it out on their way to bed.
+- **The dance:** having eaten, people go out to the green in front of the
+  inn. Those with an instrument stand in an arc with the tables behind them
+  and play; the rest dance in the middle. Once everyone's fed the innkeeper
+  brings their fiddle too, and the whole band plays with hardly a pause
+  between tunes. At 22:00 they finish the tune (or the dance), walk home
+  and go in; their lamps glow for an hour and a half. Anyone supper didn't
+  reach goes to bed hungry. At 06:30 they come out again.
 - **One size of furniture:** benches, tables and the sawhorse are built for
   a villager of middling build, and everyone fits themselves to them. They
   sit down by however much their legs need for the real seat, reach for the

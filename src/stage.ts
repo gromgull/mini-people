@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
-import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass, skinnedVariant } from './materials';
+import { createFog, createGroundMaterial, createLampUniforms, createOutlineMaterial, createToonMaterial, defaultGrass, skinnedVariant } from './materials';
 import { Clouds, Sun, createSky } from './environment';
 import type { Caster } from './trees';
 import { daylight, sunAt } from './daylight';
@@ -67,7 +67,20 @@ export class Stage {
   readonly atlas = createAtlas();
   // horizon haze: ground and everything on it fades out along the view direction
   readonly fog = createFog();
-  readonly toon = createToonMaterial(this.atlas, this.fog);
+  /** A lamp's light, shared by everything lit (see `lamp`). */
+  private lampU = createLampUniforms();
+  readonly toon = createToonMaterial(this.atlas, this.fog, this.lampU);
+  /** One lamp: where it is (world), its colour (black = off) and how far it reaches. */
+  readonly lamp = ((u) => ({
+    at: new THREE.Vector3(),
+    color: u.uLampColor.value,
+    get range() {
+      return u.uLampR.value;
+    },
+    set range(v: number) {
+      u.uLampR.value = v;
+    },
+  }))(this.lampU);
   readonly outline = createOutlineMaterial(this.fog);
   readonly skinMats = { toon: skinnedVariant(this.toon), outline: skinnedVariant(this.outline) };
   // clouds live past the horizon, so they get materials without the haze
@@ -123,7 +136,7 @@ export class Stage {
     this.scene.add(this.sun.group, this.moon.group);
 
     // ground: toon-lit like everything else, plus grass patches (falls back to plain toon)
-    this.groundMat = createGroundMaterial(this.atlas, this.fog, ROWS.ground[0]);
+    this.groundMat = createGroundMaterial(this.atlas, this.fog, ROWS.ground[0], this.lampU);
     this.groundMat.uniforms.uLightView = this.toon.uniforms.uLightView;
     this.groundMat.uniforms.uWrap = this.toon.uniforms.uWrap;
     this.groundMat.uniforms.uTint = this.toon.uniforms.uTint;
@@ -306,6 +319,9 @@ export class Stage {
   /** Draw: the scene into the low-res target, then that onto the screen. */
   render(frameStart: number, peopleCount: number) {
     const r = this.renderer;
+    // the lamp, in view space
+    this.camera.updateMatrixWorld();
+    this.lampU.uLampView.value.copy(this.lamp.at).applyMatrix4(this.camera.matrixWorldInverse);
     r.setRenderTarget(this.rt);
     r.render(this.scene, this.camera);
     const calls = r.info.render.calls;
