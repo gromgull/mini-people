@@ -158,7 +158,8 @@ function placeItems() {
     else continue;
     const tw = it.tween;
     if (tw) {
-      const k = Math.min(1, (simTime - tw.t0) / tw.dur);
+      // (one that starts later waits where it was: unclamped, the ease shoots off far past its ends)
+      const k = Math.max(0, Math.min(1, (simTime - tw.t0) / tw.dur));
       const e = k * k * (3 - 2 * k);
       it.mesh.position.copy(tw.pos).lerp(pos, e);
       it.mesh.position.y += Math.sin(Math.PI * k) * 0.12;
