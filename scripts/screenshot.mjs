@@ -55,6 +55,17 @@ await server.listen();
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// seeded Math.random, so paused shots come out the same every run (and can be
+// compared before/after a refactor)
+await page.addInitScript(() => {
+  let a = 12345;
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+});
 const errors = [];
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -62,7 +73,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 let failed = false;
 for (const [name, query] of shots) {
   errors.length = 0;
-  await page.goto(`http://localhost:5199/?${query}`);
+  await page.goto(`http://localhost:5199/${process.env.PAGE ?? 'demo.html'}?${query}`);
   try {
     await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
   } catch {

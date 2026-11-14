@@ -1,37 +1,36 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
-import { type Person, buildPerson } from './body';
+import type { Person } from './body';
 import { BEARD_STYLES, MOUTH_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
-import { PALETTE, ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
-import { createFog, createGroundMaterial, createOutlineMaterial, createToonMaterial, defaultGrass, skinnedVariant } from './materials';
+import { PALETTE } from './palette';
 import { PARTS_LAYER } from './skin';
-import { Clouds, Sun, createSky } from './environment';
-import { type Caster, Trees } from './trees';
-import { daylight, sunAt } from './daylight';
+import { Trees } from './trees';
 import { Pond } from './pond';
 import { Houses } from './houses';
 import { mulberry32 } from './rng';
-import { type Motion, WALK_SPEED, advance, defaultGait, newMotion } from './gait';
+import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
-import { PERSONA_KEYS, PRESETS, derivePersona, styleFor } from './persona';
+import { PERSONA_KEYS, PRESETS, derivePersona } from './persona';
 import { ACTIONS, type ActionKind, Actor, BPM } from './actions';
-import { Sparks } from './fx';
-import { Sound, type Voice, type Where, defaultAudio } from './audio';
+import type { Where } from './audio';
 import { Wander, type WanderState, scatter, wanderRadius } from './wander';
-import { Gaze, type GazeWorld, LOOK_MODES, type LookMode } from './gaze';
+import { Gaze, LOOK_MODES, type LookMode } from './gaze';
+import { Stage, VIEW_H, lookFromQuery, num, q } from './stage';
+import { Crowd } from './crowd';
+
+/**
+ * The demo: modes for looking at people (single, a grid, a parade ring, a
+ * wandering crowd, persona lanes), every action on a key, and a GUI for
+ * all the knobs. The village (index.html) is the other app on the same code.
+ */
 
 const MODES = ['single', 'stand', 'parade', 'wander', 'compare'] as const;
 type Mode = (typeof MODES)[number];
 
-// Colours are authored as display values and the atlas does all the shading,
-// so skip colour management entirely: what's in the atlas is what hits the screen.
-THREE.ColorManagement.enabled = false;
 
-const q = new URLSearchParams(location.search);
-const num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
 
 const settings = {
+  ...lookFromQuery(),
   seed: num('seed', 1),
   count: num('count', 48),
   spacing: num('spacing', 0.9),
@@ -39,139 +38,37 @@ const settings = {
   segments: num('segs', 8),
   eyes: true,
   merge: q.get('merge') !== '0', // one draw call per person (rigid skinning) instead of one per part
-  pixelSize: num('px', 3),
-  outline: q.get('outline') !== '0',
-  outlinePx: 1,
-  outlineColor: '#1a1410',
-  time: ((num('time', 10) % 24) + 24) % 24, // hours: sets the sun (and the moon opposite it)
-  dayCycle: q.get('daycycle') !== '0', // let the time of day run by itself
-  dayMinutes: num('daymin', 30), // real minutes per day when it does
-  shadowLength: 1, // 0 = round blobs, 1 = as long as the sun angle says
-  wrap: 0.35,
-  ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
   mode: (MODES.includes(q.get('mode') as Mode) ? q.get('mode') : 'parade') as Mode,
   speed: num('speed', WALK_SPEED),
   animFps: num('fps', 0), // 0 = smooth; 8–12 = classic sprite feel
-  maxFps: num('maxfps', 30), // render cap; 0 = every display refresh (60/120 Hz)
-  stats: q.has('stats'), // fps / frame time / draw calls overlay
   follow: q.has('follow'),
   paused: q.has('paused'),
   gait: { ...defaultGait },
   personality: num('persona', 1), // global exaggeration of everyone's persona
   autoActions: q.has('auto'),
   walk: q.has('walk'), // single mode: stroll a loop instead of standing still
-  sky: q.get('sky') !== '0',
   trees: q.get('trees') !== '0',
   pond: q.get('pond') !== '0',
   houses: q.get('houses') !== '0',
-  grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
   lookAt: (LOOK_MODES.includes(q.get('look') as LookMode) ? q.get('look') : 'auto') as LookMode,
 };
 
 // ---------------------------------------------------------------- renderer / scene
 
-const renderer = new THREE.WebGLRenderer({ antialias: false });
-renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-renderer.setPixelRatio(window.devicePixelRatio);
-document.body.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color('#1d2a1a');
-
-const atlas = createAtlas();
-fillAtlas(atlas, settings.ramp);
-// horizon haze: ground and everything on it fades out along the view direction
-const fog = createFog();
-const toon = createToonMaterial(atlas, fog);
-const outline = createOutlineMaterial(fog);
-const skinMats = { toon: skinnedVariant(toon), outline: skinnedVariant(outline) };
-// clouds live past the horizon, so they get materials without the haze
-// (but share lighting and outline settings with everything else)
-const cloudToon = createToonMaterial(atlas);
-cloudToon.uniforms.uLightView = toon.uniforms.uLightView;
-cloudToon.uniforms.uTint = toon.uniforms.uTint;
-cloudToon.uniforms.uWrap.value = 1.6; // very soft light: white with a pale shade underneath
-const cloudOutline = createOutlineMaterial();
-for (const k of ['uPx', 'uResolution', 'uColor'] as const) cloudOutline.uniforms[k] = outline.uniforms[k];
-const sky = createSky(fog);
-scene.add(sky);
-const clouds = new Clouds(cloudToon, cloudOutline);
-scene.add(clouds.group);
-const sun = new Sun();
-const moon = new Sun('moon');
-scene.add(sun.group, moon.group);
-let horizonFar = 30;
-// stencil: each pixel takes shadow once, so overlapping shadows don't stack darker
-const shadowMat = new THREE.MeshBasicMaterial({
-  color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false,
-  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
-});
-const selectMat = new THREE.MeshBasicMaterial({ color: '#ffe14a', depthWrite: false, transparent: true });
-
-// ground: toon-lit like everything else, plus grass patches (falls back to plain toon)
-const groundMat = createGroundMaterial(atlas, fog, ROWS.ground[0]);
-groundMat.uniforms.uLightView = toon.uniforms.uLightView;
-groundMat.uniforms.uWrap = toon.uniforms.uWrap;
-groundMat.uniforms.uTint = toon.uniforms.uTint;
-let ground: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
-{
-  const g = new THREE.PlaneGeometry(1600, 1600);
-  g.rotateX(-Math.PI / 2);
-  g.setAttribute('aRow', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(ROWS.ground[0]), 1));
-  ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(g, toon);
-  scene.add(ground);
-}
-
-const VIEW_H = 6;
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 1200);
-camera.zoom = num('zoom', 1);
-{
-  const az = THREE.MathUtils.degToRad(num('az', 25));
-  const el = THREE.MathUtils.degToRad(num('el', 35));
-  const r = 300; // far back: an ortho view doesn't change, but low angles mustn't start below the ground
-  camera.position.set(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r);
-}
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(num('tx', 0), 0.5, num('tz', 0)); // ?tx=&tz= look somewhere else (screenshots)
-camera.position.add(new THREE.Vector3(num('tx', 0), 0.5, num('tz', 0)));
-controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.49; // down to ~2° above the ground
-
-// low-res target → nearest-neighbour upscale for the pixel look
-const rt = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true, stencilBuffer: true });
-const blitScene = new THREE.Scene();
-const blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: rt.texture })));
-
-function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
-  const aspect = w / h;
-  camera.left = (-VIEW_H * aspect) / 2;
-  camera.right = (VIEW_H * aspect) / 2;
-  camera.top = VIEW_H / 2;
-  camera.bottom = -VIEW_H / 2;
-  camera.updateProjectionMatrix();
-  const px = Math.max(1, settings.pixelSize);
-  const bw = Math.max(1, Math.floor((w * renderer.getPixelRatio()) / px));
-  const bh = Math.max(1, Math.floor((h * renderer.getPixelRatio()) / px));
-  rt.setSize(bw, bh);
-  outline.uniforms.uResolution.value.set(bw, bh);
-}
-window.addEventListener('resize', resize);
+const stage = new Stage(settings);
+const { renderer, scene, camera, controls, toon, outline, selectMat } = stage;
+const resize = () => stage.resize();
 
 // ---------------------------------------------------------------- population
 
 let people: Person[] = [];
 let selected = 0;
-const shadowGeo = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2);
 const selectGeo = new THREE.RingGeometry(1.05, 1.25, 28).rotateX(-Math.PI / 2);
-const trees = new Trees(toon, outline, shadowGeo, shadowMat);
+const trees = new Trees(toon, outline, stage.shadowGeo, stage.shadowMat);
 scene.add(trees.group);
 const pond = new Pond(toon, outline);
 scene.add(pond.group);
-const houses = new Houses(toon, outline, shadowMat);
+const houses = new Houses(toon, outline, stage.shadowMat);
 scene.add(houses.group);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
@@ -185,28 +82,19 @@ function slotTransform(i: number) {
   return { x: x * settings.spacing, z: z * settings.spacing, rot: (r() - 0.5) * 0.7 };
 }
 
+const crowd = new Crowd(stage, settings);
+const sound = crowd.sound;
+const voiceOf = (p: Person) => crowd.voiceOf(p);
+
 function makePerson(i: number, genome = randomGenome(settings.seed * 100003 + i)) {
-  const p = buildPerson(genome, toon, outline, { segments: settings.segments, eyes: settings.eyes, skin: settings.merge ? skinMats : null });
+  const p = crowd.spawn(genome, i);
   const t = slotTransform(i);
   p.root.position.set(t.x, 0, t.z);
   p.root.rotation.y = t.rot;
-  p.root.userData.index = i;
-  // drop shadow: an ellipse in a pivot that turns it away from the sun (see updateShadows)
-  const shadow = new THREE.Mesh(shadowGeo, shadowMat);
-  shadow.raycast = () => {};
-  const pivot = new THREE.Group();
-  pivot.position.y = 0.002;
-  pivot.add(shadow);
-  p.root.add(pivot);
-  p.root.userData.shadow = { pivot, shadow, r: Math.max(p.dims.hipR, p.dims.shoulderR, p.dims.waistR) * 1.35, h: p.dims.height };
-  scene.add(p.root);
   return p;
 }
 
-function removePerson(p: Person) {
-  scene.remove(p.root);
-  p.dispose();
-}
+const removePerson = (p: Person) => crowd.despawn(p);
 
 // motion state lives beside the person so rebuilding a body keeps its stride
 let motions: Motion[] = [];
@@ -218,64 +106,6 @@ let offsets: { x: number; z: number; yaw: number; locked: boolean }[] = [];
 let nextAuto: number[] = [];
 let simTime = 0;
 let spinAngle = 0;
-const kit = { toon, outline };
-const sparks = new Sparks(scene);
-// ---------------------------------------------------------------- sound
-const sound = new Sound({ ...defaultAudio, enabled: !q.has('mute') });
-const startSound = () => sound.start();
-window.addEventListener('pointerdown', startSound);
-window.addEventListener('keydown', startSound);
-document.addEventListener('visibilitychange', () => sound.setHidden(document.hidden));
-// Watchdog: if frames stop (alt-tab to an occluding window, minimised, …) the
-// per-frame updates that keep continuous sounds honest stop too — so pause the
-// whole engine until frames come back. Timers keep running when rAF doesn't.
-let lastFrameAt = performance.now();
-let stalled = false;
-setInterval(() => {
-  if (!stalled && performance.now() - lastFrameAt > 250) {
-    stalled = true;
-    sound.setHidden(true);
-  }
-}, 100);
-let prevPhase: number[] = [];
-let walkersHeard = 0; // on-screen walkers last frame (footsteps share the space)
-let walkersNow = 0;
-let wasGasping: boolean[] = [];
-const voiceCache = new WeakMap<Person, Voice>();
-const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
-/** A person's voice and tread, from their body and personality. */
-function voiceOf(p: Person): Voice {
-  let v = voiceCache.get(p);
-  if (!v) {
-    const g = p.genome;
-    const small = 1 - g.height;
-    v = {
-      f0: lerpN(100, 235, 0.65 * g.fem + 0.35 * small) * (1.08 - 0.16 * g.girth) * (0.92 + 0.16 * g.persona.energy),
-      formant: lerpN(0.9, 1.22, 0.55 * g.fem + 0.45 * small),
-      rate: 0.8 + 0.5 * g.persona.energy,
-      weight: Math.min(1, 0.55 * g.persona.weight + 0.45 * g.girth + 0.2 * g.height - 0.1),
-    };
-    voiceCache.set(p, v);
-  }
-  return v;
-}
-const _sp = new THREE.Vector3();
-/** Stereo position + loudness from where the person is on screen; null = off-screen. */
-function whereOf(p: Person): Where | null {
-  _sp.set(0, p.dims.height * 0.8, 0).applyMatrix4(p.root.matrixWorld).project(camera);
-  if (Math.abs(_sp.x) > 1.15 || Math.abs(_sp.y) > 1.15) return null;
-  // what's near the middle of the view is what you're listening to
-  const centre = Math.min(1, Math.max(0.2, 1.15 - 0.85 * Math.hypot(_sp.x, _sp.y)));
-  return { pan: _sp.x * 0.8, gain: Math.min(1.2, 0.3 + 0.45 * camera.zoom) * centre };
-}
-
-const sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
-// bursts from the outdoor chores: wood chips, leaves, water, apple
-const chips = new Sparks(scene, 48, ['#e8d2a0', '#c79a5a', '#f2e4c0'], 9);
-const leaves = new Sparks(scene, 48, ['#4e9a3a', '#5aa642', '#78b84a'], 2.5);
-const splash = new Sparks(scene, 64, ['#dff2ff', '#9ccfe8', '#ffffff'], 9);
-const crumbs = new Sparks(scene, 24, ['#f4ecc8', '#e8dca0'], 9);
-const BURSTS = { chips: [chips, 6, 0.7], leaves: [leaves, 8, 0.45], splash: [splash, 9, 0.55], crumbs: [crumbs, 3, 0.3] } as const;
 // deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
 let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
   ACTIONS.includes(q.get('act') as ActionKind)
@@ -293,7 +123,7 @@ const LANE_LEN = 9;
 const LANE_GAP = 0.85;
 
 const ringRadius = () => Math.max(1.2, (settings.count * 0.72) / (Math.PI * 2));
-const styleOf = (p: Person) => styleFor(settings.gait, p.genome.persona, settings.personality);
+const styleOf = (p: Person) => crowd.styleOf(p);
 
 /** Where the mode wants person i to be (before action offsets). */
 function baseTransform(i: number) {
@@ -405,9 +235,10 @@ function rebuildAll() {
   motions = people.map(() => newMotion(r()));
   anims = people.map((_, i) => new Animator(settings.seed * 977 + i));
   actors.forEach((a) => a.dispose());
-  actors = people.map((p) => new Actor(p, kit));
+  actors = people.map((p) => new Actor(p, crowd.kit));
   gazes = people.map((p, i) => new Gaze(p, i, mulberry32(settings.seed * 4243 + i)));
   offsets = people.map(() => ({ x: 0, z: 0, yaw: 0, locked: false }));
+  Object.assign(crowd, { people, motions, anims, actors, gazes });
   wanders = scatter(n, mulberry32(settings.seed * 91 + 3), wanderSpread());
   brain = new Wander(mulberry32(settings.seed * 7919));
   brain.spread = wanderSpread();
@@ -426,7 +257,7 @@ function rebuildOne(i: number) {
   actors[i]?.dispose();
   removePerson(people[i]);
   people[i] = makePerson(i, g);
-  actors[i] = new Actor(people[i], kit);
+  actors[i] = new Actor(people[i], crowd.kit);
   gazes[i] = new Gaze(people[i], i, mulberry32(settings.seed * 4243 + i));
   placeAll();
   attachRing();
@@ -443,19 +274,6 @@ function modeSpeed(i: number) {
   return settings.speed * styleOf(people[i]).speedK;
 }
 
-const gazeWorld: GazeWorld = {
-  mode: 'auto',
-  people: [],
-  busy: (i) => {
-    const k = actors[i]?.kind;
-    return k === 'fall' || k === 'jump' || k === 'hammer' || k === 'saw' || k === 'chop' || k === 'fish';
-  },
-  focus: (i) => actors[i]?.focus ?? null,
-  camera: new THREE.Vector3(),
-  cursor: null,
-  selected: 0,
-  time: 0,
-};
 
 
 const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink'];
@@ -508,40 +326,6 @@ function startTalk(i: number) {
   }
 }
 
-/** Turn this frame's motion and action cues for person i into sound. */
-function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
-  const prev = prevPhase[i] ?? m.phase;
-  prevPhase[i] = m.phase;
-  if (!sound.live) {
-    if (sound.ctx) sound.saw(i, false, 0, false, { pan: 0, gain: 0 });
-    return;
-  }
-  const w = whereOf(p);
-  const v = voiceOf(p);
-  // heel strikes: left at phase 0, right at 0.5
-  if (w && m.speed > 0.06 && !m.lockPhase && !a.rootLocked) {
-    walkersNow++;
-    // a crowd's footsteps blend into a patter instead of adding up
-    const crowd = 1 / Math.sqrt(Math.max(1, walkersHeard / 1.5));
-    const crossed = (at: number) => (prev < at && m.phase >= at) || (prev > m.phase && (at === 0 || m.phase >= at));
-    if (crossed(0) || crossed(0.5)) sound.step(v, { pan: w.pan, gain: w.gain * crowd * Math.min(1, 0.5 + m.speed) });
-  }
-  sound.saw(i, !!w && a.kind === 'saw' && a.sawSpeed > 0, a.sawSpeed, a.sawPush, w ?? { pan: 0, gain: 0 });
-  if (!w) return;
-  if (a.impact) sound.hammer(w);
-  if (a.note) sound.fiddleNote(a.note.f, a.note.dur, w);
-  if (a.beat && Math.random() < (a.partner >= 0 ? 0.55 : 0.2) && !(a.partner >= 0 && sound.speaking(a.partner)) && !sound.speaking(i)) sound.phrase(i, v, w);
-  if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
-  for (const e of a.events) {
-    if (e === 'clap') sound.clap(w);
-    else if (e === 'thunk') sound.thunk(w, 1);
-    else if (e === 'log') sound.thunk(w, 0.8);
-    else if (e === 'creak') sound.creak(w);
-    else if (e === 'oof' || e === 'hup' || e === 'grunt' || e === 'hey' || e === 'ahh' || e === 'mmm') sound.exclaim(e, v, w);
-    else sound.chore(e, w);
-  }
-}
-
 /** One simulation step: actions, locomotion, animation, effects. */
 function simulate(dt: number) {
   simTime += dt;
@@ -552,15 +336,8 @@ function simulate(dt: number) {
     scheduled = null;
   }
   const decay = 1 - Math.exp(-dt * 1.5);
-  gazeWorld.mode = settings.lookAt;
-  gazeWorld.people = people;
-  gazeWorld.camera.copy(camera.position);
-  gazeWorld.cursor = cursorWorld;
-  gazeWorld.selected = selected;
-  gazeWorld.time = simTime;
+  crowd.beginStep(simTime, cursorWorld, selected);
   const turnStep = 3.2 * dt; // rad/s turning on the spot
-  walkersHeard = walkersNow;
-  walkersNow = 0;
   people.forEach((p, i) => {
     const m = motions[i];
     const a = actors[i];
@@ -570,8 +347,7 @@ function simulate(dt: number) {
       act(i, k === 'sit' && settings.mode === 'parade' ? 'carry' : k); // no benches in the stream
       nextAuto[i] = simTime + 3 + Math.random() * 10;
     }
-    a.beatTime = (simTime * BPM) / 60; // shared beat: dancers and fiddlers keep time together
-    let pose = a.pre(dt, m, st);
+    let pose = crowd.pre(i, dt, simTime);
     const o = offsets[i];
     if (settings.mode === 'wander') {
       if (a.depart) brain.send(i, wanders); // off somewhere with what they've got
@@ -581,11 +357,11 @@ function simulate(dt: number) {
         pose = a.pre(0, m, st);
       }
       m.targetSpeed = plan.speed;
-      advance(m, p, st.gait, dt);
+      crowd.advance(i, dt);
       if (!o.locked) brain.move(i, wanders, m.speed, dt);
     } else {
       m.targetSpeed = modeSpeed(i);
-      advance(m, p, st.gait, dt);
+      crowd.advance(i, dt);
     }
     if (settings.mode !== 'stand' && settings.mode !== 'wander') along[i] += m.speed * dt;
     if (!o.locked && settings.mode !== 'wander') {
@@ -600,35 +376,9 @@ function simulate(dt: number) {
       }
     }
     placeOne(i, pose?.lift ?? 0, pose?.spin ?? 0, pose?.fwd ?? 0);
-    gazes[i].partner = a.kind === 'talk' ? a.partner : -1;
-    gazes[i].aim(gazeWorld);
-    anims[i].update(dt, p, m, st, p.root.rotation.y, pose, gazes[i].hint);
-    a.post(dt, m, st);
-    gazes[i].update(dt, simTime);
-    const gasp = gazes[i].surprised || (a.kind === 'fall' && a.rootLocked);
-    if (p.mouth) {
-      // gasp while falling or while staring at someone else's drama
-      p.mouth.rest.visible = !gasp && !a.mouthOpen;
-      p.mouth.o.visible = gasp || a.mouthOpen;
-    }
-    soundFor(i, p, m, a, gazes[i].surprised && !wasGasping[i]);
-    wasGasping[i] = gazes[i].surprised;
-    if (a.impact && a.hammerHead) {
-      p.root.updateMatrixWorld(true);
-      sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
-    }
-    for (const b of a.bursts) {
-      const [fx, n, power] = BURSTS[b.kind];
-      fx.burst(b.at, n, power * Math.sqrt(p.dims.height));
-    }
-    if (a.dust && a.sawTip) {
-      p.root.updateMatrixWorld(true);
-      sawdust.burst(a.sawTip.getWorldPosition(new THREE.Vector3()), 4, 0.35);
-    }
+    crowd.post(i, dt, simTime, pose);
   });
-  sparks.update(dt);
-  sawdust.update(dt);
-  for (const [fx] of Object.values(BURSTS)) fx.update(dt);
+  crowd.endStep(dt);
 }
 
 // ---------------------------------------------------------------- labels (compare mode)
@@ -832,7 +582,7 @@ function select(i: number) {
 }
 
 const look = gui.addFolder('Look');
-const refill = () => fillAtlas(atlas, settings.ramp);
+const refill = () => stage.refillAtlas();
 look.add(settings, 'pixelSize', 1, 8, 1).name('pixel size').onChange(resize);
 look.add(settings, 'maxFps', { '15': 15, '24': 24, '30': 30, '60': 60, uncapped: 0 }).name('max fps');
 const statsCtl = look.add(settings, 'stats').name('show fps  [S]');
@@ -898,33 +648,6 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 
 // ---------------------------------------------------------------- loop
 
-/**
- * Not real shadows: each person's blob is an ellipse that starts under their
- * feet and stretches away from the sun, as long as a pole of their height would
- * cast (capped, so a low sun doesn't paint the whole field).
- */
-function updateShadows(light: THREE.Vector3) {
-  const h = Math.hypot(light.x, light.z);
-  const yaw = h > 1e-4 ? Math.atan2(light.z, -light.x) : 0; // local +x → away from the sun
-  const stretch = h > 1e-4 ? Math.min(h / Math.max(light.y, 1e-4), 3) : 0; // 1/tan(elevation)
-  const orient = (s: Caster, parentYaw: number) => {
-    const len = s.h * stretch * settings.shadowLength;
-    const a = s.r + len * 0.5; // semi-major
-    s.pivot.rotation.y = yaw - parentYaw;
-    s.shadow.scale.set(a, 1, s.r);
-    s.shadow.position.x = a - s.r; // near end stays at the feet
-  };
-  for (const p of people) if (p.root.userData.shadow) orient(p.root.userData.shadow, p.root.rotation.y);
-  if (trees.group.visible) for (const c of trees.casters) orient(c, 0);
-  if (houses.group.visible) houses.updateShadows(light, settings.shadowLength);
-}
-
-const lightWorld = new THREE.Vector3(); // what shades the scene: the sun, or the moon once the sun is down
-const sunWorld = new THREE.Vector3();
-const moonWorld = new THREE.Vector3();
-const day = daylight(50);
-const _sunNdc = new THREE.Vector3();
-const clock = new THREE.Clock();
 let frames = 0;
 let simAcc = 0;
 
@@ -939,52 +662,9 @@ function focusSelected(k = 1) {
   camera.position.copy(controls.target).add(off);
 }
 
-const _fwd = new THREE.Vector3();
-const _hz = new THREE.Vector3();
-/** Horizon distance from the crowd's extent; haze, sky line and clouds follow. */
-function updateEnvironment(dt: number) {
-  const tgt = controls.target;
-  sky.visible = clouds.group.visible = settings.sky;
-  if (!settings.sky) sun.group.visible = moon.group.visible = false;
-  if (!settings.sky) {
-    fog.uFogFar.value = fog.uFogNear.value = 1e9;
-    return;
-  }
-  let extent = 0;
-  for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
-  // keep everyone well inside the clear zone; ease so the horizon doesn't jump
-  const want = Math.max(24, extent * 4 + 14);
-  horizonFar += (want - horizonFar) * Math.min(1, dt * 2);
-  _fwd.subVectors(tgt, camera.position).setY(0).normalize();
-  fog.uFogC.value.set(tgt.x, tgt.z);
-  fog.uFogDir.value.set(_fwd.x, _fwd.z);
-  fog.uFogFar.value = horizonFar;
-  fog.uFogNear.value = horizonFar * 0.8;
-  clouds.update(camera, tgt, horizonFar, dt);
-  sun.update(camera, tgt, horizonFar, sunWorld);
-  moon.update(camera, tgt, horizonFar, moonWorld);
-  sun.setColor(day.sun);
-  _hz.copy(tgt).setY(0).addScaledVector(_fwd, horizonFar).project(camera);
-  const u = sky.material.uniforms;
-  u.uHorizon.value = _hz.y;
-  u.uRes.value.set(rt.width, rt.height);
-  // time of day: sky colours, a glow around the sun when it faces us, stars at night
-  u.uTop.value.copy(day.top);
-  u.uGlow.value.copy(day.glow);
-  u.uGlowAmt.value = day.glowAmt * THREE.MathUtils.smoothstep(sun.facing, -0.2, 0.6);
-  u.uSunX.value = _sunNdc.copy(sun.at).project(camera).x;
-  u.uStars.value = day.stars;
-  u.uStarShift.value = (Math.atan2(_fwd.x, _fwd.z) / (Math.PI * 2)) * rt.width * 3;
-  u.uTime.value = performance.now() / 1000;
-}
-
-function frame() {
-  const dt = Math.min(clock.getDelta(), 0.1);
-  lastFrameAt = performance.now();
-  if (stalled) {
-    stalled = false;
-    if (!document.hidden) sound.setHidden(false);
-  }
+function frame(frameStart: number) {
+  const dt = stage.delta();
+  crowd.frameTick();
   let simulated = false;
   if (!settings.paused) {
     if (settings.animFps > 0) {
@@ -1002,95 +682,28 @@ function frame() {
     }
   }
   // stop continuous sounds whose owner stopped reporting (mode switch, pause…)
-  if (simulated || settings.paused) sound.sweep();
+  if (simulated || settings.paused) crowd.sweep();
   if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
   controls.update();
 
-  // the clock: a whole day in settings.dayMinutes, stopped while paused
-  if (settings.dayCycle && !settings.paused) settings.time = (settings.time + (dt * 24) / (settings.dayMinutes * 60)) % 24;
-  const pos = sunAt(settings.time);
-  const az = THREE.MathUtils.degToRad(pos.az);
-  const el = THREE.MathUtils.degToRad(pos.el);
-  sunWorld.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
-  moonWorld.copy(sunWorld).negate(); // a full moon, opposite the sun
-  // shade by the sun while it's up, by the moon once it has set; never from
-  // below the ground (the tint does the dimming)
-  lightWorld.copy(pos.el > -3 ? sunWorld : moonWorld);
-  const minY = Math.sin(THREE.MathUtils.degToRad(4));
-  if (lightWorld.y < minY) {
-    const h = Math.hypot(lightWorld.x, lightWorld.z) || 1;
-    const k = Math.sqrt(1 - minY * minY) / h;
-    lightWorld.set(lightWorld.x * k, minY, lightWorld.z * k);
-  }
-  daylight(pos.el, day);
-  toon.uniforms.uTint.value.copy(day.tint);
-  fog.uHaze.value.copy(day.horizon);
-  shadowMat.opacity = day.shadow;
-  camera.updateMatrixWorld();
-  toon.uniforms.uLightView.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
+  stage.updateLight(dt, settings.paused);
   trees.group.visible = settings.trees;
   pond.group.visible = settings.pond;
   houses.group.visible = settings.houses;
   pond.update(simTime);
-  updateShadows(lightWorld);
-  toon.uniforms.uWrap.value = settings.wrap;
-  ground.material = settings.grass.enabled ? groundMat : toon;
-  groundMat.uniforms.uScale.value = settings.grass.scale;
-  groundMat.uniforms.uRagged.value = settings.grass.ragged;
-  groundMat.uniforms.uTooth.value = settings.grass.tooth;
-  groundMat.uniforms.uContrast.value = settings.grass.contrast;
-  groundMat.uniforms.uFlowers.value = settings.grass.flowers;
-  groundMat.uniforms.uFlowerSize.value = settings.grass.flowerSize;
-  updateEnvironment(dt);
-  outline.visible = settings.outline;
-  skinMats.outline.visible = settings.outline;
-  cloudOutline.visible = settings.outline;
-  outline.uniforms.uPx.value = settings.outlinePx;
-  outline.uniforms.uColor.value.set(settings.outlineColor);
+  crowd.orientShadows();
+  if (trees.group.visible) for (const c of trees.casters) stage.orient(c, 0);
+  if (houses.group.visible) houses.updateShadows(stage.lightWorld, settings.shadowLength);
+  const tgt = controls.target;
+  let extent = 0;
+  for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
+  stage.updateEnvironment(dt, extent);
 
   updateLabels();
-  renderer.setRenderTarget(rt);
-  renderer.render(scene, camera);
-  const sceneCalls = renderer.info.render.calls;
-  const sceneTris = renderer.info.render.triangles;
-  renderer.setRenderTarget(null);
-  renderer.render(blitScene, blitCam);
+  stage.render(frameStart, people.length);
 
-  stats.frame(frameStart, sceneCalls, sceneTris);
   if (++frames === 2) (window as any).__mini = { ready: true, renderer, camera, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
 }
-
-// ---------------------------------------------------------------- stats overlay
-
-/**
- * fps (frames actually drawn), frame time (CPU ms spent simulating and
- * submitting a frame: the headroom under the fps cap) and the scene pass's
- * draw calls and triangles. Averaged over half a second.
- */
-const stats = (() => {
-  const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;left:8px;top:8px;padding:4px 7px;background:#000a;color:#e8f4d8;font:12px/1.35 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;z-index:10;';
-  document.body.appendChild(el);
-  let n = 0, ms = 0, worst = 0, since = performance.now();
-  return {
-    frame(start: number, calls: number, tris: number) {
-      el.style.display = settings.stats ? '' : 'none';
-      if (!settings.stats) return;
-      const now = performance.now();
-      const took = now - (start || now);
-      n++;
-      ms += took;
-      worst = Math.max(worst, took);
-      if (now - since < 500) return;
-      const fps = (n * 1000) / (now - since);
-      el.textContent = `${fps.toFixed(0)} fps${settings.maxFps ? ` (cap ${settings.maxFps})` : ''}\n${(ms / n).toFixed(1)} ms/frame (worst ${worst.toFixed(1)})\n${calls} draw calls\n${(tris / 1000).toFixed(0)}k triangles · ${people.length} people`;
-      n = 0;
-      ms = 0;
-      worst = 0;
-      since = now;
-    },
-  };
-})();
 
 resize();
 rebuildAll();
@@ -1102,23 +715,4 @@ if (q.has('select')) {
   select(num('select', 0));
   if (q.has('focus')) focusSelected();
 }
-// Render at most settings.maxFps: pixel art gains nothing from 120 fps, and
-// simulating and drawing a crowd isn't free, so the cap saves most of the CPU. rAF keeps
-// ticking at the display rate and frames that come too soon are skipped. The
-// schedule advances in fixed steps (not "now"), so on refresh rates that don't
-// divide evenly (75, 144 Hz…) the average still lands on the cap; a little slack
-// keeps 60/120 Hz on an exact every-2nd/4th rhythm.
-let lastRenderAt = -Infinity;
-let frameStart = 0;
-function loop(now: number) {
-  requestAnimationFrame(loop);
-  if (settings.maxFps > 0) {
-    const step = 1000 / settings.maxFps;
-    if (now - lastRenderAt < step - 2) return;
-    lastRenderAt = Math.max(lastRenderAt + step, now - step); // don't bank up time after a stall
-  } else lastRenderAt = now;
-  frameStart = performance.now();
-  frame();
-}
-frame();
-requestAnimationFrame(loop);
+stage.run(frame);

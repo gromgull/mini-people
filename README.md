@@ -2,7 +2,14 @@
 
 Tiny generative people that walk, work, chat, fiddle and dance in the browser.
 
-**▶ [Live demo](https://gromgull.github.io/mini-people/)**
+**▶ [The demo](https://gromgull.github.io/mini-people/demo.html)** · [the village (in progress)](https://gromgull.github.io/mini-people/)
+
+There are two apps on the same code. The **demo** (`demo.html`) is the
+playground: crowds in different modes, every action on a key, and a GUI for
+all the knobs. The **village** (`index.html`) is where this is heading: a
+little settlement whose people do jobs that feed each other, such as chopping
+trees, carrying logs and sawing them, with real objects instead of conjured
+ones.
 
 ![A wandering crowd](docs/wander.png)
 
@@ -135,7 +142,7 @@ Handy for sharing a particular scene, e.g.
 
 ```sh
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5173 (village), /demo.html (demo)
 npm run build      # type-check + production build into dist/
 ```
 
@@ -146,8 +153,10 @@ The `scripts/` folder holds the headless test and inspection tools, driven by
 Playwright with software WebGL. They need `npx playwright install chromium`
 once.
 
-- `npm run shot`: boots the app, renders about 30 scenes into `screenshots/`,
-  and fails on any console error.
+- `npm run shot`: boots the demo, renders about 40 scenes into `screenshots/`,
+  and fails on any console error. `Math.random` is seeded, so paused scenes
+  come out identical run to run, which makes it a before/after check for
+  refactors.
 - `node scripts/sounds.mjs`: renders every sound recipe offline to WAV, plus a
   spectrogram sheet.
 - `node scripts/tune-sheet.mjs`: prints generated fiddle tunes as chords and
@@ -174,7 +183,10 @@ once.
 | `src/audio.ts` | all sound synthesis |
 | `src/trees.ts`, `src/pond.ts`, `src/houses.ts` | scenery: forest and glade, the pond, the inn and cabins (merged into a few draw calls) |
 | `src/materials.ts`, `src/palette.ts`, `src/environment.ts` | toon shading, colours, haze, sky, clouds |
-| `src/main.ts` | scene, modes, GUI, input and the main loop |
+| `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
+| `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
+| `src/demo.ts` | the demo: modes, GUI, input |
+| `src/village/` | the village app |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)
 and [Vite](https://vitejs.dev/).
