@@ -96,6 +96,9 @@ function sawGeo() {
 
 // ---------------------------------------------------------------- actor
 
+/** Stand-in for a saw in the fist (see Actor.sawFit); one shared node, so measuring creates nothing. */
+const _sawHand = new THREE.Object3D();
+
 /**
  * Runs one action at a time for a person. `pre()` runs before the animator
  * and returns overrides that get springed like everything else (so personality
@@ -419,7 +422,7 @@ export class Actor {
     const d = p.dims;
     const s = Math.sqrt(d.height);
     // a stand-in for the saw in the fist, to read the blade point through
-    const hand = new THREE.Object3D();
+    const hand = _sawHand;
     hand.position.y = -d.handR * 0.7;
     hand.scale.setScalar(s);
     J.wristR.add(hand);

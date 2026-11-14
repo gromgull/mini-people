@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Houses, type Site } from '../houses';
 import { Stage, lookFromQuery, num, q } from '../stage';
 import { Crowd, type CrowdSettings } from '../crowd';
-import { defaultGait, newMotion } from '../gait';
+import { WALK_SPEED, defaultGait, newMotion } from '../gait';
 import { Animator } from '../animate';
 import { Actor } from '../actions';
 import { Gaze } from '../gaze';
@@ -10,6 +10,7 @@ import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
 import { LOG_L, LOG_R, type Log, Sawhorse, Woodpile, makeLog } from './things';
+import { type Goal, type Obstacle, Walker } from './walk';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -102,15 +103,43 @@ function placeLogs() {
   }
 }
 
-// where everyone stands for now
-{
-  const s = horse.sawSpot();
-  people[iWood].root.position.set(s.x, 0, s.z);
-  people[iWood].root.rotation.y = s.yaw;
-  const w = pile.workSpot(_v);
-  people[0].root.position.set(w.x - 0.8, 0, w.z + 0.6);
-  people[0].root.rotation.y = 0.4;
+// ---------------------------------------------------------------- getting about
+
+const walkers = people.map((_, i) => new Walker(-1 + i * 2, 3, Math.PI));
+const houseObstacles: Obstacle[] = houses.buildings.map((b) => ({ kind: 'box', x: b.x, z: b.z, yaw: b.yaw, hx: b.half.x, hz: b.half.z }));
+const pileObstacle: Obstacle = { kind: 'box', x: pile.x, z: pile.z, yaw: pile.yaw, hx: LOG_L / 2 + 0.04, hz: 0.22 };
+const horseObstacle: Obstacle = (() => {
+  const t = horse.fit.trestles;
+  const mid = _v.set((t[0].x + t[1].x) / 2, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
+  return { kind: 'box', x: horse.x + mid.x, z: horse.z + mid.z, yaw: horse.yaw, hx: Math.abs(t[0].x - t[1].x) / 2 + 0.08, hz: 0.14 };
+})();
+const treeObstacles = new Map<number, Obstacle>();
+/** Everything solid right now. */
+function obstacles(): Obstacle[] {
+  const out = [...houseObstacles, pileObstacle, horseObstacle];
+  for (const t of forest.trees) {
+    if (t.state === 'felling') continue;
+    let o = treeObstacles.get(t.id);
+    if (!o) treeObstacles.set(t.id, (o = { kind: 'circle', x: t.x, z: t.z, r: 0 }));
+    (o as { r: number }).r = forest.specs[t.variant].rt * t.k * 1.15 + (t.state === 'growing' ? 0.06 : 0.02);
+    out.push(o);
+  }
+  return out;
 }
+/** Which way to face so a point is straight ahead. */
+const facing = (fromX: number, fromZ: number, toX: number, toZ: number) => Math.atan2(toX - fromX, toZ - fromZ);
+
+// (step 2: a patrol to try the walking — pile, a tree, the sawhorse)
+const patrol: (() => Goal)[] = [
+  () => { const w = pile.workSpot(_v); return { x: w.x, z: w.z, yaw: facing(w.x, w.z, pile.x, pile.z) }; },
+  () => {
+    const t = forest.standing()[5];
+    const o = treeObstacles.get(t.id) ?? null;
+    return { x: t.x + 0.45, z: t.z + 0.1, yaw: facing(t.x + 0.45, t.z + 0.1, t.x, t.z), ignore: o };
+  },
+  () => { const s = horse.sawSpot(); return { x: s.x + 0.6, z: s.z - 0.4, yaw: s.yaw }; },
+];
+const legs = people.map((_, i) => i);
 
 // ---------------------------------------------------------------- loop
 
@@ -118,10 +147,26 @@ let simTime = 0;
 function simulate(dt: number) {
   simTime += dt;
   crowd.beginStep(simTime, null, -1);
-  people.forEach((_, i) => {
+  const obs = obstacles();
+  people.forEach((p, i) => {
     const pose = crowd.pre(i, dt, simTime);
-    crowd.motions[i].targetSpeed = 0;
+    const w = walkers[i];
+    const a = crowd.actors[i];
+    const m = crowd.motions[i];
+    if (!w.goal || (w.arrived && !a.busy)) {
+      if (w.arrived) a.start('wave');
+      legs[i] = (legs[i] + 1) % patrol.length;
+      w.go(patrol[legs[i]]());
+    }
+    m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, walkers, WALK_SPEED * crowd.styleOf(p).speedK);
     crowd.advance(i, dt);
+    if (!a.rootLocked) {
+      w.move(m.speed, dt, obs, walkers);
+      const yaw = w.yaw + (pose?.spin ?? 0);
+      const fwd = pose?.fwd ?? 0;
+      p.root.position.set(w.x + Math.sin(yaw) * fwd, pose?.lift ?? 0, w.z + Math.cos(yaw) * fwd);
+      p.root.rotation.y = yaw;
+    }
     crowd.post(i, dt, simTime, pose);
   });
   crowd.endStep(dt);
@@ -149,7 +194,7 @@ function frame(start: number) {
   houses.updateShadows(stage.lightWorld, look.shadowLength);
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, logs, pile, horse, forest }) };
+  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest }), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
 }
 
 stage.resize();
