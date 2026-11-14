@@ -128,7 +128,8 @@ export class Walker {
       const err = wrap(g.yaw - this.yaw);
       const step = TURN_RATE * 0.8 * dt;
       this.yaw = wrap(this.yaw + Math.max(-step, Math.min(step, err)));
-      if (Math.abs(err) < 0.03 && dist < 0.01) this.arrived = true;
+      // there (or as close as whatever we're up against allows)
+      if (Math.abs(err) < 0.03 && (dist < 0.015 || this.clock - this.bestAt > 1.5)) this.arrived = true;
       return 0;
     }
     dx /= dist;

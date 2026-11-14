@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "shot": "node scripts/screenshot.mjs",
+    "test:village": "node scripts/village-test.mjs",
     "strip": "node scripts/filmstrip.mjs",
     "probe": "node scripts/probe-gait.mjs"
   },

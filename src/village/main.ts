@@ -6,6 +6,8 @@ import { WALK_SPEED, defaultGait, newMotion } from '../gait';
 import { Animator } from '../animate';
 import { Actor } from '../actions';
 import { Gaze } from '../gaze';
+import GUI from 'lil-gui';
+import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
@@ -23,7 +25,7 @@ import { type Job, Lumberjack, type Village, Woodworker } from './jobs';
 const look = lookFromQuery();
 if (q.has('nogui')) document.getElementById('hint')?.remove();
 const stage = new Stage(look);
-const settings: CrowdSettings & { seed: number; paused: boolean } = {
+const settings: CrowdSettings & { seed: number; paused: boolean; speed: number; panel: boolean } = {
   gait: { ...defaultGait },
   personality: 1,
   segments: num('segs', 8),
@@ -32,6 +34,8 @@ const settings: CrowdSettings & { seed: number; paused: boolean } = {
   lookAt: 'auto',
   seed: num('seed', 1),
   paused: q.has('paused'),
+  speed: num('speed', 1), // simulated seconds per real second
+  panel: q.get('panel') !== '0', // who's doing what
 };
 const crowd = new Crowd(stage, settings);
 
@@ -61,8 +65,8 @@ crowd.gazes = people.map((p, i) => new Gaze(p, i, mulberry32(settings.seed * 424
 const iWood = ROLES.indexOf('woodworker');
 
 // the woodworker's own sawhorse, made to their height, and the pile beside it
-const horse = new Sawhorse(stage, 0.9, 1.4, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
-const pile = new Woodpile(stage, -1.1, 1.0, 0.25);
+const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
+const pile = new Woodpile(stage, -3.7, 0.9, 0.35);
 
 const logs: Log[] = [];
 let nextLogId = 0;
@@ -180,6 +184,58 @@ if (!q.has('zoom')) {
   stage.camera.updateProjectionMatrix();
 }
 
+// ---------------------------------------------------------------- watching it
+
+const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚' };
+const panel = document.createElement('div');
+panel.style.cssText = 'position:fixed;left:8px;bottom:30px;padding:6px 9px;background:#000a;color:#e8f4d8;font:12px/1.45 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;';
+document.body.appendChild(panel);
+const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+/** Who's doing what, what's in the pile, and the tallies. */
+function updatePanel() {
+  panel.style.display = settings.panel ? '' : 'none';
+  if (!settings.panel) return;
+  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${ROLES[i].padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : ''}`);
+  const loose = logs.filter((l) => l.place.at === 'ground').length;
+  const standing = forest.trees.filter((t) => t.state === 'standing').length;
+  panel.textContent = [
+    ...rows,
+    `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
+    `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
+    `time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
+  ].join('\n');
+}
+
+const gui = new GUI({ title: 'Village' });
+if (q.has('nogui')) gui.hide();
+gui.add(settings, 'speed', { '×1': 1, '×4': 4, '×16': 16 }).name('speed');
+gui.add(settings, 'paused');
+gui.add(settings, 'panel').name("who's doing what");
+gui.add(look, 'time', 0, 24, 0.05).name('time of day (h)').decimals(2).listen();
+gui.add(look, 'dayCycle').name('day runs');
+gui.add(look, 'stats').name('show fps');
+gui.add({ none: () => (follow = -1) }, 'none').name('stop following');
+
+// click someone to follow them
+const ray = new THREE.Raycaster();
+ray.layers.enable(PARTS_LAYER);
+let downAt: [number, number] | null = null;
+stage.renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
+stage.renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  ray.setFromCamera(new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1), stage.camera);
+  const hit = ray.intersectObjects(people.map((p) => p.root), true)[0];
+  let o: THREE.Object3D | null = hit?.object ?? null;
+  while (o && o.userData.index === undefined) o = o.parent;
+  follow = o ? o.userData.index : -1;
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === ' ') settings.paused = !settings.paused;
+  if (e.key === 'f' || e.key === 'F') settings.speed = settings.speed === 1 ? 4 : settings.speed === 4 ? 16 : 1;
+  if (e.key === 'Escape') follow = -1;
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
+});
+
 /** ?follow=i: keep person i in the middle of the view. */
 let follow = q.has('follow') ? num('follow', 0) : -1;
 function focusOn(i: number, k: number) {
@@ -195,7 +251,12 @@ let frames = 0;
 function frame(start: number) {
   const dt = stage.delta();
   crowd.frameTick();
-  if (!settings.paused) simulate(dt);
+  if (!settings.paused) {
+    // fast-forward in whole steps no longer than 1/30 s, so jobs and physics behave the same at any speed
+    const total = dt * settings.speed;
+    const n = Math.max(1, Math.ceil(total / (1 / 30)));
+    for (let k = 0; k < n; k++) simulate(total / n);
+  }
   crowd.sweep();
   if (follow >= 0) focusOn(follow, frames === 0 ? 1 : 1 - Math.exp(-dt * 4));
   stage.controls.update();
@@ -205,6 +266,7 @@ function frame(start: number) {
   houses.updateShadows(stage.lightWorld, look.shadowLength);
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
+  if (frames % 6 === 0) updatePanel();
   if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village }), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
 }
 
