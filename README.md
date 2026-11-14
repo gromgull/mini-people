@@ -146,6 +146,19 @@ Handy for sharing a particular scene, e.g.
 ## The village
 
 `index.html` is the start of a small settlement with a working economy.
+
+The layout comes from the seed (`?seed=n`), along with the villagers. A
+woodyard sits in the middle, with four districts around it: the forest with
+the lumberjack's cabin; the pond with the fisher's cabin, drying rack and
+bench; the inn with its tables and kegs; and the orchard with the cider
+mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
+their order around the yard and gives each district its own direction,
+distance and turn. Each district keeps its own arrangement, so everything
+still works. The woodworker's cabin goes in the widest gap between
+districts, and a layout where anything overlaps is thrown away and redrawn.
+Building looks, the forest, the orchard and the pond's shape vary with the
+seed too.
+
 So far it has one chain:
 
 - **The lumberjack** keeps the woodpile topped up. When the pile, counting
@@ -286,7 +299,7 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
+| `src/village/` | the village: `layout.ts` (where everything goes, from the seed), `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/smoke.ts` | chimney smoke |

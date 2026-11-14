@@ -20,6 +20,7 @@ import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
 import { Fisher, Innkeeper, type Job, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt } from './jobs';
 import { InnTable } from './inn';
+import { makeLayout } from './layout';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -54,17 +55,15 @@ const crowd = new Crowd(stage, settings);
 
 // ---------------------------------------------------------------- the place
 
-const SITES: Site[] = [
-  { kind: 'cabin', x: -6.5, z: -7, yaw: 0.35 }, // the lumberjack's, by the forest
-  { kind: 'cabin', x: 7.6, z: -7.6, yaw: -0.5 }, // the woodworker's
-  { kind: 'cabin', x: 15.5, z: -4, yaw: -0.9 }, // the fisher's, up from the pond
-  { kind: 'inn', x: 1, z: -14, yaw: 0 }, // (the innkeeper lives in, and the regular has a room)
-  { kind: 'cabin', x: 7.4, z: 9.6, yaw: 2.7 }, // the picker's and the miller's, past the mill
-  { kind: 'cabin', x: -8.6, z: 9.4, yaw: 1.9 }, // the other picker's, the far side of the orchard
-];
+// where everything goes: the seed lays out the whole village (see layout.ts)
+const L = makeLayout(settings.seed);
+// the lumberjack's cabin (by the forest), the woodworker's, the fisher's (up from
+// the pond), the inn (the innkeeper lives in, the regular has a room), the
+// picker's and the miller's (past the mill), the other picker's (the far side of the orchard)
+const SITES: Site[] = L.sites;
 /** Which building each person lives in (index into SITES), by crowd index. */
 const HOME = [0, 1, 2, 3, 4, 4, 3, 5];
-const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, 23, SITES);
+const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, L.seeds.houses, SITES);
 stage.scene.add(houses.group);
 // smoke: the inn's kitchen chimney while its fire has wood, thin wisps from the cabins
 const smoke = new Smoke();
@@ -75,17 +74,17 @@ for (const b of houses.buildings) {
   const c = smoke.add(b.chimney, b.kind === 'inn' ? 1.8 : 0.45, b.kind === 'inn' ? 1.15 : 0.8);
   if (b.kind === 'inn') innChimney = c;
 }
-const forest = new Forest(stage, -11.5, -1, 4.2, 26);
+const forest = new Forest(stage, L.forest.x, L.forest.z, L.forest.R, 26, L.seeds.forest);
 stage.scene.add(forest.group);
-// the orchard to the south, and the cider mill between it and the yard
-const orchard = new Orchard(stage, -2.8, 8.6, 3.3, 5);
-const mill = new CiderMill(stage, 2.8, 6.0, 0);
-const millKegs = new KegRack(stage, 'mill kegs', 1.2, 6.1, Math.PI / 2);
+// the orchard, and the cider mill between it and the yard
+const orchard = new Orchard(stage, L.orchard.x, L.orchard.z, L.orchard.R, 5, L.seeds.orchard);
+const mill = new CiderMill(stage, L.mill.x, L.mill.z, L.mill.yaw);
+const millKegs = new KegRack(stage, 'mill kegs', L.millKegs.x, L.millKegs.z, L.millKegs.yaw);
 // each picker's basket and step-ladder
-const baskets = [new Basket(stage, 2.15, 6.85), new Basket(stage, 1.5, 7.35)];
-const ladders = [new StepLadder(stage, 0.9, 7.9, 0.5), new StepLadder(stage, 0.2, 8.7, -0.3)];
-// a good-sized pond off to the east, for the fisher
-const pond = new Pond(stage.toon, stage.outline, 10, 2, 3.6, 5);
+const baskets = L.baskets.map((b) => new Basket(stage, b.x, b.z));
+const ladders = L.ladders.map((l) => new StepLadder(stage, l.x, l.z, l.yaw));
+// a good-sized pond, for the fisher
+const pond = new Pond(stage.toon, stage.outline, L.pond.x, L.pond.z, L.pond.R, L.seeds.pond);
 stage.scene.add(pond.group);
 
 // ---------------------------------------------------------------- people
@@ -115,11 +114,11 @@ const reference = (() => {
   for (const k of SHAPE_GENES) g[k] = 0.5;
   return new Actor(buildPerson(g, stage.toon, stage.outline, { segments: 4, eyes: false }), crowd.kit);
 })();
-const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, reference.sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
-const pile = new Woodpile(stage, -3.7, 0.9, 0.35);
+const horse = new Sawhorse(stage, L.horse.x, L.horse.z, L.horse.yaw, reference.sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
+const pile = new Woodpile(stage, L.pile.x, L.pile.z, L.pile.yaw);
 // firewood: a stack in the yard for what's been sawn, and one by the inn's
 // kitchen end (beside the chimney) that the inn burns from
-const yard = new Stack(stage, 'yard', -0.35, -0.25, -1.2); // (ends toward the usual view)
+const yard = new Stack(stage, 'yard', L.yard.x, L.yard.z, L.yard.yaw);
 const innStack = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(b.half.x + 0.3, 0, 0.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
@@ -127,9 +126,9 @@ const innStack = (() => {
 })();
 // fish: a drying rack between the pond and the inn, and a larder crate by
 // the inn's kitchen hatch
-const rack = new Rack(stage, 'rack', 9.2, -4.4, 0.35);
+const rack = new Rack(stage, 'rack', L.rack.x, L.rack.z, L.rack.yaw);
 // the inn's own kegs, out front to the right of the door
-const innKegs = new KegRack(stage, 'inn kegs', 4.9, -11.2, -Math.PI / 2, 3);
+const innKegs = new KegRack(stage, 'inn kegs', L.innKegs.x, L.innKegs.z, L.innKegs.yaw, 3);
 const larder = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
@@ -195,17 +194,17 @@ const DRY_TIME = 120;
 const BURN_EVERY = 25;
 let nextBurn = BURN_EVERY;
 // and a bench of their height to sit on between logs, looking over the yard
-const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, reference.sitFit());
+const bench = new Bench(stage, L.bench.x, L.bench.z, L.bench.yaw, reference.sitFit());
 // the innkeeper's, out front of the inn left of the door; the fisher's, looking over the pond
 const innBench = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(-1.7, 0, 2.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
   return new Bench(stage, b.x + at.x, b.z + at.z, b.yaw + 0.15, reference.sitFit());
 })();
-const pondBench = new Bench(stage, 5.2, 3.6, Math.PI / 2 + 0.25, reference.sitFit());
+const pondBench = new Bench(stage, L.pondBench.x, L.pondBench.z, L.pondBench.yaw, reference.sitFit());
 // the inn's table, out front to the right of the door, built to the regular
 // (who sits at its near end facing out, the table in front of them)
-const SEAT = { x: 3.0, z: -10.75, yaw: 0 };
+const SEAT = L.tables[0];
 const regularDine = reference.choreOf('dine');
 const table = regularDine.worldFurniture();
 // and a second one just like it in front, so everyone fits at supper
@@ -213,7 +212,8 @@ const tables = [
   new InnTable(stage, table.group, table.dims, SEAT.x, SEAT.z, SEAT.yaw, table.box, 0),
   (() => {
     const t2 = regularDine.worldFurniture();
-    return new InnTable(stage, t2.group, t2.dims, SEAT.x - 0.2, SEAT.z + 2.5, SEAT.yaw, t2.box, 4);
+    const T2 = L.tables[1];
+    return new InnTable(stage, t2.group, t2.dims, T2.x, T2.z, T2.yaw, t2.box, 4);
   })(),
 ];
 const seats = tables.flatMap((t) => t.seats);
