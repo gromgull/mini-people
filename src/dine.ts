@@ -220,7 +220,12 @@ export class Dine implements Chore {
     this.fit();
     const group = new THREE.Group();
     const t = new THREE.Group(), f = new THREE.Group(), n = new THREE.Group();
+    // (build() throws away what it built last time: keep this table's own, so a
+    // second table, or a conjured one later, doesn't take this one with it)
+    const conjured = this.built;
+    this.built = [];
     this.build(t, f, n);
+    this.built = conjured;
     group.add(t, f, n);
     const G = this.g, H = this.p.dims.height;
     const L = 2 * 0.44 * H + 0.16 * H;
