@@ -90,7 +90,7 @@ Audio from the same genome, with no samples:
 | `1`–`9`, `0` | wave / hammer / jump / trip / carry / sit / talk / saw / fiddle / dance |
 | `C` / `A` / `F` | chop a tree / pick an apple / fish |
 | `T` / `E` / `D` | sit at a table / eat / drink |
-| `H` / `B` | haul a log / play the banjo (tick "musicians sit down" to play seated) |
+| `H` / `B` / `G` | haul a log / play the banjo (tick "musicians sit down" to play seated) / carry an armful of firewood |
 | `S` | show / hide the fps overlay |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
@@ -150,7 +150,13 @@ So far it has one chain:
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
   logs and a stump), then carry each log to the pile on their shoulder.
 - **The woodworker** carries logs from the pile to their own sawhorse, which
-  is built to their height, and saws them.
+  is built to their height, and saws each into four pieces of firewood. They
+  gather the pieces in their arms and stack them in the yard.
+- **Firewood to the inn:** the inn keeps a stack by its kitchen end and its
+  fire burns a piece every so often. When it's below eight, the woodworker
+  carries an armful over, before sawing more if the inn is nearly out.
+  Delivery is a general job, "fetch n pieces from one stack to another", so
+  later a porter or the innkeeper can take it.
 - **Spare time:** with nothing to do, people now and then sit on a free
   bench (built to the woodworker's height) or play their instrument, the
   woodworker a banjo and the lumberjack a fiddle, standing or seated. They
@@ -169,7 +175,7 @@ and the haul and the saw use the actual log.
 | click | follow that person |
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
-| `?follow=i`, `?speed=n`, `?logs=n` | follow someone, run faster, start with logs in the pile |
+| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n` | follow someone, run faster, start with logs in the pile or firewood in the yard / at the inn |
 
 The panel at the bottom left shows who's doing what, the woodpile and the
 tallies. `npm run test:village` runs the village headless for ten simulated
@@ -225,8 +231,9 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (the lumberjack's and woodworker's routines), `main.ts` |
+| `src/village/` | the village: `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, firewood stacks), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (the lumberjack's and woodworker's routines), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
+| `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/banjo.ts` | playing the banjo (the shared tune's banjo part), standing or seated |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)

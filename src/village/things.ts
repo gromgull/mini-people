@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ROWS } from '../palette';
 import type { Stage } from '../stage';
 import { type Part, bake } from '../trees';
+import { PIECE_L, PIECE_R } from '../firewood';
 
 /**
  * The things the woodcutting chain moves around: logs, the woodpile they
@@ -103,6 +104,8 @@ export class Woodpile {
 export class Sawhorse {
   readonly group = new THREE.Group();
   log: Log | null = null;
+  /** Firewood just sawn, still lying on the sawhorse. */
+  pieces: Piece[] = [];
   claimedBy = -1;
   /** Where the log lies (world), and its yaw (along the horse). */
   readonly logAt = new THREE.Vector3();
@@ -181,6 +184,100 @@ export class Bench {
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     // local (along, 0, fwd) turned by yaw
     return { x: this.x + along * c + fwd * s, z: this.z - along * s + fwd * c, yaw: this.yaw };
+  }
+}
+
+/** A piece of firewood and where it is. */
+export type PiecePlace =
+  | { at: 'stack'; stack: Stack; slot: number }
+  | { at: 'carried'; by: number }
+  | { at: 'horse' }
+  | { at: 'ground'; pos: THREE.Vector3; quat: THREE.Quaternion };
+
+export interface Piece {
+  id: number;
+  place: PiecePlace;
+  mesh: THREE.Object3D;
+}
+
+/**
+ * A stack of firewood: layers of pieces side by side on two bearers. It
+ * keeps count of pieces on their way to it (incoming) and pieces someone has
+ * come to take (reserved), so two people don't plan around the same pieces.
+ */
+export class Stack {
+  readonly group = new THREE.Group();
+  readonly slots: { pos: THREE.Vector3; quat: THREE.Quaternion }[] = [];
+  readonly items: (Piece | null)[];
+  incoming = 0;
+  reserved = 0;
+
+  constructor(stage: Stage, readonly name: string, readonly x: number, readonly z: number, readonly yaw: number, layers = 3, perLayer = 4) {
+    const w = PIECE_R * 1.85;
+    // a fixed jumble per slot (the same every run): each piece turned its own
+    // way about its length so split faces and bark mix, ends not quite in line,
+    // every other layer shifted half a piece (like brickwork)
+    const jit = (k: number) => (((Math.sin(k * 12.9898 + x * 3.1 + z * 7.7) * 43758.5453) % 1) + 1) % 1;
+    for (let l = 0; l < layers; l++) {
+      for (let i = 0; i < perLayer; i++) {
+        const k = l * perLayer + i;
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), jit(k) * Math.PI * 2);
+        q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (jit(k + 50) - 0.5) * 0.18));
+        const along = (i - (perLayer - 1) / 2 + (l % 2 ? 0.45 : 0) - 0.22) * w;
+        this.slots.push({ pos: new THREE.Vector3((jit(k + 100) - 0.5) * 0.06, 0.035 + PIECE_R * 0.55 + l * PIECE_R * 1.15, along), quat: q });
+      }
+    }
+    this.items = this.slots.map(() => null);
+    const parts: Part[] = [];
+    for (const sx of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.045, 0.035, perLayer * w + 0.08).translate(sx * PIECE_L * 0.32, 0.0175, 0), row: ROWS.log[1] });
+    this.group.add(outlined(bake(parts), stage));
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  get count() {
+    return this.items.filter(Boolean).length;
+  }
+
+  /** Pieces not already promised to someone. */
+  get available() {
+    return this.count - this.reserved;
+  }
+
+  /** Room not already promised to someone. */
+  get room() {
+    return this.slots.length - this.count - this.incoming;
+  }
+
+  /** The topmost n pieces (taken first). */
+  top(n: number) {
+    const out: number[] = [];
+    for (let i = this.items.length - 1; i >= 0 && out.length < n; i--) if (this.items[i]) out.push(i);
+    return out;
+  }
+
+  /** The lowest n free slots (filled first). */
+  free(n: number) {
+    const out: number[] = [];
+    for (let i = 0; i < this.items.length && out.length < n; i++) if (!this.items[i]) out.push(i);
+    return out;
+  }
+
+  /** Slot i in the world. */
+  slotWorld(i: number) {
+    this.group.updateMatrixWorld();
+    const s = this.slots[i];
+    return {
+      pos: s.pos.clone().applyMatrix4(this.group.matrixWorld),
+      quat: this.group.getWorldQuaternion(new THREE.Quaternion()).multiply(s.quat),
+    };
+  }
+
+  /** Stand here, facing the stack, to take from it or add to it. */
+  workSpot() {
+    const d = 0.5;
+    return { x: this.x + Math.sin(this.yaw) * d, z: this.z + Math.cos(this.yaw) * d, yaw: this.yaw + Math.PI };
   }
 }
 

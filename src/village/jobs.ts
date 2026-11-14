@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Bench, LOG_L, LOG_R, type Log, type Sawhorse, type Woodpile } from './things';
+import { type Bench, LOG_L, LOG_R, type Log, type Piece, type Sawhorse, type Stack, type Woodpile } from './things';
+import type { ItemPose } from '../armful';
+import { PIECE_L, PIECE_R } from '../firewood';
 import { type Obstacle, type Walker, wrap } from './walk';
 
 /**
@@ -22,6 +24,12 @@ import { type Obstacle, type Walker, wrap } from './walk';
  */
 
 export const PILE_WANT = 4;
+/** The inn wants at least this much firewood in its stack. */
+export const INN_WANT = 8;
+/** Pieces of firewood a sawn log makes. */
+export const PIECES_PER_LOG = 4;
+/** Pieces in an armful. */
+export const ARMFUL = 4;
 
 export interface Village {
   forest: Forest;
@@ -35,8 +43,14 @@ export interface Village {
   /** Somewhere to sit (with the obstacle to step past onto it). */
   benches: { bench: Bench; obstacle: Obstacle }[];
   time: number;
+  /** Firewood: the stack by the sawhorse, the inn's stack by the kitchen, every piece. */
+  yard: Stack;
+  inn: Stack;
+  pieces: Piece[];
+  newPiece(): Piece;
+  removePiece(p: Piece): void;
   /** Bookkeeping for the overlay and the tests. */
-  stats: { felled: number; sawn: number };
+  stats: { felled: number; sawn: number; delivered: number; burned: number };
 }
 
 export interface Worker {
@@ -50,6 +64,8 @@ export interface Worker {
 
 /** Steps that aren't work: sitting about and playing. */
 const LEISURE = new Set(['to bench', 'sitting', 'playing', 'getting up']);
+/** Steps of moving an armful from one place to a stack. */
+const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
 
 type Step = { kind: string; [k: string]: unknown };
 
@@ -77,6 +93,8 @@ function besideLog(l: Log, fromX: number, fromZ: number) {
 export abstract class Job {
   step: Step = { kind: 'idle' };
   carrying: Log | null = null;
+  /** Firewood in their arms. */
+  armful: Piece[] = [];
   protected waitUntil = 0;
 
   constructor(readonly w: Worker, readonly role: string) {}
@@ -88,8 +106,18 @@ export abstract class Job {
   /** Called every simulation step, before walking. */
   tick(v: Village) {
     if (LEISURE.has(this.step.kind)) this.leisureStep(v);
+    else if (DELIVERY.has(this.step.kind)) this.deliveryStep(v);
     else this.run(v);
     const a = this.w.actor;
+    // an armful interrupted the same way: down it goes, where they stand
+    if (this.armful.length && a.kind !== 'armful' && this.step.kind !== 'stacking') {
+      const to = this.step.to as Stack | undefined;
+      if (to) to.incoming = Math.max(0, to.incoming - this.armful.length);
+      for (const p of this.armful) p.place = { at: 'ground', pos: p.mesh.position.clone().setY(PIECE_R * 0.5), quat: p.mesh.quaternion.clone() };
+      this.armful = [];
+      this.step = { kind: 'idle' };
+      this.w.walker.stop();
+    }
     // interrupted while carrying (tripped, shoved): drop it here (but a
     // carry that just ended because it was put down is the routine's to handle)
     if (this.carrying && a.kind !== 'haul' && this.step.kind !== 'dropping' && this.step.kind !== 'loading') {
@@ -107,6 +135,80 @@ export abstract class Job {
   protected abstract run(v: Village): void;
   /** Is there something for them to do right now? (Leisure ends when there is.) */
   protected abstract hasWork(v: Village): boolean;
+
+  // ------------------------------------------------------------ moving things in armfuls
+
+  /**
+   * Go and fetch n pieces from one stack and stack them on another: a job
+   * anyone can take. Promises them on both ends straight away (the source's
+   * pieces are spoken for, the destination's room is taken).
+   */
+  protected fetch(from: Stack, to: Stack, n: number) {
+    from.reserved += n;
+    to.incoming += n;
+    const at = from.workSpot();
+    this.go(at.x, at.z, at.yaw);
+    this.step = { kind: 'fetching', from, to, n };
+  }
+
+  /** Gather these pieces (lying at these poses) into an armful and take them to a stack (room there already promised). */
+  protected gather(pieces: Piece[], from: ItemPose[], to: Stack) {
+    for (const p of pieces) p.place = { at: 'carried', by: this.w.i };
+    this.armful = pieces;
+    this.w.actor.start('armful', { items: { meshes: pieces.map((p) => p.mesh), from } });
+    this.step = { kind: 'gathering', to };
+  }
+
+  private deliveryStep(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const to = s.to as Stack;
+    switch (s.kind) {
+      case 'fetching': {
+        if (!this.arrived) return;
+        const from = s.from as Stack;
+        const n = s.n as number;
+        const slots = from.top(n);
+        from.reserved = Math.max(0, from.reserved - n);
+        if (slots.length < n) to.incoming = Math.max(0, to.incoming - (n - slots.length));
+        if (!slots.length) {
+          this.step = { kind: 'idle' };
+          return;
+        }
+        const pieces = slots.map((i) => from.items[i]!);
+        const poses = slots.map((i) => from.slotWorld(i));
+        for (const i of slots) from.items[i] = null;
+        this.gather(pieces, poses, to);
+        return;
+      }
+      case 'gathering': {
+        if (!(a.kind === 'armful' && a.choreOf('armful').carrying)) return;
+        const at = to.workSpot();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'delivering', to };
+        return;
+      }
+      case 'delivering': {
+        if (!this.arrived) return;
+        const slots = to.free(this.armful.length);
+        // (room was promised, so there's a slot for each)
+        slots.forEach((i, k) => (to.items[i] = this.armful[k]));
+        a.choreOf('armful').putDown(slots.map((i) => to.slotWorld(i)));
+        this.step = { kind: 'stacking', to, slots };
+        return;
+      }
+      case 'stacking': {
+        if (a.kind === 'armful') return;
+        const slots = s.slots as number[];
+        this.armful.forEach((p, k) => (p.place = { at: 'stack', stack: to, slot: slots[k] }));
+        to.incoming = Math.max(0, to.incoming - this.armful.length);
+        if (to === v.inn) v.stats.delivered += this.armful.length;
+        this.armful = [];
+        this.step = { kind: 'idle' };
+        return;
+      }
+    }
+  }
 
   // ------------------------------------------------------------ time on their hands
 
@@ -409,8 +511,19 @@ export class Woodworker extends Job {
     super(w, 'woodworker');
   }
 
+  /** A log to saw, and room on the yard stack for what it makes. */
+  private canSaw(v: Village) {
+    return !v.horse.log && !v.horse.pieces.length && v.pile.count > 0 && v.yard.room >= PIECES_PER_LOG;
+  }
+
+  /** How many pieces the inn could do with right now (and we have to bring). */
+  private innWants(v: Village) {
+    const short = INN_WANT - v.inn.count - v.inn.incoming;
+    return short > 0 ? Math.min(ARMFUL, v.yard.available, v.inn.room) : 0;
+  }
+
   protected hasWork(v: Village) {
-    return !v.horse.log && v.pile.count > 0;
+    return this.canSaw(v) || this.innWants(v) > 0;
   }
 
   protected run(v: Village) {
@@ -420,10 +533,22 @@ export class Woodworker extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (this.hasWork(v)) {
+        // the inn nearly out of firewood: that comes before sawing more
+        const urgent = v.inn.count + v.inn.incoming < 3 ? this.innWants(v) : 0;
+        if (urgent > 0) {
+          this.fetch(v.yard, v.inn, urgent);
+          return;
+        }
+        if (this.canSaw(v)) {
+          v.yard.incoming += PIECES_PER_LOG; // room for what it'll make
           const spot = v.pile.workSpot(_v, 0.3);
           this.go(spot.x, spot.z, facing(spot.x, spot.z, v.pile.x, v.pile.z));
           this.step = { kind: 'to pile' };
+          return;
+        }
+        const n = this.innWants(v);
+        if (n > 0) {
+          this.fetch(v.yard, v.inn, n);
           return;
         }
         if (this.leisure(v)) return;
@@ -438,6 +563,7 @@ export class Woodworker extends Job {
         if (!this.arrived) return;
         const slot = v.pile.topSlot();
         if (slot < 0) {
+          v.yard.incoming = Math.max(0, v.yard.incoming - PIECES_PER_LOG);
           this.step = { kind: 'idle' };
           return;
         }
@@ -473,12 +599,29 @@ export class Woodworker extends Job {
       }
       case 'sawing': {
         if (a.busy) return;
-        // sawn through (firewood comes later): the log is used up
+        // sawn through: the log is now firewood lying on the sawhorse; gather
+        // it up and stack it in the yard (room was kept for it)
         const l = horse.log!;
         horse.log = null;
         v.removeLog(l);
         v.stats.sawn++;
-        this.step = { kind: 'idle' };
+        const axis = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw);
+        const poses: ItemPose[] = [];
+        const pieces: Piece[] = [];
+        for (let k = 0; k < PIECES_PER_LOG; k++) {
+          const p = v.newPiece();
+          p.place = { at: 'horse' };
+          const pos = horse.logAt.clone().addScaledVector(axis, (k - 1.5) * PIECE_L * 0.7);
+          pos.y += (k % 2) * PIECE_R * 0.4;
+          const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), horse.yaw + Math.PI / 2 + (k - 1.5) * 0.25);
+          p.mesh.position.copy(pos);
+          p.mesh.quaternion.copy(quat);
+          poses.push({ pos, quat });
+          pieces.push(p);
+        }
+        horse.pieces = pieces;
+        this.gather(pieces, poses, v.yard);
+        horse.pieces = [];
         return;
       }
     }

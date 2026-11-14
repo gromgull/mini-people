@@ -11,15 +11,17 @@ import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
-import { Bench, LOG_L, LOG_R, type Log, Sawhorse, Woodpile, makeLog } from './things';
+import { Bench, LOG_L, LOG_R, type Log, type Piece, Sawhorse, Stack, Woodpile, makeLog } from './things';
+import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
 import { type Job, Lumberjack, type Village, Woodworker } from './jobs';
 
 /**
  * The village: a little settlement where people do jobs that feed each
- * other. For now, the woodcutting chain: a lumberjack fells pines and carries
- * the logs to a woodpile; a woodworker takes them from the pile and saws them
- * on a sawhorse.
+ * other. For now, the firewood chain: a lumberjack fells pines and carries
+ * the logs to a woodpile; a woodworker saws them into firewood on a
+ * sawhorse, stacks it in the yard, and carries armfuls to the inn, whose
+ * kitchen fire burns through it.
  */
 
 const look = lookFromQuery();
@@ -69,6 +71,54 @@ const iWood = ROLES.indexOf('woodworker');
 // the woodworker's own sawhorse, made to their height, and the pile beside it
 const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
 const pile = new Woodpile(stage, -3.7, 0.9, 0.35);
+// firewood: a stack in the yard for what's been sawn, and one by the inn's
+// kitchen end (beside the chimney) that the inn burns from
+const yard = new Stack(stage, 'yard', -0.35, -0.25, -1.2); // (ends toward the usual view)
+const innStack = (() => {
+  const b = houses.buildings.find((h) => h.kind === 'inn')!;
+  const at = new THREE.Vector3(b.half.x + 0.3, 0, 0.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
+  return new Stack(stage, 'inn', b.x + at.x, b.z + at.z, b.yaw + Math.PI / 2);
+})();
+const pieces: Piece[] = [];
+let nextPieceId = 0;
+function newPiece(): Piece {
+  const mesh = makePiece(crowd.kit);
+  stage.scene.add(mesh);
+  const p: Piece = { id: nextPieceId++, place: { at: 'horse' }, mesh };
+  pieces.push(p);
+  return p;
+}
+function removePiece(p: Piece) {
+  stage.scene.remove(p.mesh);
+  pieces.splice(pieces.indexOf(p), 1);
+}
+/** Put every stacked (or dropped) piece's mesh where its place says; carried ones are the armful's. */
+function placePieces() {
+  for (const p of pieces) {
+    const pl = p.place;
+    if (pl.at === 'stack') {
+      const w = pl.stack.slotWorld(pl.slot);
+      p.mesh.position.copy(w.pos);
+      p.mesh.quaternion.copy(w.quat);
+    } else if (pl.at === 'ground') {
+      p.mesh.position.copy(pl.pos);
+      p.mesh.quaternion.copy(pl.quat);
+    }
+  }
+}
+// ?wood=n: start with some firewood in the yard; the inn starts with a little
+function stock(st: Stack, n: number) {
+  for (const i of st.free(n)) {
+    const p = newPiece();
+    p.place = { at: 'stack', stack: st, slot: i };
+    st.items[i] = p;
+  }
+}
+stock(yard, num('wood', 0));
+stock(innStack, num('innwood', 3));
+/** The inn's kitchen fire burns a piece every so often. */
+const BURN_EVERY = 25;
+let nextBurn = BURN_EVERY;
 // and a bench of their height to sit on between logs, looking over the yard
 const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, crowd.actors[iWood].sitFit());
 
@@ -149,7 +199,12 @@ const village: Village = {
   horseObstacle,
   benches: [{ bench, obstacle: benchObstacle }],
   time: 0,
-  stats: { felled: 0, sawn: 0 },
+  yard,
+  inn: innStack,
+  pieces,
+  newPiece,
+  removePiece,
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]] };
@@ -183,7 +238,17 @@ function simulate(dt: number) {
   });
   crowd.endStep(dt);
   forest.update(simTime);
+  if (simTime >= nextBurn) {
+    nextBurn += BURN_EVERY;
+    const top = innStack.top(1).find((i) => innStack.items[i] && innStack.items[i]!.place.at === 'stack');
+    if (top !== undefined && innStack.available > 0) {
+      removePiece(innStack.items[top]!);
+      innStack.items[top] = null;
+      village.stats.burned++;
+    }
+  }
   placeLogs();
+  placePieces();
 }
 
 stage.controls.target.set(num('tx', -2), 0.5, num('tz', -1));
@@ -211,6 +276,7 @@ function updatePanel() {
     ...rows,
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
+    `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
     `time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
   ].join('\n');
 }

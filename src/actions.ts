@@ -11,12 +11,13 @@ import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from
 import { type DineAsk, Dine } from './dine';
 import { Haul, type LogSpot } from './haul';
 import { Banjo } from './banjo';
+import { Armful, type ItemPose } from './armful';
 import type { PineSpec } from './trees';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
 const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -190,8 +191,10 @@ export class Actor {
   choreOf(kind: 'chop'): Chop;
   choreOf(kind: 'haul'): Haul;
   choreOf(kind: 'banjo'): Banjo;
-  choreOf(kind: 'chop' | 'haul' | 'banjo'): Chore {
-    return (this.chores[kind] ??= kind === 'chop' ? new Chop(this.p, this.kit) : kind === 'haul' ? new Haul(this.p, this.kit) : new Banjo(this.p, this.kit));
+  choreOf(kind: 'armful'): Armful;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful }[kind];
+    return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
   start(
@@ -205,6 +208,8 @@ export class Actor {
       tree?: PineSpec;
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
+      /** Armful: the things to gather (their meshes) and where each lies. */
+      items?: { meshes: THREE.Object3D[]; from: ItemPose[] };
       /** Music: how many phrases to play (default: to the end of the next full one). */
       phrases?: number;
       /** Sit down for it (on a conjured seat) and get up after. */
@@ -251,6 +256,12 @@ export class Actor {
       b.plan(this.beatTime, this.playLength(0.6, this.phrases));
       this.chore = b;
       b.start();
+    }
+    if (kind === 'armful') {
+      const a = this.choreOf('armful');
+      a.aim(opts.items?.meshes ?? [], opts.items?.from ?? []);
+      this.chore = a;
+      a.start();
     }
     if (kind === 'haul') {
       const h = this.choreOf('haul');
