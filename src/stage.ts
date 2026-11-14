@@ -290,7 +290,10 @@ export class Stage {
       u.uGlowAmt.value = this.day.glowAmt * THREE.MathUtils.smoothstep(this.sun.facing, -0.2, 0.6);
       u.uSunX.value = this._sunNdc.copy(this.sun.at).project(camera).x;
       u.uStars.value = this.day.stars;
-      u.uStarShift.value = (Math.atan2(fwd.x, fwd.z) / (Math.PI * 2)) * this.rt.width * 3;
+      // a full turn of the view slides the stars by three screen widths, and round again
+      const wrap = Math.round(this.rt.width * 3);
+      u.uStarWrap.value = wrap;
+      u.uStarShift.value = (((Math.atan2(fwd.x, fwd.z) / (Math.PI * 2)) * wrap) % wrap + wrap) % wrap;
       u.uTime.value = performance.now() / 1000;
     }
     this.outline.visible = look.outline;

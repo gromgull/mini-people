@@ -30,6 +30,7 @@ export function createSky(fog: FogUniforms) {
       uSunX: { value: 0 }, // NDC x of the sun
       uStars: { value: 0 }, // 0 = day … 1 = full night
       uStarShift: { value: 0 }, // pixels: stars slide sideways as the view turns
+      uStarWrap: { value: 1 }, // pixels: once round the sky (the star field repeats after a full turn)
       uTime: { value: 0 },
     },
     vertexShader: /* glsl */ `
@@ -45,8 +46,15 @@ export function createSky(fog: FogUniforms) {
       uniform float uSunX;
       uniform float uStars;
       uniform float uStarShift;
+      uniform float uStarWrap;
       uniform float uTime;
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      // (no sin(): the classic sin hash falls apart into stripes and tiles once
+      // its argument gets large, which pixel coordinates easily make it)
+      float hash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
       void main() {
         vec2 ndc = gl_FragCoord.xy / uRes * 2.0 - 1.0;
         // a quick haze band at the horizon, then the sky colour
@@ -64,6 +72,7 @@ export function createSky(fog: FogUniforms) {
         // stars: single pixels on a hashed grid, only above the haze, gently twinkling
         if (uStars > 0.0 && t > 0.2) {
           vec2 px = floor(gl_FragCoord.xy + vec2(uStarShift, 0.0));
+          px.x = mod(px.x, uStarWrap); // seamless all the way round
           float h = hash(px);
           if (h > 0.992) {
             float tw = 0.65 + 0.35 * sin(uTime * (1.0 + 3.0 * hash(px + 7.0)) + h * 400.0);
