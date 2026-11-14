@@ -277,27 +277,27 @@ function modeSpeed(i: number) {
 
 
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'banjo'];
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'banjo', 'bass', 'pipe', 'pipe'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish' || kind === 'dine' || kind === 'eat' || kind === 'drink' || kind === 'banjo') && settings.mode === 'parade') kind = 'wave';
+  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish' || kind === 'dine' || kind === 'eat' || kind === 'drink' || kind === 'banjo' || kind === 'bass' || kind === 'pipe') && settings.mode === 'parade') kind = 'wave';
   const a = actors[i];
   if (!a) return;
   if (kind === 'talk') return startTalk(i);
-  const music = kind === 'fiddle' || kind === 'banjo';
-  a.start(kind, { push, seated: music && settings.musicSeated });
+  const music = kind === 'fiddle' || kind === 'banjo' || kind === 'bass';
+  a.start(kind, { push, seated: music && kind !== 'bass' && settings.musicSeated });
   if (music && settings.mode === 'wander') {
     // music! some idle folk nearby get up and dance, and now and then
-    // someone fetches their own fiddle or banjo and joins in
+    // someone fetches their own fiddle, banjo or double bass and joins in
     const me = people[i].root.position;
     let band = 0;
     people.forEach((o, j) => {
       if (j !== i && !actors[j].busy && !wanders[j]?.walking && o.root.position.distanceTo(me) < 2.6 && Math.random() < 0.6) {
         const r = Math.random();
-        const kind = band < 2 && r < 0.3 ? (r < 0.15 ? 'fiddle' : 'banjo') : 'dance';
+        const kind = band < 2 && r < 0.3 ? (r < 0.12 ? 'fiddle' : r < 0.22 ? 'banjo' : 'bass') : 'dance';
         if (kind !== 'dance') band++;
-        setTimeout(() => !actors[j].busy && actors[j].start(kind, { seated: kind !== 'dance' && settings.musicSeated }), (kind === 'dance' ? 300 : 800) + Math.random() * 1500);
+        setTimeout(() => !actors[j].busy && actors[j].start(kind, { seated: kind !== 'dance' && kind !== 'bass' && settings.musicSeated }), (kind === 'dance' ? 300 : 800) + Math.random() * 1500);
       }
     });
   }
@@ -480,7 +480,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]'], ['haul', '🪵 haul a log  [H]'], ['banjo', '🪕 banjo  [B]'], ['armful', '🔥 armful of firewood  [G]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]'], ['haul', '🪵 haul a log  [H]'], ['banjo', '🪕 banjo  [B]'], ['bass', '🎻 double bass  [U]'], ['pipe', '💨 smoke a pipe  [P]'], ['armful', '🔥 armful of firewood  [G]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -535,7 +535,7 @@ labBtn('fiddle tune', () => {
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
-  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink', h: 'haul', b: 'banjo', g: 'armful' } as const)[e.key.toLowerCase() as 'c'];
+  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink', h: 'haul', b: 'banjo', u: 'bass', p: 'pipe', g: 'armful' } as const)[e.key.toLowerCase() as 'c'];
   if (k) act(selected, k);
   if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);

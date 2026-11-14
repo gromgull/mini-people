@@ -18,10 +18,25 @@ export type ActEvent =
   | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'ahh' | 'mmm';
 export type BurstKind = 'chips' | 'leaves' | 'splash' | 'crumbs';
 
+/** Plucked strings: their frequencies (Hz, low to high) and how (a brush rakes across them). */
+export interface Pluck {
+  f: number[];
+  kind: 'bum' | 'brush' | 'thumb' | 'bass';
+}
+
+/** A puff of smoke let go this frame (pipe): where (world), how big, and which way it's blown. */
+export interface Puff {
+  at: THREE.Vector3;
+  size: number;
+  vel?: THREE.Vector3;
+}
+
 /** What a chore reports back each frame (the Actor carries these). */
 export interface ChoreOut {
   events: ActEvent[];
   bursts: { kind: BurstKind; at: THREE.Vector3 }[];
+  /** Smoke let go this frame (a pipe's bowl, a breath out). */
+  puffs: Puff[];
   /** World point the eyes should follow, or null. */
   focus: THREE.Vector3 | null;
   /** False lets them walk while the chore goes on (carrying something off). */
@@ -32,8 +47,8 @@ export interface ChoreOut {
   mouthOpen: boolean;
   /** The shared beat clock (read). */
   readonly beatTime: number;
-  /** A plucked string this frame (banjo). */
-  pluck: { f: number } | null;
+  /** Strings plucked this frame: the banjo's melody note, brush or drone; a double bass note. */
+  pluck: Pluck | null;
   /** How far each arm is taken by a chat gesture (0…1): hand-work yields that much. */
   readonly gesturing: { L: number; R: number };
 }

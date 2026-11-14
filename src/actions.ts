@@ -7,10 +7,12 @@ import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 import { twoBoneIK } from './ik';
 import { type ActionPose, type PropKit, arm, envelope, lerp, mesh, smooth } from './actionkit';
-import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from './chores';
+import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple, type Pluck, type Puff } from './chores';
 import { type DineAsk, Dine } from './dine';
 import { Haul, type LogSpot } from './haul';
 import { Banjo } from './banjo';
+import { DoubleBass } from './bass';
+import { Pipe } from './pipe';
 import { Armful, type ItemPose } from './armful';
 import { Hold, type HoldPlan } from './hold';
 import type { PineSpec } from './trees';
@@ -18,7 +20,7 @@ import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './
 
 const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -141,6 +143,8 @@ export class Actor {
   events: ActEvent[] = [];
   /** Particle bursts raised this frame (world positions). */
   bursts: { kind: BurstKind; at: THREE.Vector3 }[] = [];
+  /** Smoke let go this frame (world positions). */
+  puffs: Puff[] = [];
   /** Where this action wants the eyes, in world space (null = let the gaze pick). */
   focus: THREE.Vector3 | null = null;
   /** Set for one frame when the action wants them to walk off somewhere. */
@@ -151,8 +155,8 @@ export class Actor {
   private chores: Partial<Record<ActionKind, Chore>> = {};
   /** Shared beat clock (beats since start), set by the caller every frame. */
   beatTime = 0;
-  /** A banjo string plucked this frame: frequency (Hz). */
-  pluck: { f: number } | null = null;
+  /** Strings plucked this frame (banjo, double bass). */
+  pluck: Pluck | null = null;
   /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
   note: { f: number; dur: number } | null = null;
   /** Which part of the tune this fiddler plays (0 melody, 1 harmony, 2 bass), −1 = not playing. */
@@ -198,8 +202,10 @@ export class Actor {
   choreOf(kind: 'pick'): PickApple;
   choreOf(kind: 'hold'): Hold;
   choreOf(kind: 'dine'): Dine;
-  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine'): Chore {
-    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine }[kind];
+  choreOf(kind: 'bass'): DoubleBass;
+  choreOf(kind: 'pipe'): Pipe;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine' | 'bass' | 'pipe'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine, bass: DoubleBass, pipe: Pipe }[kind];
     return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
@@ -228,6 +234,8 @@ export class Actor {
       items?: { meshes: THREE.Object3D[]; from: ItemPose[] };
       /** Music: how many phrases to play (default: to the end of the next full one). */
       phrases?: number;
+      /** Pipe: how long to smoke it (s). */
+      smoke?: number;
       /** Sit down for it (on a conjured seat) and get up after. */
       seated?: boolean;
     } = {},
@@ -274,6 +282,20 @@ export class Actor {
       b.plan(this.beatTime, this.playLength(0.6, this.phrases));
       this.chore = b;
       b.start();
+    }
+    if (kind === 'bass') {
+      // (no sitting down to the double bass)
+      this.dropSeat();
+      const b = this.choreOf('bass');
+      b.plan(this.beatTime, this.playLength(0.7, this.phrases));
+      this.chore = b;
+      b.start();
+    }
+    if (kind === 'pipe') {
+      const pp = this.choreOf('pipe');
+      pp.plan(opts.smoke ?? 14 + Math.random() * 10);
+      this.chore = pp;
+      pp.start();
     }
     if (kind === 'hold') {
       const h = this.choreOf('hold');
@@ -722,6 +744,8 @@ export class Actor {
     const end = this.t + (now ? 0.5 : toPhrase + 0.6);
     if (this.kind === 'fiddle') this.fiddleDur = Math.min(this.fiddleDur, end);
     if (this.kind === 'banjo') this.choreOf('banjo').stopAt(end);
+    if (this.kind === 'bass') this.choreOf('bass').stopAt(end);
+    if (this.kind === 'pipe') this.choreOf('pipe').stopAt(this.t + 0.2);
   }
 
   private makeBench() {
@@ -898,6 +922,7 @@ export class Actor {
     this.sawSpeed = 0;
     this.events.length = 0;
     this.bursts.length = 0;
+    this.puffs.length = 0;
     this.focus = null;
     this.mouthOpen = false;
     this.depart = false;

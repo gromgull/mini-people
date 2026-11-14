@@ -94,7 +94,9 @@ type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'm
 // (two pickers, to keep the mill busy)
 const ROLES: Role[] = ['lumberjack', 'woodworker', 'fisher', 'innkeeper', 'picker', 'miller', 'regular', 'picker'];
 /** What each plays in their spare time. */
-const INSTRUMENT: Record<Role, 'fiddle' | 'banjo' | null> = { lumberjack: 'fiddle', woodworker: 'banjo', fisher: null, innkeeper: 'fiddle', picker: 'banjo', miller: null, regular: null };
+const INSTRUMENT: Record<Role, 'fiddle' | 'banjo' | 'bass' | null> = { lumberjack: 'fiddle', woodworker: 'banjo', fisher: null, innkeeper: 'fiddle', picker: 'banjo', miller: 'bass', regular: null };
+/** Who smokes a pipe. */
+const PIPE: Record<Role, boolean> = { lumberjack: true, woodworker: false, fisher: true, innkeeper: false, picker: false, miller: true, regular: false };
 const people = ROLES.map((_, i) => crowd.spawn(randomGenome(settings.seed * 100003 + 17 + i * 5), i));
 const r = mulberry32(settings.seed * 31 + 7);
 crowd.people = people;
@@ -389,7 +391,7 @@ const pickers = ROLES.map((r, k) => (r === 'picker' ? k : -1)).filter((k) => k >
 const jobs: Job[] = people.map((p, i) => {
   const pk = pickers.indexOf(i);
   const gear = pk >= 0 ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
-  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], home: homes[i], gear };
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], pipe: PIPE[ROLES[i]], home: homes[i], gear };
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
   return new J(w);
 });

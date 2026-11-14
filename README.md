@@ -48,9 +48,12 @@ Audio from the same genome, with no samples:
 - **Footsteps** are heavier for heavier people.
 - **Voices** are gibberish whose pitch and vowel character follow body size.
 - **Tools and props** have their own sounds: hammer, saw and box.
-- **Fiddle tunes** are generated in AABB form over chord progressions. Several
-  fiddlers split into melody, harmony and bass parts that play in time
-  together.
+- **Fiddle tunes** are generated in G, in AABB form over chord progressions.
+  Several fiddlers split into melody, harmony and bass parts that play in
+  time together. Banjos play strict old-time bum-ditty under them: the
+  melody note, a brush down across the chord, and the open G of the short
+  fifth string. A double bass plays the chord's root and the fifth below it
+  on the beat.
 
 ## What's in it
 
@@ -63,7 +66,7 @@ Audio from the same genome, with no samples:
   - *single*: one person up close. With *walk* on, they stroll a loop while
     acting.
 - **Actions:** wave, hammer, jump, trip, carry a box, sit on a bench, talk
-  (with turn-taking, nods and gestures), saw a log, fiddle, play the banjo, dance, chop down a
+  (with turn-taking, nods and gestures), saw a log, fiddle, play the banjo or the double bass, smoke a pipe, dance, chop down a
   pine, pick an apple, and fish. Apples and fish are carried off afterwards.
   Sit down at a farmhouse table (shuffling the bench in) to eat an apple or a
   fish, or to drink from a tankard; asking for more while seated adds to the
@@ -91,6 +94,7 @@ Audio from the same genome, with no samples:
 | `C` / `A` / `F` | chop a tree / pick an apple / fish |
 | `T` / `E` / `D` | sit at a table / eat / drink |
 | `H` / `B` / `G` | haul a log / play the banjo (tick "musicians sit down" to play seated) / carry an armful of firewood |
+| `U` / `P` | play the double bass (always standing) / smoke a pipe |
 | `S` | show / hide the fps overlay |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
@@ -205,8 +209,12 @@ So far it has one chain:
 - **Smoke** rises from the inn's chimney while its fire has firewood, and
   thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
-  bench (their own first, if they have one) or play their instrument, the
-  woodworker a banjo and the lumberjack a fiddle, standing or seated. They
+  bench (their own first, if they have one), play their instrument or
+  smoke a pipe. The woodworker and the pickers play the banjo, the
+  lumberjack and the innkeeper the fiddle, and the miller the double bass
+  (standing only). The lumberjack, the fisher and the miller smoke a pipe,
+  standing or seated, with a wisp off the bowl and a breath of smoke after
+  each draw. They
   stop, get up and go as soon as there's work. Everyone plays the same
   shared tune, so whoever's playing plays together.
 - **Stumps grow back:** a sapling appears after about a minute and becomes a
@@ -271,7 +279,7 @@ once.
 | `src/actionkit.ts` | shared action helpers: pose types, easing, FK prop fitting |
 | `src/gaze.ts` | eyes and head: who looks at whom |
 | `src/wander.ts` | the roaming crowd: targets, steering, personal space |
-| `src/tune.ts` | AABB fiddle tunes with melody, harmony and bass parts |
+| `src/tune.ts` | AABB tunes in G: fiddle melody, harmony and bass parts, the banjo's bum-ditty, the double bass |
 | `src/audio.ts` | all sound synthesis |
 | `src/trees.ts`, `src/pond.ts`, `src/houses.ts` | scenery: forest and glade, the pond, the inn and cabins (merged into a few draw calls) |
 | `src/materials.ts`, `src/palette.ts`, `src/environment.ts` | toon shading, colours, haze, sky, clouds |
@@ -283,7 +291,9 @@ once.
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/smoke.ts` | chimney smoke |
 | `src/hold.ts` | hands on something that moves (a crank, a tap) |
-| `src/banjo.ts` | playing the banjo (the shared tune's banjo part), standing or seated |
+| `src/banjo.ts` | playing the banjo (the shared tune's banjo part, bum-ditty), standing or seated |
+| `src/bass.ts` | playing the double bass (the shared tune's bass part), standing |
+| `src/pipe.ts` | smoking a pipe, standing or seated (the smoke is the crowd's) |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)
 and [Vite](https://vitejs.dev/).

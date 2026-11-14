@@ -309,12 +309,63 @@ export class Sound {
    * nasal ring (a resonance around 1.8 kHz) and the filter closes as the
    * note decays; a click from the fingernail on the attack.
    */
-  banjoNote(f: number, w: Where) {
+  /**
+   * Banjo, clawhammer style, where the three strokes of bum-ditty sound
+   * different: the melody note (bum) struck firm with the nail and left to
+   * ring; the brush (dit) a quick rake down across the strings with a
+   * scratch of nail, ringing a while before the hand comes round again; the
+   * thumb's drone (ty) light and short, and a hair early, pushing on into
+   * the next beat. (Early can't be scheduled before the frame that asks for
+   * it, so the bum and the dit sound a little after theirs instead.)
+   */
+  banjoNote(fs: number[], kind: 'bum' | 'brush' | 'thumb', w: Where) {
+    if (!this.live || !this.allow('music')) return;
+    const EARLY = 0.03;
+    if (kind === 'brush') {
+      // (the hand comes down across the strings from the low one, nearest the face, to the high)
+      fs.forEach((f, k) => this.banjoString(f, EARLY + k * 0.008, 0.42 * (1 - 0.08 * k), w, 0.55));
+      const t = this.ctx!.currentTime + 0.005 + EARLY;
+      this.noiseSrc(t, 0.04).connect(this.filter('bandpass', 5200, 1.4)).connect(this.env(t, 0.16, 0.002, 0.025)).connect(this.out('music', w));
+    } else if (kind === 'thumb') this.banjoString(fs[0], 0, 0.38, w, 0.4);
+    else this.banjoString(fs[0], EARLY, 1, w, 1);
+  }
+
+  /**
+   * Double bass, plucked: a round, woody low note (the fundamental with a
+   * couple of harmonics so small speakers still carry it), a soft thump at
+   * the start, a long-ish fade.
+   */
+  bassNote(f: number, w: Where) {
     if (!this.live || !this.allow('music')) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime + 0.005;
     const o = this.out('music', w);
-    const decay = 0.9 * Math.min(1, 330 / f) + 0.25;
+    const decay = 1.1;
+    const lp = this.filter('lowpass', 900, 0.9);
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(320, t + 0.35);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.linearRampToValueAtTime(0.42, t + 0.008);
+    env.gain.exponentialRampToValueAtTime(0.14, t + 0.25);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    const parts: [OscillatorType, number, number][] = [['sine', 1, 1], ['triangle', 2, 0.45], ['sine', 3, 0.22]];
+    for (const [type, h, g] of parts) {
+      const gn = ctx.createGain();
+      gn.gain.value = g;
+      this.tone(type, t, f * h * 1.004, f * h, decay).connect(gn).connect(lp);
+    }
+    lp.connect(env).connect(o);
+    // the finger leaving the string
+    this.noiseSrc(t, 0.03).connect(this.filter('lowpass', 500, 1)).connect(this.env(t, 0.12, 0.002, 0.03)).connect(o);
+  }
+
+  /** One banjo string: `ring` scales how long it sounds (a muted string stops short). */
+  private banjoString(f: number, delay: number, gain: number, w: Where, ring: number) {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005 + delay;
+    const o = this.out('music', w);
+    const decay = (0.9 * Math.min(1, 330 / f) + 0.25) * ring;
     const lp = this.filter('lowpass', 5200, 1.2);
     lp.frequency.setValueAtTime(5200, t);
     lp.frequency.exponentialRampToValueAtTime(1100, t + decay * 0.5);
@@ -322,7 +373,7 @@ export class Sound {
     head.gain.value = 7;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, t);
-    env.gain.linearRampToValueAtTime(0.34, t + 0.002);
+    env.gain.linearRampToValueAtTime(0.34 * gain, t + 0.002);
     env.gain.exponentialRampToValueAtTime(0.0001, t + decay);
     const saw = this.tone('sawtooth', t, f * 1.008, f, decay);
     const oct = this.tone('triangle', t, f * 2.01, f * 2, decay * 0.6);

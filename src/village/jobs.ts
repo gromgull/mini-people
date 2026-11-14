@@ -123,15 +123,17 @@ export interface Worker {
   walker: Walker;
   root: THREE.Object3D;
   /** What they play when they've time on their hands. */
-  instrument: 'fiddle' | 'banjo' | null;
+  instrument: 'fiddle' | 'banjo' | 'bass' | null;
+  /** Do they smoke a pipe (now and then, with nothing to do)? */
+  pipe: boolean;
   /** Their own front door (where they go in at night and come out in the morning). */
   home: { x: number; z: number; yaw: number };
   /** A picker's own basket and step-ladder. */
   gear?: { basket: Basket; ladder: StepLadder };
 }
 
-/** Steps that aren't work: sitting about and playing. */
-const LEISURE = new Set(['to bench', 'sitting', 'playing', 'getting up']);
+/** Steps that aren't work: sitting about, playing, a pipe. */
+const LEISURE = new Set(['to bench', 'sitting', 'playing', 'smoking', 'getting up']);
 /** Steps of moving an armful from one place to a stack. */
 const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
 /** Steps of the evening: supper at the inn, home, sleep. */
@@ -440,17 +442,24 @@ export abstract class Job {
       this.step = { kind: 'to bench', bench: b };
       return true;
     }
-    if (this.w.instrument && r < 0.85) {
-      this.play();
-      this.step = { kind: 'playing' };
-      return true;
-    }
+    if (r < 0.85) return this.pastime(false);
     return false;
   }
 
-  private play() {
-    this.w.actor.start(this.w.instrument!, { phrases: 2 + Math.floor(Math.random() * 2) }); // (the rest of this phrase, then one or two more)
+  /**
+   * Their instrument or their pipe (whichever they have; either, if both),
+   * standing or sat on a bench (no double bass sat down, though). Returns
+   * whether they started one.
+   */
+  private pastime(seated: boolean) {
+    const music = this.w.instrument && !(seated && this.w.instrument === 'bass') ? this.w.instrument : null;
+    const smoke = this.w.pipe && (!music || Math.random() < 0.45);
+    if (!smoke && !music) return false;
+    if (smoke) this.w.actor.start('pipe');
+    else this.w.actor.start(music!, { phrases: 2 + Math.floor(Math.random() * 2) }); // (the rest of this phrase, then one or two more)
     this.wasPlaying = true;
+    if (!seated) this.step = { kind: smoke ? 'smoking' : 'playing' };
+    return true;
   }
 
   private leisureStep(v: Village) {
@@ -482,9 +491,12 @@ export abstract class Job {
           this.wasPlaying = false;
           this.nextTune = v.time + 4 + Math.random() * 10;
         }
-        if (!a.busy && a.seated && this.w.instrument && v.time >= this.nextTune) this.play();
+        if (!a.busy && a.seated && v.time >= this.nextTune) {
+          if (!this.pastime(true)) this.nextTune = v.time + 10;
+        }
         return;
       case 'playing':
+      case 'smoking':
         if (work && a.busy) a.stopPlaying(true);
         if (!a.busy) {
           this.wasPlaying = false;

@@ -10,7 +10,7 @@
 //     stacks' promised room and pieces add up
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
 //   - nobody stays in the same step for more than 90 s (waiting about,
-//     sitting on a bench, playing, waiting for supper and sleeping don't
+//     sitting on a bench, playing, smoking, waiting for supper and sleeping don't
 //     count; nor does the regular)
 //   - over a whole day (900 s from 08:00): suppers served, everyone in bed,
 //     and everyone up again in the morning
@@ -90,7 +90,7 @@ const result = await page.evaluate((secs) => {
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (!['idle', 'sitting', 'playing', 'asleep', 'waiting for supper'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
+      else if (!['idle', 'sitting', 'playing', 'smoking', 'asleep', 'waiting for supper'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
         since.set(i, [j.doing, s]);
       }

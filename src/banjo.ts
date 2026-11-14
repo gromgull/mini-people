@@ -9,9 +9,9 @@ import { BANJO, FORM_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
  * Playing the banjo, standing or seated (whatever the actor's posture is):
  * the pot rests against the right hip with the head facing out, the neck
  * runs up across the body to the left, the left hand on the neck and the
- * right hand picking over the head. It plays the shared tune's banjo part (a
- * roll through each bar's chord, the drone string on the off-beats), so it
- * fits under any fiddlers who are playing.
+ * right hand over the head. It plays the shared tune's banjo part in strict
+ * old-time bum-ditty (the melody note, a brush down across the chord, the
+ * thumb on the drone string), so it fits under any fiddlers who are playing.
  *
  * Like the meals, the instrument leads: it's placed against the body every
  * frame and both arms are solved onto it.
@@ -34,6 +34,7 @@ export class Banjo implements Chore {
   private dur = 10;
   private lastSlot = -1;
   private pluckAt = -10;
+  private stroke: 'bum' | 'brush' | 'thumb' = 'bum';
   private fret = 0.55; // where along the neck the left hand is (0 = pot, 1 = nut)
   private fretTo = 0.55;
   private t = 0;
@@ -93,7 +94,9 @@ export class Banjo implements Chore {
       this.lastSlot = slot;
       const n = tune().parts[BANJO][slot % FORM_SLOTS];
       if (n.hold > 0) {
-        out.pluck = { f: degToHz(n.deg) };
+        const kind = n.chord ? 'brush' : n.hold === 1 ? 'thumb' : 'bum';
+        out.pluck = { f: (n.chord ?? [n.deg]).map(degToHz), kind };
+        this.stroke = kind;
         this.pluckAt = t;
         // the fretting hand shifts with the chord (once a bar)
         if (slot % 8 === 0) this.fretTo = 0.45 + 0.25 * ((tune().chords[Math.floor((slot % FORM_SLOTS) / 8)] % 3) / 2);
@@ -138,10 +141,14 @@ export class Banjo implements Chore {
     // left hand round the neck, at the fret
     const fret = this.group.localToWorld(_a.set(POT_R + NECK * this.fret, -0.02, -0.01));
     reachFist(p, 'L', p.root.worldToLocal(fret), e, _b.set(0.6, -1, -0.2));
-    // right hand over the head near the bridge, striking down on each pluck
+    // right hand over the head near the bridge: the nail strikes down on the
+    // melody note, sweeps right across the strings on the brush, and the
+    // thumb catches the drone with hardly a move
     const since = this.t - this.pluckAt;
     const lift = since < 0.06 ? 1 - since / 0.06 : since < 0.2 ? (since - 0.06) / 0.14 : 1;
-    const pick = this.group.localToWorld(_a.set(-POT_R * 0.15, 0.01 + 0.012 * lift, 0.045 + 0.015 * lift));
+    const big = this.stroke === 'brush' ? 2.2 : this.stroke === 'thumb' ? 0.5 : 1;
+    const across = this.stroke === 'brush' ? 0.03 * (1 - lift) : 0;
+    const pick = this.group.localToWorld(_a.set(-POT_R * 0.15, 0.01 + 0.012 * lift * big - across, 0.045 + 0.015 * lift * big));
     reachFist(p, 'R', p.root.worldToLocal(pick), e);
   }
 

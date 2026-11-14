@@ -1,5 +1,6 @@
 /**
- * Fiddle tunes in the old-time / reel mould: D major, 4/4 in eighth notes,
+ * Fiddle tunes in the old-time / reel mould: G major (the banjo's open
+ * tuning), 4/4 in eighth notes,
  * AABB form. Each section is a 4-chord progression, one chord per bar; the
  * first time through it ends open (usually on V), the repeat closes on I.
  *
@@ -12,14 +13,20 @@
  * Everyone reads the same grid (slot = shared eighth-note count), so parts
  * always line up no matter when someone starts playing.
  *
- * A fourth part is for banjos: a rolling pattern of plucked chord tones
- * under the fiddles, with the short fifth string droning on the off-beats.
+ * A fourth part is for banjos, in strict old-time "bum-ditty": on every beat
+ * pair the melody note (a quarter), a brush down across the chord (an
+ * eighth), and the short fifth string's open G (an eighth).
+ *
+ * A fifth part is for the double bass: the chord's root and the fifth below
+ * it, alternating on the beat.
  */
 
 /** One eighth-note slot: a new note of `hold` eighths, or hold 0 = still sounding. */
 export interface Slot {
-  deg: number; // diatonic degree in D major, 0 = D4, 7 = D5
+  deg: number; // diatonic degree in G major, 0 = G3, 7 = G4
   hold: number;
+  /** Struck together (a banjo's brush), low to high; `deg` is the lowest. */
+  chord?: number[];
 }
 
 export interface Tune {
@@ -35,11 +42,13 @@ export const PHRASE_SLOTS = SECTION_BARS * 8;
 export const VOICES = ['melody', 'harmony', 'bass'] as const;
 /** The banjo's part (parts[BANJO]). */
 export const BANJO = 3;
+/** The double bass's part (parts[BASS]). */
+export const BASS = 4;
 
 const SCALE = [0, 2, 4, 5, 7, 9, 11];
-const D4 = 293.66;
+const G3 = 196.0;
 const mod7 = (d: number) => ((d % 7) + 7) % 7;
-export const degToHz = (deg: number) => D4 * 2 ** ((12 * Math.floor(deg / 7) + SCALE[mod7(deg)]) / 12);
+export const degToHz = (deg: number) => G3 * 2 ** ((12 * Math.floor(deg / 7) + SCALE[mod7(deg)]) / 12);
 
 // I ii iii IV V vi  →  0 1 2 3 4 5
 const I = 0, ii = 1, iii = 2, IV = 3, V = 4, vi = 5;
@@ -70,7 +79,7 @@ const RHYTHMS = [
   [3, 1, 1, 1, 1, 1],
 ];
 const CADENCE = [[2, 2, 4], [1, 1, 2, 4], [2, 1, 1, 4], [1, 1, 1, 1, 4]];
-const BASS = [
+const BASS_PATS = [
   [[0, 2], [4, 2], [0, 2], [4, 2]], // root–fifth in quarters
   [[0, 3], [0, 1], [4, 2], [0, 2]], // dotted lilt
   [[0, 4], [4, 4]], // halves, for the slower feel
@@ -78,9 +87,9 @@ const BASS = [
 
 const isChordTone = (d: number, root: number) => [0, 2, 4].includes(mod7(d - root));
 
-const MEL_LO = 3, MEL_HI = 12; // G4 … B5
-const HAR_LO = -1, HAR_HI = 10; // C#4 … G5
-const BASS_LO = -4, BASS_HI = 3; // G3 (open string) … G4
+const MEL_LO = 7, MEL_HI = 16; // G4 … B5
+const HAR_LO = 3, HAR_HI = 14; // C4 … D6
+const BASS_LO = 0, BASS_HI = 7; // G3 (open string) … G4
 
 export function makeTune(rnd: () => number): Tune {
   const pick = <T>(a: T[]) => a[Math.floor(rnd() * a.length)];
@@ -90,7 +99,7 @@ export function makeTune(rnd: () => number): Tune {
 
   // ---- melody: write each section once, then rewrite only the bars whose chord changes on the repeat
   const melody: Slot[] = [];
-  let prev = 7 + Math.floor(rnd() * 3); // around D5
+  let prev = 11 + Math.floor(rnd() * 3); // around D5
   let dir = rnd() < 0.5 ? 1 : -1;
 
   const bar = (root: number, rhythm: number[], last: boolean, home: boolean): Slot[] => {
@@ -166,7 +175,7 @@ export function makeTune(rnd: () => number): Tune {
 
   // ---- bass: roots and fifths, one pattern for A and one for B
   const bass: Slot[] = [];
-  const patA = pick(BASS), patB = pick(BASS);
+  const patA = pick(BASS_PATS), patB = pick(BASS_PATS);
   chords.forEach((root, b) => {
     const pat = b < 8 ? patA : patB;
     const r = root <= BASS_HI ? root : root - 7; // the root, low
@@ -179,25 +188,67 @@ export function makeTune(rnd: () => number): Tune {
     }
   });
 
-  // ---- banjo: an eighth-note roll through each bar's chord, the drone string
-  // (A4, the open fifth string) on the off-beats; a different roll for B
-  const DRONE = 4;
-  const ROLLS = [
-    [0, 2, 'd', 7, 4, 2, 'd', 7], // forward roll
-    [0, 'd', 4, 7, 2, 'd', 4, 7],
-    [7, 4, 'd', 2, 0, 4, 'd', 2], // backward
-  ] as const;
-  // (picked from the progressions already chosen, not with fresh random draws,
-  // so adding the banjo didn't change any tune or anything else seeded after it)
-  const rollA = ROLLS[A_PROGS.indexOf(A) % ROLLS.length], rollB = ROLLS[(B_PROGS.indexOf(B) + 1) % ROLLS.length];
+  // ---- banjo: bum-ditty. On each beat pair: the melody note an octave down
+  // (bum), a brush across the chord (dit), the open fifth string (ty)
+  const DRONE = 7; // G4, the short fifth string
+  const sounding = (s: number) => {
+    for (let j = s; j >= 0; j--) if (melody[j].hold > 0) return melody[j].deg;
+    return melody[0].deg;
+  };
   const banjo: Slot[] = [];
   chords.forEach((root, b) => {
-    const roll = b < 8 ? rollA : rollB;
-    const base = root - 7; // the chord an octave down, from D3 up
-    for (const step of roll) banjo.push({ deg: step === 'd' ? DRONE : base + step, hold: 1 });
+    for (let q = 0; q < 2; q++) {
+      const s0 = b * 8 + q * 4;
+      let m = sounding(s0) - 7;
+      while (m < -3) m += 7;
+      banjo.push({ deg: m, hold: 2 }, { deg: m, hold: 0 });
+      const ch = banjoChord(root);
+      banjo.push({ deg: ch[0], hold: 1, chord: ch });
+      banjo.push({ deg: DRONE, hold: 1 });
+    }
   });
 
-  return { chords, parts: [melody, harmony, bass, banjo] };
+  // ---- double bass: root on the beat, then the fifth below it, and again
+  const dbass: Slot[] = [];
+  chords.forEach((root) => {
+    const r = root - 7; // G2 … E3
+    for (const d of [r, r - 3, r, r - 3]) dbass.push({ deg: d, hold: 2 }, { deg: d, hold: 0 });
+  });
+
+  return { chords, parts: [melody, harmony, bass, banjo, dbass] };
+}
+
+/** The open-G banjo's four long strings (D3 G3 B3 D4), as degrees. */
+const STRINGS = [-3, 0, 2, 4];
+const semitones = (d: number) => 12 * Math.floor(d / 7) + SCALE[mod7(d)];
+
+/**
+ * A chord as you'd fret it on the banjo's four long strings: each string
+ * plays a chord tone within its first five frets, and of all the ways to
+ * do that, the one that sounds all three of the chord's notes with the
+ * least fretting (and no two strings on the same note, if it can help it). (So G is all open strings, C is E3 G3 C4 E4, D is
+ * D3 A3 D4 F#4.) Low to high, as the brush strikes them.
+ */
+export function banjoChord(root: number) {
+  const cands = STRINGS.map((o) => {
+    const out: number[] = [];
+    for (let d = o; semitones(d) - semitones(o) <= 5; d++) if ([0, 2, 4].includes(mod7(d - root))) out.push(d);
+    return out;
+  });
+  let best: number[] = [], bestScore = -Infinity;
+  const pick = (k: number, chosen: number[]) => {
+    if (k === STRINGS.length) {
+      const tones = new Set(chosen.map((d) => mod7(d - root)));
+      const frets = chosen.reduce((n, d, i) => n + semitones(d) - semitones(STRINGS[i]), 0);
+      const doubled = chosen.length - new Set(chosen).size; // (two strings on the same note sounds thin)
+      const score = tones.size * 100 - frets - 4 * doubled;
+      if (score > bestScore) [best, bestScore] = [chosen, score];
+      return;
+    }
+    for (const d of cands[k]) pick(k + 1, [...chosen, d]);
+  };
+  pick(0, []);
+  return best;
 }
 
 /** The degree closest to `from` (within lo…hi) that passes `ok`. */
@@ -213,7 +264,7 @@ function nearest(from: number, ok: (d: number) => boolean, lo: number, hi: numbe
  * fiddling while nobody else is, so the square hears a new tune now and then.
  */
 let current = makeTune(Math.random);
-const playing = [0, 0, 0, 0]; // fiddlers per part, then banjos
+const playing = [0, 0, 0, 0, 0]; // fiddlers per part, then banjos, then basses
 
 export const tune = () => current;
 export function setTune(t: Tune) {
@@ -222,14 +273,15 @@ export function setTune(t: Tune) {
 
 /**
  * Join in: a fiddle takes the first free part (melody first), a banjo plays
- * the banjo part. Returns the part index. Starting while nobody else plays
+ * the banjo part, a double bass the bass part. Returns the part index. Starting while nobody else plays
  * strikes up a new tune.
  */
-export function joinBand(instrument: 'fiddle' | 'banjo' = 'fiddle'): number {
+export function joinBand(instrument: 'fiddle' | 'banjo' | 'bass' = 'fiddle'): number {
   if (playing.every((n) => n === 0)) current = makeTune(Math.random);
-  if (instrument === 'banjo') {
-    playing[BANJO]++;
-    return BANJO;
+  if (instrument === 'banjo' || instrument === 'bass') {
+    const v = instrument === 'banjo' ? BANJO : BASS;
+    playing[v]++;
+    return v;
   }
   const fid = playing.slice(0, BANJO);
   let v = fid.findIndex((n) => n === 0);

@@ -45,6 +45,12 @@ export class Smoke {
   }
 
   private emit(c: Chimney) {
+    const vel = new THREE.Vector3((Math.random() - 0.5) * 0.06, 0.42 + Math.random() * 0.12, (Math.random() - 0.5) * 0.06);
+    this.puff(c.at, (0.07 + Math.random() * 0.03) * c.heavy, 3.2 + Math.random() * 1.6, vel);
+  }
+
+  /** One puff, anywhere: a pipe's wisp, a breath of smoke (size: starting radius; it swells about fourfold). */
+  puff(at: THREE.Vector3, size: number, life: number, vel: THREE.Vector3) {
     const p =
       this.free.pop() ??
       (() => {
@@ -56,11 +62,11 @@ export class Smoke {
         return { mesh, age: 0, life: 0, vel: new THREE.Vector3(), size: 0, spin: 0 } as Puff;
       })();
     p.age = 0;
-    p.life = 3.2 + Math.random() * 1.6;
-    p.vel.set((Math.random() - 0.5) * 0.06, 0.42 + Math.random() * 0.12, (Math.random() - 0.5) * 0.06);
-    p.size = (0.07 + Math.random() * 0.03) * c.heavy;
+    p.life = life;
+    p.vel.copy(vel);
+    p.size = size;
     p.spin = (Math.random() - 0.5) * 1.5;
-    p.mesh.position.copy(c.at);
+    p.mesh.position.copy(at);
     p.mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
     p.mesh.visible = true;
     this.puffs.push(p);
@@ -92,7 +98,7 @@ export class Smoke {
       // rise slows; the wind takes over the higher it gets
       const rise = p.vel.y * (1 - 0.7 * k);
       const drift = Math.min(1, k * 2.5);
-      p.mesh.position.x += (p.vel.x + this.wind.x * drift + 0.03 * Math.sin(this.t * 1.3 + p.spin * 5)) * dt;
+      p.mesh.position.x += (p.vel.x + this.wind.x * drift + 0.3 * p.size * Math.sin(this.t * 1.3 + p.spin * 5)) * dt;
       p.mesh.position.y += rise * dt;
       p.mesh.position.z += (p.vel.z + this.wind.y * drift) * dt;
       p.mesh.rotation.y += p.spin * dt;

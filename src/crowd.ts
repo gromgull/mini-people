@@ -5,6 +5,7 @@ import { type GaitParams, type Motion, advance } from './gait';
 import { Animator } from './animate';
 import { styleFor } from './persona';
 import { type ActionPose, Actor, BPM } from './actions';
+import { Smoke } from './smoke';
 import { Sparks } from './fx';
 import { Sound, type Voice, type Where, defaultAudio } from './audio';
 import { Gaze, type GazeWorld, type LookMode } from './gaze';
@@ -43,6 +44,8 @@ export class Crowd {
   readonly gazeWorld: GazeWorld;
   readonly sparks: Sparks;
   readonly sawdust: Sparks;
+  /** Pipe smoke. */
+  readonly smoke = new Smoke();
   private bursts;
   private prevPhase: number[] = [];
   private walkersHeard = 0; // on-screen walkers last frame (footsteps share the space)
@@ -57,6 +60,7 @@ export class Crowd {
     const scene = stage.scene;
     this.sparks = new Sparks(scene);
     this.sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
+    scene.add(this.smoke.group);
     // bursts from the outdoor chores: wood chips, leaves, water, apple
     const chips = new Sparks(scene, 48, ['#e8d2a0', '#c79a5a', '#f2e4c0'], 9);
     const leaves = new Sparks(scene, 48, ['#4e9a3a', '#5aa642', '#78b84a'], 2.5);
@@ -203,6 +207,7 @@ export class Crowd {
       p.root.updateMatrixWorld(true);
       this.sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
     }
+    for (const f of a.puffs) this.smoke.puff(f.at, f.size, 1.6 + Math.random() * 0.8, f.vel ?? new THREE.Vector3(0, 0.1, 0));
     for (const b of a.bursts) {
       const [fx, n, power] = this.bursts[b.kind];
       fx.burst(b.at, n, power * Math.sqrt(p.dims.height));
@@ -217,6 +222,7 @@ export class Crowd {
   endStep(dt: number) {
     this.sparks.update(dt);
     this.sawdust.update(dt);
+    this.smoke.update(dt, this.stage.toon.uniforms.uTint.value);
     for (const [fx] of Object.values(this.bursts)) fx.update(dt);
   }
 
@@ -253,7 +259,8 @@ export class Crowd {
     if (!w) return;
     if (a.impact) sound.hammer(w);
     if (a.note) sound.fiddleNote(a.note.f, a.note.dur, w);
-    if (a.pluck) sound.banjoNote(a.pluck.f, w);
+    if (a.pluck?.kind === 'bass') sound.bassNote(a.pluck.f[0], w);
+    else if (a.pluck) sound.banjoNote(a.pluck.f, a.pluck.kind, w);
     const to = a.talkingTo;
     if (a.beat && Math.random() < (to >= 0 ? 0.55 : 0.2) && !(to >= 0 && sound.speaking(to)) && !sound.speaking(i)) sound.phrase(i, v, w);
     if (gasped && Math.random() < 0.2) sound.exclaim('gasp', v, w);
