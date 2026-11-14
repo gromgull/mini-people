@@ -111,6 +111,8 @@ export interface Village {
   lamp: StreetLamp;
   /** Where this person stands on the green of an evening (the band in an arc at one side, dancers in the middle). */
   greenSpot(i: number): { x: number; z: number; yaw: number };
+  /** Is anyone playing right now (fiddle, banjo or bass)? */
+  bandPlaying(): boolean;
   /** Two people have a word: they stop where they are (if walking) and talk for a while. */
   chat(i: number, j: number, seconds: number): void;
   /** Bookkeeping for the overlay and the tests. */
@@ -422,6 +424,8 @@ export abstract class Job {
           else this.goHome();
           return;
         }
+        // the band's struck up: the pipe goes away, there's dancing to be done
+        if (a.kind === 'pipe' && !this.w.instrument && v.bandPlaying()) a.stopPlaying(true);
         if (a.busy) {
           this.wasPlaying = true;
           return;
@@ -433,7 +437,13 @@ export abstract class Job {
         }
         if (v.time < this.nextTune || this.danceBreak(v)) return;
         if (this.w.instrument) a.start(this.w.instrument, { phrases: 2 + Math.floor(Math.random() * 2) });
-        else a.start('dance');
+        else if (v.bandPlaying()) a.start('dance');
+        else {
+          // no music yet: stand about (with a pipe, if they smoke) till there is
+          if (this.w.pipe) a.start('pipe');
+          this.nextTune = v.time + 1;
+          return;
+        }
         v.stats.evening++;
         return;
       }

@@ -370,6 +370,7 @@ const village: Village = {
   everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
   lamp,
   greenSpot: (i) => greenSpot(i),
+  bandPlaying: () => crowd.actors.some((a) => a.kind === 'fiddle' || a.kind === 'banjo' || a.kind === 'bass'),
   chat: (i, j, seconds) => {
     // (only with someone who's there for it: not asleep, not walking off somewhere)
     if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
