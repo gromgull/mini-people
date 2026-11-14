@@ -149,8 +149,8 @@ So far it has one chain:
   four, they claim the nearest free pine and walk up to it side-on. They
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
   logs and a stump), then carry each log to the pile on their shoulder.
-- **The woodworker** carries logs from the pile to their own sawhorse, which
-  is built to their height, and saws each into four pieces of firewood. They
+- **The woodworker** carries logs from the pile to the sawhorse and saws
+  each into four pieces of firewood. They
   gather the pieces in their arms and stack them in the yard.
 - **Firewood to the inn:** the inn keeps a stack by its kitchen end and its
   fire burns a piece every so often. When it's below eight, the woodworker
@@ -177,21 +177,26 @@ So far it has one chain:
 - **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
   to the table.
-- **The regular** has no job. They sit at the inn's table (built to them),
-  sip cider every so often, and wait when the tankard's empty.
+- **The regular** has no job. They sit at the inn's table, sip cider every
+  so often, and wait when the tankard's empty.
 - **The day:** the village keeps its own clock on simulation time (a day is
   12 real minutes at ×1, `?daymin=` to change it; the evening runs at half
   speed). Work runs from 06:30. At 17:00 everyone finishes what they're doing
-  and goes to the inn for supper. There are two tables, eight places, and
-  each diner sits to the real table at their own size. The innkeeper cooks
+  and goes to the inn for supper. There are two tables and eight places. The
+  innkeeper cooks
   dried fish from the larder at the kitchen hatch and brings the plates out
   one by one. Having eaten, people walk home and go in; their lamps glow for
   an hour and a half. By 21:30 everyone's in (hungry, if supper didn't
   reach them). At 06:30 they come out again.
+- **One size of furniture:** benches, tables and the sawhorse are built for
+  a villager of middling build, and everyone fits themselves to them. They
+  sit down by however much their legs need for the real seat, reach for the
+  real table top, and crouch to the real log, so a short woodworker saws
+  standing tall and a tall one bends their knees.
 - **Smoke** rises from the inn's chimney while its fire has firewood, and
   thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
-  bench (built to the woodworker's height) or play their instrument, the
+  bench (their own first, if they have one) or play their instrument, the
   woodworker a banjo and the lumberjack a fiddle, standing or seated. They
   stop, get up and go as soon as there's work. Everyone plays the same
   shared tune, so whoever's playing plays together.

@@ -203,6 +203,12 @@ export class Dine implements Chore {
     if (this.cur?.kind === 'rest') this.cur.dur = Math.min(this.cur.dur, this.tau + 0.05);
   }
 
+  /** Where the tankard stands (world), once seated. */
+  tankWorld() {
+    this.p.root.updateMatrixWorld(true);
+    return this.p.root.localToWorld(this.tankAt.clone());
+  }
+
   /** Where the plate goes (world), once seated. */
   boardWorld() {
     this.p.root.updateMatrixWorld(true);

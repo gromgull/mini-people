@@ -9,7 +9,8 @@ import { Gaze } from '../gaze';
 import GUI from 'lil-gui';
 import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
-import { randomGenome } from '../genome';
+import { SHAPE_GENES, randomGenome } from '../genome';
+import { buildPerson } from '../body';
 import { Forest } from './forest';
 import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
 import { Orchard } from './orchard';
@@ -101,7 +102,14 @@ const iWood = ROLES.indexOf('woodworker');
 for (const p of people) p.root.userData.height = p.dims.height;
 
 // the woodworker's own sawhorse, made to their height, and the pile beside it
-const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, crowd.actors[iWood].sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
+// furniture is one size for everyone: built to a villager of middling build
+// (only ever measured, never drawn), and anyone fits themselves to it
+const reference = (() => {
+  const g = randomGenome(1);
+  for (const k of SHAPE_GENES) g[k] = 0.5;
+  return new Actor(buildPerson(g, stage.toon, stage.outline, { segments: 4, eyes: false }), crowd.kit);
+})();
+const horse = new Sawhorse(stage, -1.6, 1.3, -0.2, reference.sawFit({ r: LOG_R, len: LOG_L / 2.05 }));
 const pile = new Woodpile(stage, -3.7, 0.9, 0.35);
 // firewood: a stack in the yard for what's been sawn, and one by the inn's
 // kitchen end (beside the chimney) that the inn burns from
@@ -181,18 +189,18 @@ const DRY_TIME = 120;
 const BURN_EVERY = 25;
 let nextBurn = BURN_EVERY;
 // and a bench of their height to sit on between logs, looking over the yard
-const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, crowd.actors[iWood].sitFit());
+const bench = new Bench(stage, 0.7, 2.4, Math.atan2(-1.6 - 0.7, 1.3 - 2.4) + 0.4, reference.sitFit());
 // the innkeeper's, out front of the inn left of the door; the fisher's, looking over the pond
 const innBench = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(-1.7, 0, 2.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
-  return new Bench(stage, b.x + at.x, b.z + at.z, b.yaw + 0.15, crowd.actors[ROLES.indexOf('innkeeper')].sitFit());
+  return new Bench(stage, b.x + at.x, b.z + at.z, b.yaw + 0.15, reference.sitFit());
 })();
-const pondBench = new Bench(stage, 5.2, 3.6, Math.PI / 2 + 0.25, crowd.actors[ROLES.indexOf('fisher')].sitFit());
+const pondBench = new Bench(stage, 5.2, 3.6, Math.PI / 2 + 0.25, reference.sitFit());
 // the inn's table, out front to the right of the door, built to the regular
 // (who sits at its near end facing out, the table in front of them)
 const SEAT = { x: 3.0, z: -10.75, yaw: 0 };
-const regularDine = crowd.actors[ROLES.indexOf('regular')].choreOf('dine');
+const regularDine = reference.choreOf('dine');
 const table = regularDine.worldFurniture();
 // and a second one just like it in front, so everyone fits at supper
 const tables = [
@@ -280,7 +288,6 @@ const pondObstacle: Obstacle = { kind: 'radial', x: pond.x, z: pond.z, r: (dx, d
 const rackObstacle: Obstacle = { kind: 'box', x: rack.x, z: rack.z, yaw: rack.yaw, hx: 0.95, hz: 0.3 };
 const larderObstacle: Obstacle = { kind: 'box', x: larder.x, z: larder.z, yaw: larder.yaw, hx: 0.27, hz: 0.2 };
 const stackObstacles: Obstacle[] = [yard, innStack].map((st) => ({ kind: 'box', x: st.x, z: st.z, yaw: st.yaw, hx: 0.18, hz: 0.28 }));
-const tableObstacle = tables[0].obstacle;
 const millObstacles: Obstacle[] = [
   ...tables.map((t) => t.obstacle),
   { kind: 'box', x: mill.x, z: mill.z, yaw: mill.yaw, hx: 0.3, hz: 0.27 },
@@ -351,7 +358,6 @@ const village: Village = {
   },
   everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
   tankardSpot,
-  seat: { ...SEAT, via: (() => { const v = fromSeat(-0.85, 0); return { x: v.x, z: v.z }; })(), obstacle: tableObstacle },
   served: () => {
     const mug = tankardSpot.items[0];
     if (mug) {

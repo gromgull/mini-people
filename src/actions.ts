@@ -185,7 +185,8 @@ export class Actor {
   }
 
   /** Sawing a real log on a real sawhorse (village): its size; no conjured trestles. */
-  private sawLog: { r: number; len: number } | null = null;
+  private sawLog: { r: number; len: number; y?: number } | null = null;
+  private sawExtra = 0;
   private phrases: number | undefined;
 
   /** This person's chore of a kind (made on first use): for fitting props before starting it. */
@@ -208,7 +209,7 @@ export class Actor {
       push?: THREE.Vector3;
       side?: 'L' | 'R';
       /** Sawing: a real log's size (no conjured trestles). */
-      sawLog?: { r: number; len: number };
+      sawLog?: { r: number; len: number; y?: number };
       /** Chopping: a real tree's shape (stands where it is; no conjured tree). */
       tree?: PineSpec;
       /** Picking: a real apple, where it hangs (world); no conjured tree; ends once it's in the hand. */
@@ -466,7 +467,10 @@ export class Actor {
     }
     this.saw.visible = true;
 
-    const { cut, r, len, y, trestles } = this.sawFit(this.sawLog ?? undefined);
+    const { cut, r, len, y: ownY, trestles } = this.sawFit(this.sawLog ?? undefined);
+    // a real log at its own height: crouch the difference, so the blade meets it there
+    const y = this.sawLog?.y ?? ownY;
+    this.sawExtra = this.sawLog?.y !== undefined ? THREE.MathUtils.clamp((ownY - y) / p.dims.legLen, -0.06, 0.3) : 0;
     this.logSet!.position.set(cut.x, 0, cut.z);
     this.logHalves.forEach((h, i) => {
       h.position.set(0, y, 0);
@@ -617,9 +621,16 @@ export class Actor {
   private posture = { want: false, k: 0, conjured: false, autoUp: false, creaked: false };
 
   /** Sit down on a seat behind them: a real one, or (conjure) one that appears. */
-  sitDown(opts: { conjure?: boolean } = {}) {
+  sitDown(opts: { conjure?: boolean; seatH?: number } = {}) {
     const f = this.sitFit();
     Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
+    if (opts.seatH !== undefined) {
+      // a real seat, whatever height it is: lower by however far their legs need
+      const d = this.p.dims;
+      const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
+      this.seat.h = opts.seatH;
+      this.seat.crouch = (standY - (opts.seatH + d.hipBelow * 0.9)) / d.legLen;
+    }
     if (!this.posture.want && this.posture.k === 0) this.posture.creaked = false;
     this.posture.want = true;
     if (opts.conjure && this.posture.k === 0) {
@@ -1023,7 +1034,7 @@ export class Actor {
         const a = this.sawStroke(u);
         Object.assign(P.arms.R, { w: e, x: a.x, z: a.z, elbow: a.elbow, stiff: 2.6 });
         Object.assign(P.arms.L, { w: e, x: -0.85, z: 0.0, elbow: 0.15, stiff: 1.4 }); // steadies the log
-        P.crouch = SAW_CROUCH * e;
+        P.crouch = (SAW_CROUCH + this.sawExtra) * e;
         P.spineX = (0.45 + 0.05 * u) * e;
         P.headX = 0.3 * e;
         P.headZ = 0.05 * e;

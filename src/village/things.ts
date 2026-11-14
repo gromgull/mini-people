@@ -103,8 +103,8 @@ export class Woodpile {
 }
 
 /**
- * A sawhorse: two X trestles carrying a log at the height of its owner's
- * saw stroke (see Actor.sawFit), and a spot where they stand to saw.
+ * A sawhorse: two X trestles carrying a log at a sawing height (a reference
+ * sawyer's, see Actor.sawFit), and where anyone stands to saw at it.
  */
 export class Sawhorse {
   readonly group = new THREE.Group();
@@ -143,9 +143,9 @@ export class Sawhorse {
     this.logAt.set((fit.len * 1.45 - fit.len * 0.6) / 2, fit.y, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).add(new THREE.Vector3(x, 0, z));
   }
 
-  /** Where the owner stands, and which way they face, to saw. */
-  sawSpot() {
-    const c = new THREE.Vector3(this.fit.cut.x, 0, this.fit.cut.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+  /** Where to stand, and which way to face, to saw: from `fit` (the sawyer's own Actor.sawFit), else the reference sawyer's. */
+  sawSpot(fit: { cut: THREE.Vector3 } = this.fit) {
+    const c = new THREE.Vector3(fit.cut.x, 0, fit.cut.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
     return { x: this.x - c.x, z: this.z - c.z, yaw: this.yaw };
   }
 }
@@ -183,9 +183,13 @@ export class Bench {
     stage.scene.add(this.group);
   }
 
-  /** Where to stand (facing away from the bench) to sit down on it; `along` picks a place along it. */
-  sitSpot(along = 0) {
-    const fwd = -this.fit.benchZ; // the bench is this far behind the sitter's feet
+  /**
+   * Where to stand (facing away from the bench) to sit down on it; `along`
+   * picks a place along it, `sitter` (Actor.sitFit) says how far in front of
+   * a bench their feet go (else the bench's own reference sitter).
+   */
+  sitSpot(along = 0, sitter?: { benchZ: number }) {
+    const fwd = -(sitter ?? this.fit).benchZ; // the bench is this far behind the sitter's feet
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     // local (along, 0, fwd) turned by yaw
     return { x: this.x + along * c + fwd * s, z: this.z - along * s + fwd * c, yaw: this.yaw };

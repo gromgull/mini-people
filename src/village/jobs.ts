@@ -79,7 +79,6 @@ export interface Village {
   innKegs: KegRack;
   /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
   tankardSpot: Spot;
-  seat: { x: number; z: number; yaw: number; via: { x: number; z: number }; obstacle: Obstacle };
   /** A full tankard has just been set down at the regular's place. */
   served(): void;
   /** Is anyone at the table who needs a refill? */
@@ -423,7 +422,7 @@ export abstract class Job {
     if (free.length && r < 0.6) {
       const b = free.reduce((a, b) => (Math.hypot(b.bench.x - me.x, b.bench.z - me.z) < Math.hypot(a.bench.x - me.x, a.bench.z - me.z) ? b : a));
       b.bench.claimedBy = this.w.i;
-      const at = b.bench.sitSpot(0.22);
+      const at = b.bench.sitSpot(0.22, this.w.actor.sitFit());
       this.go(at.x, at.z, at.yaw, b.obstacle, 'ahead');
       this.step = { kind: 'to bench', bench: b };
       return true;
@@ -453,7 +452,7 @@ export abstract class Job {
           this.w.walker.stop();
           this.step = { kind: 'idle' };
         } else if (this.arrived) {
-          a.sitDown();
+          a.sitDown({ seatH: bench!.fit.h });
           this.nextTune = v.time + 2 + Math.random() * 4;
           this.step = { ...s, kind: 'sitting' };
         }
@@ -705,6 +704,11 @@ export class Woodworker extends Job {
     super(w, 'woodworker');
   }
 
+  /** Where their saw cuts (for a log off the pile). */
+  private sawFit() {
+    return this.w.actor.sawFit({ r: LOG_R, len: LOG_L / 2.05 });
+  }
+
   /** A log to saw, and room on the yard stack for what it makes. */
   private canSaw(v: Village) {
     return !v.horse.log && !v.horse.pieces.length && v.pile.ready > 0 && v.yard.room >= PIECES_PER_LOG;
@@ -747,7 +751,7 @@ export class Woodworker extends Job {
         }
         if (this.leisure(v)) return;
         // otherwise wait at the sawhorse
-        const at = horse.sawSpot();
+        const at = horse.sawSpot(this.sawFit());
         const w = this.w.walker;
         if (Math.hypot(w.x - at.x, w.z - at.z) > 0.3 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw, v.horseObstacle);
         this.waitUntil = v.time + 1;
@@ -769,7 +773,7 @@ export class Woodworker extends Job {
       }
       case 'lifting': {
         if (!this.haulCarrying) return;
-        const at = horse.sawSpot();
+        const at = horse.sawSpot(this.sawFit());
         this.go(at.x, at.z, at.yaw, v.horseObstacle);
         this.step = { kind: 'to sawhorse' };
         return;
@@ -786,7 +790,7 @@ export class Woodworker extends Job {
         this.carrying = null;
         l.place = { at: 'horse' };
         horse.log = l;
-        a.start('saw', { sawLog: { r: LOG_R, len: LOG_L / 2.05 } });
+        a.start('saw', { sawLog: { r: LOG_R, len: LOG_L / 2.05, y: horse.logAt.y } });
         l.mesh.visible = false; // the saw's own log halves take over
         this.step = { kind: 'sawing' };
         return;
@@ -1404,18 +1408,22 @@ export class Regular extends Job {
     const a = this.w.actor;
     switch (s.kind) {
       case 'idle': {
-        const st = v.seat;
-        // in from the end of the bench (stepping between it and the table)
-        this.w.walker.go({ x: st.x, z: st.z, yaw: st.yaw, ignore: st.obstacle, via: { ...st.via } });
-        this.step = { kind: 'to the table' };
+        // their usual place, in from the end of the bench (between it and the table)
+        const seat = v.seats[0];
+        const at = seat.table.sitFor(seat, a);
+        this.w.walker.go({ x: at.x, z: at.z, yaw: at.yaw, ignore: seat.table.obstacle, via: at.via });
+        this.step = { kind: 'to the table', table: at.table };
         return;
       }
       case 'to the table': {
         if (!this.arrived) return;
-        a.start('dine', { atTable: true });
-        const seat = v.seats[0]; // (theirs: the table was built to them)
+        a.start('dine', { atTable: s.table as { top: number; edge: number; h: number } });
+        const seat = v.seats[0];
         seat.state = 'claimed';
         seat.diner = this.w.i;
+        // their tankard's spot is wherever it stands in front of them
+        const tw = a.choreOf('dine').tankWorld();
+        v.tankardSpot.set(tw, seat.table.yaw, seat.table.serveFrom(tw));
         this.nextSip = v.time + 4;
         this.step = { kind: 'waiting for a refill' };
         return;
