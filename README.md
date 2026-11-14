@@ -56,8 +56,10 @@ Audio from the same genome, with no samples:
   - *single*: one person up close. With *walk* on, they stroll a loop while
     acting.
 - **Actions:** wave, hammer, jump, trip, carry a box, sit on a bench, talk
-  (with turn-taking, nods and gestures), saw a log, fiddle and dance. Dancers
-  and fiddlers share one beat.
+  (with turn-taking, nods and gestures), saw a log, fiddle, dance, chop down a
+  pine, pick (and eat) an apple, and fish. Dancers and fiddlers share one beat.
+  Props are conjured and fitted to the person: the trunk stands where *their*
+  axe lands, the apple hangs where *their* hand reaches.
 - **Faces:** googly eyes that look at each other, the camera, the cursor or
   whatever just happened, plus noses, mouths that gasp, and beards.
 - **Look:** cel shading through a palette atlas, pixelation, outlines, banded
@@ -71,6 +73,7 @@ Audio from the same genome, with no samples:
 | click | select a person (also turns sound on) |
 | shift + click | shove them |
 | `1`–`9`, `0` | wave / hammer / jump / trip / carry / sit / talk / saw / fiddle / dance |
+| `C` / `A` / `F` | chop a tree / pick an apple / fish |
 | `W` | toggle walking (single mode) |
 | drag / scroll | orbit / zoom (orbit low to see the sky) |
 
@@ -129,7 +132,7 @@ The `scripts/` folder holds the headless test and inspection tools, driven by
 Playwright with software WebGL. They need `npx playwright install chromium`
 once.
 
-- `npm run shot`: boots the app, renders about 24 scenes into `screenshots/`,
+- `npm run shot`: boots the app, renders about 30 scenes into `screenshots/`,
   and fails on any console error.
 - `node scripts/sounds.mjs`: renders every sound recipe offline to WAV, plus a
   spectrogram sheet.
@@ -146,7 +149,9 @@ once.
 | `src/persona.ts` | personality sliders, presets, and how they turn into gait style |
 | `src/gait.ts`, `src/animate.ts` | the walk cycle and per-frame posing |
 | `src/springs.ts`, `src/ik.ts`, `src/ragdoll.ts` | secondary motion, inverse kinematics, falling over |
-| `src/actions.ts` | every action, its props, and its pose layers |
+| `src/actions.ts` | the action runner: each action's props and pose layers |
+| `src/chores.ts` | chopping, apple picking and fishing, with their conjured trees, pool and catch |
+| `src/actionkit.ts` | shared action helpers: pose types, easing, FK prop fitting |
 | `src/gaze.ts` | eyes and head: who looks at whom |
 | `src/wander.ts` | the roaming crowd: targets, steering, personal space |
 | `src/tune.ts` | AABB fiddle tunes with melody, harmony and bass parts |

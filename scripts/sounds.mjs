@@ -33,6 +33,7 @@ const RECIPES = {
   'fiddle-melody': [35, `const e = 30 / 112; const t = T.makeTune(R(+SEED)); const play = (v, g) => t.parts[v].forEach((n, k) => n.hold && at(0.05 + k * e, () => s.fiddleNote(T.degToHz(n.deg), e * n.hold, g))); play(0, C);`],
   'fiddle-trio': [35, `const e = 30 / 112; const t = T.makeTune(R(+SEED)); const play = (v, g) => t.parts[v].forEach((n, k) => n.hold && at(0.05 + k * e, () => s.fiddleNote(T.degToHz(n.deg), e * n.hold, g))); play(0, { pan: -0.35, gain: 1 }); play(1, { pan: 0.35, gain: 0.85 }); play(2, { pan: 0, gain: 0.9 });`],
   'claps': [4.4, `for (let k = 0; k < 8; k++) at(0.05 + k * 60 / 112, () => s.clap({ pan: k % 2 ? 0.2 : -0.2, gain: 1 }));`],
+  'chores': [9, `['chop', 'chop', 'chop'].forEach((k, i) => at(0.1 + i * 0.6, () => s.chore(k, C))); at(1.9, () => s.chore('crack', C)); at(3.0, () => s.chore('whump', C)); at(4.0, () => s.chore('rustle', C)); at(4.3, () => s.chore('rustle', C)); at(4.7, () => s.chore('snap', C)); at(5.1, () => s.chore('crunch', C)); at(5.6, () => s.chore('crunch', C)); at(6.1, () => s.chore('whoosh', C)); at(6.7, () => s.chore('plop', C)); for (let k = 0; k < 14; k++) at(7.1 + k * 0.09, () => s.chore('tick', C)); at(7.3, () => s.chore('splash', C)); at(8.4, () => s.chore('splash', C));`],
   'props': [1.6, `at(0.1, () => s.thunk(C, 1)); at(0.6, () => s.thunk(C, 0.8)); at(1.0, () => s.creak(C));`],
 };
 

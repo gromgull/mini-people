@@ -304,6 +304,88 @@ export class Sound {
     this.noiseSrc(t, 0.06).connect(this.filter('bandpass', 2400, 1.5)).connect(this.env(t, 0.035, 0.003, 0.04)).connect(o);
   }
 
+  /** A swept noise band: whooshes, rustles, splashes. */
+  private noiseSweep(t: number, o: AudioNode, f0: number, f1: number, q: number, peak: number, attack: number, dur: number) {
+    const f = this.filter('bandpass', f0, q);
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    this.noiseSrc(t, dur + attack).connect(f).connect(this.env(t, peak, attack, dur)).connect(o);
+  }
+
+  /**
+   * Sounds of the outdoor chores: axe, falling tree, leaves, apples, and
+   * fishing (cast, float, splashes, the reel's ratchet).
+   */
+  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick', w: Where) {
+    // the reel's ratchet ticks fast and quietly: not worth a rate-limit token
+    if (!this.live || (kind !== 'tick' && !this.allow('tools'))) return;
+    const t = this.ctx!.currentTime + 0.003;
+    const o = this.out('tools', w);
+    switch (kind) {
+      case 'chop': {
+        // axe into wood: a hard knock with a hollow body, a splintery crack on top
+        this.noiseSrc(t, 0.02).connect(this.filter('bandpass', 2600, 1.2)).connect(this.env(t, 0.5, 0.001, 0.012)).connect(o);
+        const f = rand(170, 210);
+        this.tone('triangle', t, f * 1.4, f, 0.1).connect(this.env(t, 0.5, 0.001, 0.08)).connect(o);
+        this.tone('sine', t, 95, 50, 0.12).connect(this.env(t, 0.6, 0.002, 0.1)).connect(o);
+        this.noiseSrc(t, 0.07).connect(this.filter('bandpass', 700, 2.5)).connect(this.env(t, 0.35, 0.001, 0.05)).connect(o);
+        break;
+      }
+      case 'crack': {
+        // the hinge giving way: a long creak that falls in pitch, with splinters
+        const dur = 0.9;
+        const src = this.tone('sawtooth', t, rand(60, 70), 34, dur);
+        const f = this.filter('bandpass', 600, 5);
+        f.frequency.setValueAtTime(700, t);
+        f.frequency.exponentialRampToValueAtTime(260, t + dur);
+        src.connect(f).connect(this.env(t, 1.3, 0.05, dur)).connect(o);
+        for (let k = 0; k < 5; k++) {
+          const tk = t + rand(0, 0.5);
+          this.noiseSrc(tk, 0.02).connect(this.filter('bandpass', rand(1800, 3200), 2)).connect(this.env(tk, 0.6, 0.001, 0.015)).connect(o);
+        }
+        break;
+      }
+      case 'whump': {
+        // the trunk hits the ground, the branches thrash
+        this.tone('sine', t, 70, 30, 0.35).connect(this.env(t, 1.0, 0.004, 0.3)).connect(o);
+        this.noiseSrc(t, 0.2).connect(this.filter('lowpass', 400, 1)).connect(this.env(t, 0.6, 0.003, 0.18)).connect(o);
+        this.noiseSweep(t + 0.02, o, 3500, 1800, 0.6, 0.6, 0.02, 0.6);
+        break;
+      }
+      case 'rustle':
+        this.noiseSweep(t, o, rand(2600, 3600), rand(3800, 5000), 0.8, 0.3, 0.04, 0.22);
+        break;
+      case 'snap':
+        // the stalk letting go: a tiny dry tick
+        this.noiseSrc(t, 0.02).connect(this.filter('bandpass', 3000, 3)).connect(this.env(t, 0.9, 0.001, 0.01)).connect(o);
+        this.tone('square', t, 1400, 900, 0.015).connect(this.env(t, 0.05, 0.001, 0.012)).connect(o);
+        break;
+      case 'crunch':
+        // a bite: a rattle of crisp little bursts
+        for (let k = 0; k < 6; k++) {
+          const tk = t + k * rand(0.018, 0.03);
+          this.noiseSrc(tk, 0.025).connect(this.filter('bandpass', rand(1800, 3400), 1.5)).connect(this.env(tk, rand(0.45, 0.75), 0.001, 0.02)).connect(o);
+        }
+        break;
+      case 'whoosh':
+        this.noiseSweep(t, o, 500, 2400, 1.2, 0.55, 0.08, 0.25);
+        break;
+      case 'plop': {
+        // a float or a fish going in: the classic rising "bloop"
+        this.tone('sine', t, rand(260, 320), rand(900, 1100), 0.06).connect(this.env(t, 0.35, 0.002, 0.07)).connect(o);
+        this.noiseSrc(t, 0.05).connect(this.filter('bandpass', 1200, 1)).connect(this.env(t, 0.12, 0.001, 0.04)).connect(o);
+        break;
+      }
+      case 'splash':
+        this.noiseSweep(t, o, 1400, 2600, 0.7, 0.55, 0.005, 0.25);
+        this.tone('sine', t, rand(400, 500), rand(1100, 1400), 0.05).connect(this.env(t, 0.15, 0.002, 0.05)).connect(o);
+        break;
+      case 'tick':
+        this.noiseSrc(t, 0.01).connect(this.filter('bandpass', 4200, 4)).connect(this.env(t, 0.16, 0.0005, 0.006)).connect(o);
+        break;
+    }
+  }
+
   /** A short wooden creak (sitting down on the bench). */
   creak(w: Where) {
     if (!this.live || !this.allow('tools')) return;

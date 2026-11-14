@@ -23,6 +23,7 @@ export const PALETTE = {
   water: ['#4f9fc8', '#3b86b6'],
   shore: ['#a8a070'],
   stone: ['#8e8b85', '#a19c92', '#78756f'],
+  fish: ['#a9c2cf', '#e0884a', '#5f7f96'],
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

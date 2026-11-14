@@ -14,6 +14,8 @@ export interface GazeWorld {
   cursor: THREE.Vector3 | null;
   selected: number;
   time: number;
+  /** A point a person's own action wants them to watch (an axe's mark, a float), or null. */
+  focus?: (i: number) => THREE.Vector3 | null;
 }
 
 /** Head-turn request for the animator (radians, root-relative, unsprung). */
@@ -102,6 +104,10 @@ export class Gaze {
       headCentre(w.people[this.partner], this.target);
       this.hasTarget = true;
       this.who = this.partner;
+    } else if (w.mode === 'auto' && w.focus?.(this.self)) {
+      this.target.copy(w.focus(this.self)!);
+      this.hasTarget = true;
+      this.who = -1;
     } else if (w.mode === 'auto') {
       if (w.time >= this.nextPick || (this.who >= 0 && !w.people[this.who])) this.pick(w);
       // interrupt a dull glance if someone nearby starts doing something

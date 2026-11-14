@@ -6,43 +6,13 @@ import type { Style } from './persona';
 import { ROWS } from './palette';
 import { Ragdoll } from './ragdoll';
 import { twoBoneIK } from './ik';
+import { type ActionPose, type PropKit, arm, envelope, lerp, mesh, smooth } from './actionkit';
+import { type ActEvent, type BurstKind, Chop, type Chore, Fish, PickApple } from './chores';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
-
-/** Arm override blended into the animator's targets *before* the springs. */
-export interface ArmOverride {
-  w: number; // blend weight 0..1
-  x: number; // shoulder pitch (−forward)
-  z: number; // shoulder abduction (positive = away from body, either side)
-  elbow: number; // elbow bend
-  stiff: number; // spring frequency multiplier while overriding (crisp strikes)
-}
-
-/** What an action asks of the animator this frame. */
-export interface ActionPose {
-  crouch: number; // × leg length
-  sitZ: number; // pelvis pushed back for sitting
-  lift: number; // root height (jumps)
-  spineX: number;
-  headX: number;
-  headY: number;
-  headZ: number;
-  spineY: number; // chest twist
-  spineZ: number; // side bend
-  spin: number; // extra facing (rad) on top of wherever the person faces
-  arms: { L: ArmOverride; R: ArmOverride };
-}
-
-const arm = (): ArmOverride => ({ w: 0, x: 0, z: 0, elbow: 0, stiff: 1 });
-const smooth = (t: number) => {
-  const c = Math.min(1, Math.max(0, t));
-  return c * c * (3 - 2 * c);
-};
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-/** 0→1→0 envelope with ease-in/out at the ends of [0, dur]. */
-const envelope = (t: number, dur: number, tin: number, tout: number) => smooth(t / tin) * smooth((dur - t) / tout);
+export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
 const JUMP_G = 14;
 
@@ -69,11 +39,6 @@ const _q = new THREE.Quaternion();
 const _scl = new THREE.Vector3();
 
 // ---------------------------------------------------------------- props
-
-export interface PropKit {
-  toon: THREE.Material;
-  outline: THREE.Material;
-}
 
 let hammerGeo: { handle: THREE.BufferGeometry; head: THREE.BufferGeometry; rock: THREE.BufferGeometry } | null = null;
 function geos() {
@@ -126,14 +91,6 @@ function sawGeo() {
   return sawGeos;
 }
 
-function mesh(geo: THREE.BufferGeometry, kit: PropKit) {
-  const m = new THREE.Mesh(geo, kit.toon);
-  const o = new THREE.Mesh(geo, kit.outline);
-  o.raycast = () => {};
-  m.add(o);
-  return m;
-}
-
 // ---------------------------------------------------------------- actor
 
 /**
@@ -170,7 +127,13 @@ export class Actor {
   partner = -1;
   dust = false; // set on frames where a saw stroke throws sawdust
   /** Sound cues raised this frame (consumed by the audio layer). */
-  events: ('oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log' | 'clap')[] = [];
+  events: ActEvent[] = [];
+  /** Particle bursts raised this frame (world positions). */
+  bursts: { kind: BurstKind; at: THREE.Vector3 }[] = [];
+  /** Where this action wants the eyes, in world space (null = let the gaze pick). */
+  focus: THREE.Vector3 | null = null;
+  private chore: Chore | null = null;
+  private chores: Partial<Record<ActionKind, Chore>> = {};
   /** Shared beat clock (beats since start), set by the caller every frame. */
   beatTime = 0;
   /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
@@ -225,6 +188,11 @@ export class Actor {
     }
     if (kind === 'saw') this.makeSaw();
     if (kind === 'fiddle') this.makeFiddle();
+    if (kind === 'chop' || kind === 'pick' || kind === 'fish') {
+      const C = kind === 'chop' ? Chop : kind === 'pick' ? PickApple : Fish;
+      this.chore = this.chores[kind] ??= new C(this.p, this.kit);
+      this.chore.start();
+    }
     if (kind === 'dance') {
       this.dance.lastBar = -1;
       this.dance.lastBeat = -1;
@@ -234,6 +202,9 @@ export class Actor {
 
   stop() {
     this.showHammer(false);
+    this.chore?.hide();
+    this.chore = null;
+    this.focus = null;
     if (this.box) this.box.visible = false;
     if (this.bench) this.bench.visible = false;
     if (this.saw) {
@@ -263,6 +234,7 @@ export class Actor {
     this.logSet?.removeFromParent();
     this.fiddle?.removeFromParent();
     this.bowMesh?.removeFromParent();
+    for (const c of Object.values(this.chores)) c.dispose();
   }
 
   /** A fiddle (placed every frame between chin and left hand), a bow in the right hand, and a tune. */
@@ -571,6 +543,8 @@ export class Actor {
     this.note = null;
     this.sawSpeed = 0;
     this.events.length = 0;
+    this.bursts.length = 0;
+    this.focus = null;
     m.lockPhase = false;
     if (!this.kind) return null;
     if (this.stopNow) {
@@ -587,6 +561,8 @@ export class Actor {
     const tempo = st.tempo;
     this.tempo = tempo;
     const t = this.t;
+
+    if (this.chore) return this.chore.pre(t, dt, P, tempo, this) ? P : this.finish();
 
     switch (this.kind) {
       case 'wave': {
@@ -948,6 +924,7 @@ export class Actor {
 
   /** After the animator: pose overrides that replace the animation outright. */
   post(dt: number, m: Motion, st: Style) {
+    if (this.chore) return this.chore.post(this.t, dt, this);
     if (this.kind === 'fiddle' && this.fiddle) {
       this.placeFiddle();
       this.placeBow();

@@ -32,6 +32,12 @@ const shots = process.argv[2]
       ['single-walk-carry', 'mode=single&walk&seed=1&who=3&act=carry&actAt=0.3&t=3.5&paused&nogui'],
       ['single-walk-wave', 'mode=single&walk&seed=5&act=wave&actAt=1&t=1.8&paused&nogui'],
       ['sky', 'mode=parade&el=8&az=120&t=3&paused&nogui'],
+      ['act-chop', 'mode=single&seed=1&who=3&act=chop&actAt=0.1&zoom=2.5&el=20&px=2&t=2.1&paused&nogui'],
+      ['act-chop-felled', 'mode=single&seed=1&who=3&act=chop&actAt=0.1&zoom=1.6&el=25&px=2&t=6.6&paused&nogui'],
+      ['act-pick', 'mode=single&seed=4&act=pick&actAt=0.1&zoom=3&el=30&px=2&t=1.7&paused&nogui'],
+      ['act-fish-reel', 'mode=single&seed=1&who=3&act=fish&actAt=0.1&zoom=2&el=20&az=60&px=2&t=7&paused&nogui'],
+      ['act-fish-catch', 'mode=single&seed=1&who=3&act=fish&actAt=0.1&zoom=3&el=10&az=40&px=2&t=9.4&paused&nogui'],
+      ['wander-chores', 'mode=wander&seed=3&count=30&t=45&paused&nogui'],
       ['look-camera', 'mode=stand&count=12&seed=1&zoom=3.2&px=2&look=camera&t=2&paused&nogui'],
       ['stand-idle', 'mode=stand&seed=1&count=12&zoom=3&t=6&paused&nogui'],
     ];

@@ -262,6 +262,12 @@ function whereOf(p: Person): Where | null {
 }
 
 const sawdust = new Sparks(scene, 48, ['#d9b77a', '#b8925a', '#e8d2a0'], 6);
+// bursts from the outdoor chores: wood chips, leaves, water, apple
+const chips = new Sparks(scene, 48, ['#e8d2a0', '#c79a5a', '#f2e4c0'], 9);
+const leaves = new Sparks(scene, 48, ['#4e9a3a', '#5aa642', '#78b84a'], 2.5);
+const splash = new Sparks(scene, 64, ['#dff2ff', '#9ccfe8', '#ffffff'], 9);
+const crumbs = new Sparks(scene, 24, ['#f4ecc8', '#e8dca0'], 9);
+const BURSTS = { chips: [chips, 6, 0.7], leaves: [leaves, 8, 0.45], splash: [splash, 9, 0.55], crumbs: [crumbs, 3, 0.3] } as const;
 // deterministic action trigger for tests: ?act=fall&actAt=0.5 (person = ?select or 0)
 let scheduled: { at: number; who: number; kind: ActionKind; push?: THREE.Vector3 } | null =
   ACTIONS.includes(q.get('act') as ActionKind)
@@ -433,8 +439,9 @@ const gazeWorld: GazeWorld = {
   people: [],
   busy: (i) => {
     const k = actors[i]?.kind;
-    return k === 'fall' || k === 'jump' || k === 'hammer' || k === 'saw';
+    return k === 'fall' || k === 'jump' || k === 'hammer' || k === 'saw' || k === 'chop' || k === 'fish';
   },
+  focus: (i) => actors[i]?.focus ?? null,
   camera: new THREE.Vector3(),
   cursor: null,
   selected: 0,
@@ -442,11 +449,11 @@ const gazeWorld: GazeWorld = {
 };
 
 
-const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance'];
+const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall', 'carry', 'carry', 'sit', 'talk', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish'];
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance') && settings.mode === 'parade') kind = 'wave';
+  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish') && settings.mode === 'parade') kind = 'wave';
   const a = actors[i];
   if (!a) return;
   if (kind === 'talk') return startTalk(i);
@@ -521,7 +528,8 @@ function soundFor(i: number, p: Person, m: Motion, a: Actor, gasped: boolean) {
     else if (e === 'thunk') sound.thunk(w, 1);
     else if (e === 'log') sound.thunk(w, 0.8);
     else if (e === 'creak') sound.creak(w);
-    else sound.exclaim(e, v, w);
+    else if (e === 'oof' || e === 'hup' || e === 'grunt' || e === 'hey') sound.exclaim(e, v, w);
+    else sound.chore(e, w);
   }
 }
 
@@ -599,6 +607,10 @@ function simulate(dt: number) {
       p.root.updateMatrixWorld(true);
       sparks.burst(a.hammerHead.getWorldPosition(new THREE.Vector3()), 7, Math.sqrt(p.dims.height));
     }
+    for (const b of a.bursts) {
+      const [fx, n, power] = BURSTS[b.kind];
+      fx.burst(b.at, n, power * Math.sqrt(p.dims.height));
+    }
     if (a.dust && a.sawTip) {
       p.root.updateMatrixWorld(true);
       sawdust.burst(a.sawTip.getWorldPosition(new THREE.Vector3()), 4, 0.35);
@@ -606,6 +618,7 @@ function simulate(dt: number) {
   });
   sparks.update(dt);
   sawdust.update(dt);
+  for (const [fx] of Object.values(BURSTS)) fx.update(dt);
 }
 
 // ---------------------------------------------------------------- labels (compare mode)
@@ -704,7 +717,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -758,7 +771,9 @@ labBtn('fiddle tune', () => {
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
+  const k2 = ({ c: 'chop', a: 'pick', f: 'fish' } as const)[e.key.toLowerCase() as 'c'];
   if (k) act(selected, k);
+  if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);
 });
 
