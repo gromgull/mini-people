@@ -11,13 +11,14 @@ import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { randomGenome } from '../genome';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMug, setDry } from './things';
+import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, type Store, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
 import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
-import { Fisher, Innkeeper, type Job, Lumberjack, Miller, Picker, Regular, SERVINGS, type Village, Woodworker } from './jobs';
+import { Fisher, Innkeeper, type Job, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt } from './jobs';
+import { InnTable } from './inn';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -27,7 +28,13 @@ import { Fisher, Innkeeper, type Job, Lumberjack, Miller, Picker, Regular, SERVI
  * kitchen fire burns through it.
  */
 
-const look = lookFromQuery();
+const look = lookFromQuery({ time: 8 });
+// the village keeps its own clock, on simulation time (so fast-forward runs the day faster too)
+look.dayCycle = false;
+/** Real seconds per game hour at ×1 (?daymin: minutes per whole day). */
+const SEC_PER_HOUR = (num('daymin', 12) * 60) / 24;
+/** Evenings run at half speed, so supper has time to be cooked and served. */
+const secPerHour = (h: number) => (h >= SUPPER - 0.5 && h < NIGHT + 0.5 ? 2 : 1) * SEC_PER_HOUR;
 if (q.has('nogui')) document.getElementById('hint')?.remove();
 const stage = new Stage(look);
 const settings: CrowdSettings & { seed: number; paused: boolean; speed: number; panel: boolean } = {
@@ -48,10 +55,13 @@ const crowd = new Crowd(stage, settings);
 
 const SITES: Site[] = [
   { kind: 'cabin', x: -6.5, z: -7, yaw: 0.35 }, // the lumberjack's, by the forest
-  { kind: 'cabin', x: 4.5, z: -6.5, yaw: -0.3 }, // the woodworker's
+  { kind: 'cabin', x: 7.6, z: -7.6, yaw: -0.5 }, // the woodworker's
   { kind: 'cabin', x: 15.5, z: -4, yaw: -0.9 }, // the fisher's, up from the pond
-  { kind: 'inn', x: 1, z: -14, yaw: 0 }, // (the innkeeper lives in)
+  { kind: 'inn', x: 1, z: -14, yaw: 0 }, // (the innkeeper lives in, and the regular has a room)
+  { kind: 'cabin', x: 7.4, z: 9.6, yaw: 2.7 }, // the picker's and the miller's, past the mill
 ];
+/** Which building each person lives in (index into SITES). */
+const HOME: Record<string, number> = { lumberjack: 0, woodworker: 1, fisher: 2, innkeeper: 3, regular: 3, picker: 4, miller: 4 };
 const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, 23, SITES);
 stage.scene.add(houses.group);
 // smoke: the inn's kitchen chimney while its fire has wood, thin wisps from the cabins
@@ -109,13 +119,13 @@ const innKegs = new KegRack(stage, 'inn kegs', 4.9, -11.2, -Math.PI / 2, 3);
 const larder = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
-  return new Crate(stage, 'larder', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw);
+  return new Crate(stage, 'larder', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw, 8);
 })();
 
 const items: Item[] = [];
 let nextItemId = 0;
 function newItem(kind: Item['kind']): Item {
-  const mesh = { wood: () => makePiece(crowd.kit), fish: () => makeFish(stage), apple: () => makeApple(stage), keg: () => makeKeg(stage), mug: () => makeMug(stage) }[kind]();
+  const mesh = { wood: () => makePiece(crowd.kit), fish: () => makeFish(stage), apple: () => makeApple(stage), keg: () => makeKeg(stage), mug: () => makeMug(stage), meal: () => makeMeal(stage) }[kind]();
   stage.scene.add(mesh);
   const it: Item = { id: nextItemId++, kind, place: { at: 'horse' }, mesh, dry: 0 };
   items.push(it);
@@ -166,9 +176,7 @@ stock(mill.hopper, num('apples', 0), 'apple');
 stock(innKegs, num('kegs', 1), 'keg', SERVINGS);
 /** Fish dry on the rack over this many seconds. */
 const DRY_TIME = 120;
-/** The inn's guests eat a fish every so often. */
-const EAT_EVERY = 50;
-let nextMeal = EAT_EVERY;
+
 /** The inn's kitchen fire burns a piece every so often. */
 const BURN_EVERY = 25;
 let nextBurn = BURN_EVERY;
@@ -184,10 +192,17 @@ const pondBench = new Bench(stage, 5.2, 3.6, Math.PI / 2 + 0.25, crowd.actors[RO
 // the inn's table, out front to the right of the door, built to the regular
 // (who sits at its near end facing out, the table in front of them)
 const SEAT = { x: 3.0, z: -10.75, yaw: 0 };
-const table = crowd.actors[ROLES.indexOf('regular')].choreOf('dine').worldFurniture();
-table.group.position.set(SEAT.x, 0, SEAT.z);
-table.group.rotation.y = SEAT.yaw;
-stage.scene.add(table.group);
+const regularDine = crowd.actors[ROLES.indexOf('regular')].choreOf('dine');
+const table = regularDine.worldFurniture();
+// and a second one just like it in front, so everyone fits at supper
+const tables = [
+  new InnTable(stage, table.group, table.dims, SEAT.x, SEAT.z, SEAT.yaw, table.box, 0),
+  (() => {
+    const t2 = regularDine.worldFurniture();
+    return new InnTable(stage, t2.group, t2.dims, SEAT.x - 0.2, SEAT.z + 2.5, SEAT.yaw, t2.box, 4);
+  })(),
+];
+const seats = tables.flatMap((t) => t.seats);
 const fromSeat = (x: number, z: number) => new THREE.Vector3(x, 0, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), SEAT.yaw).add(new THREE.Vector3(SEAT.x, 0, SEAT.z));
 const tankardSpot = (() => {
   const at = fromSeat(table.tankAt.x, table.tankAt.z).setY(table.tankAt.y);
@@ -238,12 +253,15 @@ function placeLogs() {
 // ---------------------------------------------------------------- getting about
 
 // everyone starts the day at their own door (the miller and the picker by the mill, the regular by the inn)
-const doors = houses.buildings.map((b) => b.door);
-const START: Record<Role, THREE.Vector3> = {
-  lumberjack: doors[0], woodworker: doors[1], fisher: doors[2], innkeeper: doors[3],
-  picker: new THREE.Vector3(1.4, 0, 7.4), miller: new THREE.Vector3(3.8, 0, 7.0), regular: doors[3].clone().add(new THREE.Vector3(1.2, 0, 0.6)),
+const doorOf = (i: number) => {
+  const b = houses.buildings[HOME[ROLES[i]]];
+  // (two living in one house come and go side by side)
+  const twin = ROLES.findIndex((r, j) => j < i && HOME[r] === HOME[ROLES[i]]) >= 0 ? 0.45 : 0;
+  const at = b.door.clone().add(new THREE.Vector3(Math.cos(b.yaw), 0, -Math.sin(b.yaw)).multiplyScalar(twin));
+  return { x: at.x, z: at.z, yaw: b.doorFacing };
 };
-const walkers = people.map((_, i) => new Walker(START[ROLES[i]].x, START[ROLES[i]].z, Math.PI * 0.9));
+const homes = people.map((_, i) => doorOf(i));
+const walkers = people.map((_, i) => new Walker(homes[i].x, homes[i].z, homes[i].yaw + Math.PI));
 const houseObstacles: Obstacle[] = houses.buildings.map((b) => ({ kind: 'box', x: b.x, z: b.z, yaw: b.yaw, hx: b.half.x, hz: b.half.z }));
 const pileObstacle: Obstacle = { kind: 'box', x: pile.x, z: pile.z, yaw: pile.yaw, hx: LOG_L / 2 + 0.04, hz: 0.22 };
 const horseObstacle: Obstacle = (() => {
@@ -262,12 +280,9 @@ const pondObstacle: Obstacle = { kind: 'radial', x: pond.x, z: pond.z, r: (dx, d
 const rackObstacle: Obstacle = { kind: 'box', x: rack.x, z: rack.z, yaw: rack.yaw, hx: 0.95, hz: 0.3 };
 const larderObstacle: Obstacle = { kind: 'box', x: larder.x, z: larder.z, yaw: larder.yaw, hx: 0.27, hz: 0.2 };
 const stackObstacles: Obstacle[] = [yard, innStack].map((st) => ({ kind: 'box', x: st.x, z: st.z, yaw: st.yaw, hx: 0.18, hz: 0.28 }));
-const tableObstacle: Obstacle = (() => {
-  const c = fromSeat(table.box.x, table.box.z);
-  return { kind: 'box', x: c.x, z: c.z, yaw: SEAT.yaw, hx: table.box.hx, hz: table.box.hz };
-})();
+const tableObstacle = tables[0].obstacle;
 const millObstacles: Obstacle[] = [
-  tableObstacle,
+  ...tables.map((t) => t.obstacle),
   { kind: 'box', x: mill.x, z: mill.z, yaw: mill.yaw, hx: 0.3, hz: 0.27 },
   ...[millKegs, innKegs].map((k): Obstacle => ({ kind: 'box', x: k.x, z: k.z, yaw: k.yaw, hx: 0.17, hz: 0.25 })),
   ...orchard.trees.map((t): Obstacle => ({ kind: 'circle', x: t.x, z: t.z, r: 0.12 })),
@@ -311,6 +326,30 @@ const village: Village = {
   millKegs,
   innKegs,
   dt: 0,
+  hours: look.time,
+  phase: phaseAt(look.time),
+  tables,
+  seats,
+  hatch: (() => {
+    const b = houses.buildings.find((h) => h.kind === 'inn')!;
+    const p = b.pickup!;
+    const into = new THREE.Vector3(-Math.sin(b.yaw), 0, -Math.cos(b.yaw)); // toward the inn
+    return { stand: { x: p.x, z: p.z, yaw: b.doorFacing }, counter: p.clone().addScaledVector(into, 0.42).setY(0.97) };
+  })(),
+  mealServed: (seat) => {
+    const meal = seat.plate.items[0];
+    if (meal) {
+      seat.plate.items[0] = null;
+      removeItem(meal);
+    }
+    crowd.actors[seat.diner]?.choreOf('dine').serveMeal('fish');
+    seat.state = 'served';
+    village.stats.meals++;
+  },
+  cameHome: (i) => {
+    litUntil[HOME[ROLES[i]]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
+  },
+  everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
   tankardSpot,
   seat: { ...SEAT, via: (() => { const v = fromSeat(-0.85, 0); return { x: v.x, z: v.z }; })(), obstacle: tableObstacle },
   served: () => {
@@ -328,10 +367,10 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, meals: 0, hungry: 0, slept: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
-  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]] };
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], home: homes[i] };
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
   return new J(w);
 });
@@ -339,10 +378,14 @@ const jobs: Job[] = people.map((p, i) => {
 // ---------------------------------------------------------------- loop
 
 let simTime = 0;
+/** Lamps: each house's are lit until then (simulation seconds). */
+const litUntil = houses.buildings.map(() => 0);
 function simulate(dt: number) {
   simTime += dt;
   village.time = simTime;
   village.dt = dt;
+  village.hours = look.time = (village.hours + dt / secPerHour(village.hours)) % 24;
+  village.phase = phaseAt(village.hours);
   crowd.beginStep(simTime, null, -1);
   const obs = obstacles();
   people.forEach((p, i) => {
@@ -365,6 +408,8 @@ function simulate(dt: number) {
   crowd.endStep(dt);
   forest.update(simTime);
   orchard.update(simTime);
+  // (the kitchen fire's banked while the inn's shut for the night)
+  if (simTime >= nextBurn && jobs[ROLES.indexOf('innkeeper')].asleep) nextBurn = simTime + BURN_EVERY;
   if (simTime >= nextBurn) {
     nextBurn += BURN_EVERY;
     const top = innStack.top(1)[0];
@@ -383,19 +428,18 @@ function simulate(dt: number) {
       village.stats.dried++;
     }
   }
-  if (simTime >= nextMeal) {
-    nextMeal += EAT_EVERY;
-    const top = larder.top(1)[0];
-    if (top !== undefined && larder.available > 0) {
-      removeItem(larder.items[top]!);
-      larder.items[top] = null;
-      village.stats.eaten++;
-    }
-  }
   placeLogs();
   placeItems();
+  // lamps: lit for a while when someone gets home after dark; the inn's while it's open
+  const dark = village.hours >= 17.5 || village.hours < 6.5;
+  const innOpen = !jobs[ROLES.indexOf('innkeeper')].asleep || seats.some((st) => st.state !== 'free');
+  if (dark && innOpen) litUntil[HOME.innkeeper] = Math.max(litUntil[HOME.innkeeper], simTime + 0.75 * secPerHour(village.hours));
+  litUntil.forEach((until, i) => {
+    const on = dark && until > simTime;
+    if (houses.isLit(i) !== on) houses.setLit(i, on);
+  });
   // the kitchen fire smokes while there's firewood to burn
-  if (innChimney) innChimney.rate = innStack.count > 0 ? 1.8 : 0.15;
+  if (innChimney) innChimney.rate = jobs[ROLES.indexOf('innkeeper')].asleep ? 0.12 : innStack.count > 0 ? 1.8 : 0.15;
   smoke.update(dt, stage.toon.uniforms.uTint.value);
 }
 
@@ -417,7 +461,7 @@ const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60))
 function updatePanel() {
   panel.style.display = settings.panel ? '' : 'none';
   if (!settings.panel) return;
-  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${ROLES[i].padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : j.armful.length ? ` (an armful of ${j.armful[0].kind === 'fish' ? 'fish' : 'firewood'})` : ''}`);
+  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${ROLES[i].padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : j.armful.length ? ` (${{ wood: 'an armful of firewood', fish: 'an armful of fish', apple: 'apples', keg: 'a keg', mug: 'a tankard of cider', meal: 'a plate of supper' }[j.armful[0].kind]})` : ''}`);
   const loose = logs.filter((l) => l.place.at === 'ground').length;
   const standing = forest.trees.filter((t) => t.state === 'standing').length;
   panel.textContent = [
@@ -425,9 +469,9 @@ function updatePanel() {
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
-    `fish: caught ${village.stats.caught} · rack ${rack.count}/${rack.slots.length} (${rack.items.filter((it) => it && it.dry >= 1).length} dry) · larder ${larder.count}/${larder.slots.length}${larder.incoming ? ` (+${larder.incoming} coming)` : ''} · eaten ${village.stats.eaten}`,
+    `fish: caught ${village.stats.caught} · rack ${rack.count}/${rack.slots.length} (${rack.items.filter((it) => it && it.dry >= 1).length} dry) · larder ${larder.count}/${larder.slots.length}${larder.incoming ? ` (+${larder.incoming} coming)` : ''} · suppers served ${village.stats.meals}`,
     `cider: picked ${village.stats.picked} · basket ${basket.count}/5 · hopper ${mill.hopper.count}/${mill.hopper.slots.length} · kegs made ${village.stats.kegs} · at the mill ${millKegs.count} · at the inn ${innKegs.count} (${innKegs.items.reduce((n, k) => n + (k ? k.dry : 0), 0)} tankards) · poured ${village.stats.poured} · sips ${village.stats.drunk}`,
-    `time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
+    `${String(Math.floor(village.hours)).padStart(2, '0')}:${String(Math.floor((village.hours % 1) * 60)).padStart(2, '0')} ${{ work: 'working', supper: 'supper at the inn', night: 'night' }[village.phase]} · meals ${village.stats.meals} · time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
   ].join('\n');
 }
 
@@ -436,8 +480,7 @@ if (q.has('nogui')) gui.hide();
 gui.add(settings, 'speed', { '×1': 1, '×4': 4, '×16': 16 }).name('speed');
 gui.add(settings, 'paused');
 gui.add(settings, 'panel').name("who's doing what");
-gui.add(look, 'time', 0, 24, 0.05).name('time of day (h)').decimals(2).listen();
-gui.add(look, 'dayCycle').name('day runs');
+gui.add(look, 'time', 0, 24, 0.05).name('time of day (h)').decimals(2).listen().onChange((h: number) => (village.hours = h));
 gui.add(look, 'stats').name('show fps');
 gui.add({ none: () => (follow = -1) }, 'none').name('stop following');
 

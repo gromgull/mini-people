@@ -3,6 +3,7 @@ import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
 import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, type Store, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
+import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
 import type { ItemPose } from '../armful';
 import { PIECE_L, PIECE_R } from '../firewood';
@@ -35,7 +36,7 @@ export const ARMFUL = 4;
 /** Fish caught before taking them to the rack. */
 export const CATCH = 3;
 /** The inn's larder wants at least this many dried fish. */
-export const LARDER_WANT = 4;
+export const LARDER_WANT = 8;
 /** Apples in a basketful. */
 export const BASKET = 5;
 /** Apples the mill turns into a keg. */
@@ -44,6 +45,12 @@ export const MILL_BATCH = 12;
 export const SERVINGS = 8;
 /** The inn wants this many kegs on hand. */
 export const INN_KEGS = 2;
+/** The day: work from WAKE, supper at the inn from SUPPER, everyone home by NIGHT (hours). */
+export const WAKE = 6.5;
+export const SUPPER = 17;
+export const NIGHT = 21.5;
+export type Phase = 'work' | 'supper' | 'night';
+export const phaseAt = (h: number): Phase => (h >= WAKE && h < SUPPER ? 'work' : h >= SUPPER && h < NIGHT ? 'supper' : 'night');
 
 export interface Village {
   forest: Forest;
@@ -79,12 +86,31 @@ export interface Village {
   wantsRefill(): boolean;
   /** This simulation step's length. */
   dt: number;
+  /** The time of day (hours) and what that means for everyone. */
+  hours: number;
+  phase: Phase;
+  /** The inn's tables and their seats. */
+  tables: InnTable[];
+  seats: Seat[];
+  /** The kitchen hatch: where the innkeeper stands to cook, and the counter. */
+  hatch: { stand: { x: number; z: number; yaw: number }; counter: THREE.Vector3 };
+  /** A plate of supper has just been put down at this seat. */
+  mealServed(seat: Seat): void;
+  /** Someone's just got home (their lamps go on for a while). */
+  cameHome(i: number): void;
+  /** Everyone (but the innkeeper) has had supper or gone to bed. */
+  everyoneFed(): boolean;
+  /** Bookkeeping for the overlay and the tests. */
+  stats: {
+    felled: number; sawn: number; delivered: number; burned: number;
+    caught: number; dried: number; fishIn: number; eaten: number;
+    picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
+    meals: number; hungry: number; slept: number;
+  };
   /** Every item (firewood, fish, apples, kegs, tankards). */
   items: Item[];
   newItem(kind: Item['kind']): Item;
   removeItem(it: Item): void;
-  /** Bookkeeping for the overlay and the tests. */
-  stats: { felled: number; sawn: number; delivered: number; burned: number; caught: number; dried: number; fishIn: number; eaten: number; picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number };
 }
 
 export interface Worker {
@@ -94,12 +120,16 @@ export interface Worker {
   root: THREE.Object3D;
   /** What they play when they've time on their hands. */
   instrument: 'fiddle' | 'banjo' | null;
+  /** Their own front door (where they go in at night and come out in the morning). */
+  home: { x: number; z: number; yaw: number };
 }
 
 /** Steps that aren't work: sitting about and playing. */
 const LEISURE = new Set(['to bench', 'sitting', 'playing', 'getting up']);
 /** Steps of moving an armful from one place to a stack. */
 const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
+/** Steps of the evening: supper at the inn, home, sleep. */
+const EVENING = new Set(['to supper', 'waiting for supper', 'eating', 'leaving the table', 'going home']);
 
 type Step = { kind: string; [k: string]: unknown };
 
@@ -137,8 +167,24 @@ export abstract class Job {
     return this.step.kind;
   }
 
+  /** Asleep at home (hidden indoors). */
+  asleep = false;
+  /** Had supper today. */
+  ateToday = false;
+  protected seat: Seat | null = null;
+
   /** Called every simulation step, before walking. */
   tick(v: Village) {
+    if (this.asleep) {
+      if (v.phase === 'work') this.wake();
+      return;
+    }
+    if (EVENING.has(this.step.kind)) {
+      this.eveningStep(v);
+      return;
+    }
+    // evening: supper (if not had it), else home; started between tasks
+    if (this.step.kind === 'idle' && v.phase !== 'work' && this.eveningStarts(v)) return;
     if (LEISURE.has(this.step.kind)) this.leisureStep(v);
     else if (DELIVERY.has(this.step.kind)) this.deliveryStep(v);
     else this.run(v);
@@ -245,11 +291,114 @@ export abstract class Job {
           v.served();
           return;
         }
+        const plateOf = v.seats.find((st) => st.plate === to);
+        if (plateOf) {
+          this.armful = [];
+          this.step = { kind: 'idle' };
+          v.mealServed(plateOf);
+          return;
+        }
         this.armful = [];
         this.step = { kind: 'idle' };
         return;
       }
     }
+  }
+
+  // ------------------------------------------------------------ evenings
+
+  /** Head for supper or home, if it's time; returns whether they did. */
+  protected eveningStarts(v: Village) {
+    if (v.phase === 'supper' && !this.ateToday) {
+      const me = this.w.walker;
+      const free = v.seats.filter((s) => s.state === 'free');
+      if (free.length) {
+        const seat = free.reduce((b, s) => (s.table.world(s.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) < b.table.world(b.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) ? s : b));
+        seat.state = 'claimed';
+        seat.diner = this.w.i;
+        this.seat = seat;
+        const at = seat.table.sitFor(seat, this.w.actor);
+        this.w.walker.go({ x: at.x, z: at.z, yaw: at.yaw, ignore: seat.table.obstacle, via: at.via });
+        this.step = { kind: 'to supper', table: at.table };
+        return true;
+      }
+    }
+    this.goHome();
+    return true;
+  }
+
+  protected goHome() {
+    const h = this.w.home;
+    this.w.actor.stop();
+    this.go(h.x, h.z, h.yaw);
+    this.step = { kind: 'going home' };
+  }
+
+  /** Sat down at a seat (supper or not): make the plate's spot fit them. */
+  protected seated(seat: Seat) {
+    const d = this.w.actor.choreOf('dine');
+    const at = d.boardWorld();
+    seat.plate.set(at, seat.table.yaw, seat.table.serveFrom(at));
+    seat.state = 'seated';
+  }
+
+  private eveningStep(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const seat = this.seat;
+    switch (s.kind) {
+      case 'to supper': {
+        if (!this.arrived) return;
+        a.start('dine', { atTable: s.table as { top: number; edge: number; h: number } });
+        this.seated(seat!);
+        this.step = { kind: 'waiting for supper' };
+        return;
+      }
+      case 'waiting for supper':
+      case 'eating': {
+        const d = a.choreOf('dine');
+        if (seat!.state === 'served') this.step = { kind: 'eating' };
+        const late = v.phase === 'night' && seat!.state !== 'served';
+        if (d.ate > 0 || late || !a.busy) {
+          if (d.ate > 0) {
+            this.ateToday = true;
+          } else if (late) v.stats.hungry++;
+          d.leave();
+          seat!.state = 'done';
+          this.step = { kind: 'leaving the table' };
+        }
+        return;
+      }
+      case 'leaving the table': {
+        if (a.busy) return;
+        if (seat) {
+          seat.state = 'free';
+          seat.diner = -1;
+          this.seat = null;
+        }
+        this.goHome();
+        return;
+      }
+      case 'going home': {
+        if (!this.arrived) return;
+        // in they go
+        this.asleep = true;
+        this.w.root.visible = false;
+        v.cameHome(this.w.i);
+        v.stats.slept++;
+        this.step = { kind: 'asleep' };
+        return;
+      }
+    }
+  }
+
+  /** Morning: out of the door, a new day. */
+  protected wake() {
+    this.asleep = false;
+    this.ateToday = false;
+    this.w.root.visible = true;
+    this.step = { kind: 'idle' };
+    this.waitUntil = 0;
   }
 
   // ------------------------------------------------------------ time on their hands
@@ -264,7 +413,7 @@ export abstract class Job {
    * something. Any of it stops as soon as there's work.
    */
   protected leisure(v: Village) {
-    if (v.time < this.restAfter) return false;
+    if (v.time < this.restAfter || v.phase !== 'work') return false;
     this.restAfter = v.time + 5 + Math.random() * 6;
     const r = Math.random();
     const me = this.w.walker;
@@ -296,7 +445,7 @@ export abstract class Job {
     const s = this.step;
     const a = this.w.actor;
     const bench = (s.bench as { bench: Bench } | undefined)?.bench;
-    const work = this.hasWork(v);
+    const work = this.hasWork(v) || v.phase !== 'work'; // (and supper is work, of a kind)
     switch (s.kind) {
       case 'to bench':
         if (work) {
@@ -799,10 +948,58 @@ export class Innkeeper extends Job {
     return this.refill(v) || this.larderWants(v) > 0 || this.kegsWanted(v) > 0;
   }
 
+  /** The innkeeper doesn't sit down to supper: they cook it, then go to bed once everyone's fed. */
+  protected eveningStarts(v: Village) {
+    if (v.phase === 'night' || (v.hours >= SUPPER + 1 && v.everyoneFed() && !this.seatWaiting(v))) {
+      this.ateToday = true; // (a bite in the kitchen)
+      this.goHome();
+      return true;
+    }
+    return false;
+  }
+
+  /** Someone sat down to supper who's not been served (and nobody's cooking for). */
+  private seatWaiting(v: Village) {
+    return v.seats.find((st) => st.state === 'seated' && st.plate.incoming === 0 && st.plate.count === 0) ?? null;
+  }
+
   protected run(v: Village) {
     const s = this.step;
     const a = this.w.actor;
     switch (s.kind) {
+      case 'to the hatch': {
+        if (!this.arrived) return;
+        const seat = s.seat as Seat;
+        const slot = v.larder.top(1)[0];
+        if (slot === undefined) {
+          // no fish after all
+          seat.plate.incoming = 0;
+          this.step = { kind: 'idle' };
+          return;
+        }
+        v.removeItem(v.larder.items[slot]!);
+        v.larder.items[slot] = null;
+        // cook it: hands busy at the counter a while
+        const c = v.hatch.counter;
+        const side = new THREE.Vector3(Math.cos(v.hatch.stand.yaw), 0, -Math.sin(v.hatch.stand.yaw)).multiplyScalar(0.12);
+        a.start('hold', { hold: { right: () => c.clone().sub(side), left: () => c.clone().add(side), lean: 0.2, bob: () => 0.02 * Math.sin(v.time * 9) } });
+        this.step = { kind: 'cooking', seat, until: v.time + 3 };
+        return;
+      }
+      case 'cooking': {
+        if (v.time < (s.until as number)) return;
+        if (a.kind === 'hold') {
+          a.choreOf('hold').release();
+          return;
+        }
+        if (a.busy) return;
+        const meal = v.newItem('meal');
+        const pos = v.hatch.counter.clone().setY(v.hatch.counter.y + 0.02);
+        const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), v.hatch.stand.yaw);
+        meal.place = { at: 'ground', pos, quat };
+        this.gather([meal], [{ pos, quat }], (s.seat as Seat).plate);
+        return;
+      }
       case 'to the kegs': {
         if (!this.arrived) return;
         // draw a tankard from the top keg: hands at its tap a moment
@@ -845,6 +1042,17 @@ export class Innkeeper extends Job {
       }
     }
     if (s.kind !== 'idle' || v.time < this.waitUntil) return;
+    // supper: cook for whoever's sat down, one plate at a time
+    if (v.phase !== 'work') {
+      const seat = this.seatWaiting(v);
+      if (seat && v.larder.available > 0) {
+        seat.plate.incoming += 1;
+        const at = v.hatch.stand;
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to the hatch', seat };
+        return;
+      }
+    }
     if (this.refill(v)) {
       v.tankardSpot.incoming += 1;
       const at = v.innKegs.workSpot();
@@ -1205,6 +1413,9 @@ export class Regular extends Job {
       case 'to the table': {
         if (!this.arrived) return;
         a.start('dine', { atTable: true });
+        const seat = v.seats[0]; // (theirs: the table was built to them)
+        seat.state = 'claimed';
+        seat.diner = this.w.i;
         this.nextSip = v.time + 4;
         this.step = { kind: 'waiting for a refill' };
         return;
@@ -1216,6 +1427,13 @@ export class Regular extends Job {
           return;
         }
         const d = a.choreOf('dine');
+        if (v.phase !== 'work' && !this.ateToday) {
+          // supper time: they're already sat at their place
+          this.seat = v.seats[0];
+          this.seated(this.seat);
+          this.step = { kind: 'waiting for supper' };
+          return;
+        }
         this.step = { kind: d.needsRefill ? 'waiting for a refill' : 'drinking cider' };
         if (!d.needsRefill && !d.drinking && v.time >= this.nextSip) {
           a.start('drink');

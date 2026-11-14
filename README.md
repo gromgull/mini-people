@@ -174,11 +174,20 @@ So far it has one chain:
 - **The miller** turns the mill's crank once the hopper holds twelve apples;
   the apples go down one by one, and a keg of cider stands full under the
   spout, which they carry to the keg rack.
-- **The innkeeper** also fetches kegs to the inn, and serves: when the
+- **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
   to the table.
 - **The regular** has no job. They sit at the inn's table (built to them),
   sip cider every so often, and wait when the tankard's empty.
+- **The day:** the village keeps its own clock on simulation time (a day is
+  12 real minutes at ×1, `?daymin=` to change it; the evening runs at half
+  speed). Work runs from 06:30. At 17:00 everyone finishes what they're doing
+  and goes to the inn for supper. There are two tables, eight places, and
+  each diner sits to the real table at their own size. The innkeeper cooks
+  dried fish from the larder at the kitchen hatch and brings the plates out
+  one by one. Having eaten, people walk home and go in; their lamps glow for
+  an hour and a half. By 21:30 everyone's in (hungry, if supper didn't
+  reach them). At 06:30 they come out again.
 - **Smoke** rises from the inn's chimney while its fire has firewood, and
   thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
@@ -255,7 +264,7 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the basket, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
+| `src/village/` | the village: `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the basket, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/smoke.ts` | chimney smoke |

@@ -80,6 +80,10 @@ export class Dine implements Chore {
    */
   private world = false;
   private stay = false;
+  /** At a real table someone else's size: its top height, its edge (ahead of their feet) and the bench height. */
+  private realTable: { top: number; edge: number; h: number } | null = null;
+  /** Meals eaten since sitting down. */
+  ate = 0;
   private queue: Course[] = [];
   private cur: { kind: Course; t0: number; dur: number } | null = null;
   private tau = 0;
@@ -150,8 +154,9 @@ export class Dine implements Chore {
   }
 
   /** What they sat down for (set before start). */
-  plan(ask: DineAsk, opts: { world?: boolean } = {}) {
-    this.world = !!opts.world;
+  plan(ask: DineAsk, opts: { world?: boolean; table?: { top: number; edge: number; h: number } | null } = {}) {
+    this.world = !!opts.world || !!opts.table;
+    this.realTable = opts.table ?? null;
     this.stay = this.world;
     this.ask = ask;
   }
@@ -167,9 +172,11 @@ export class Dine implements Chore {
     return true;
   }
 
-  /** Get up and go (after whatever course is on). */
+  /** Get up and go (after whatever course is on; no more sitting about). */
   leave() {
     this.stay = false;
+    this.queue = this.queue.filter((k) => k !== 'rest');
+    if (this.cur?.kind === 'rest') this.cur.dur = Math.min(this.cur.dur, this.tau + 0.05);
   }
 
   /** The tankard's empty (or there isn't one yet). */
@@ -188,6 +195,20 @@ export class Dine implements Chore {
     this.level = 1;
   }
 
+  /** A plate set down in front of them: eat it next. */
+  serveMeal(kind: 'fish' | 'apple') {
+    this.boardOn = 1;
+    this.onBoard = kind;
+    if (this.queue[0] !== kind) this.queue.unshift(kind);
+    if (this.cur?.kind === 'rest') this.cur.dur = Math.min(this.cur.dur, this.tau + 0.05);
+  }
+
+  /** Where the plate goes (world), once seated. */
+  boardWorld() {
+    this.p.root.updateMatrixWorld(true);
+    return this.p.root.localToWorld(this.boardAt.clone());
+  }
+
   /**
    * For a real table: the fit for this person (as start() will make it at a
    * real table), and the table and both benches built to it, in their seated
@@ -204,7 +225,14 @@ export class Dine implements Chore {
     const G = this.g, H = this.p.dims.height;
     const L = 2 * 0.44 * H + 0.16 * H;
     const nearZ = n.position.z;
-    return { group, tankAt: this.tankAt.clone(), side: G.side, box: { x: t.position.x, z: (nearZ + G.farZ) / 2, hx: L / 2 + 0.02, hz: (G.farZ - nearZ) / 2 + 0.12 } };
+    return {
+      group,
+      tankAt: this.tankAt.clone(),
+      side: G.side,
+      box: { x: t.position.x, z: (nearZ + G.farZ) / 2, hx: L / 2 + 0.02, hz: (G.farZ - nearZ) / 2 + 0.12 },
+      /** The table in its own frame: top height, near edge (z), depth, bench height, bench middles (z), seat spacing, middle (x), length. */
+      dims: { top: G.top, edge: G.edge, W: 0.6 * H, h: G.h, nearZ, farZ: G.farZ, seatW: 0.44 * H, cx: t.position.x, L },
+    };
   }
 
   private courseFor(ask: DineAsk): Course {
@@ -226,6 +254,7 @@ export class Dine implements Chore {
     this.shift = this.scooted = 0;
     this.boardOn = this.tankOn = 0;
     this.level = this.world ? 0 : 1;
+    this.ate = 0;
     this.onBoard = null;
     this.pop = 0;
     for (const o of [this.table, this.farBench, this.nearBench]) {
@@ -260,6 +289,13 @@ export class Dine implements Chore {
       G.edge = front + 0.03 * H;
       G.S = 0;
       G.side = 1;
+      if (this.realTable) {
+        // someone else's table: sit to its bench and reach to its top
+        G.h = this.realTable.h;
+        G.crouch = (standY - (G.h + d.hipBelow * 0.9)) / d.legLen;
+        G.top = this.realTable.top;
+        G.edge = this.realTable.edge;
+      }
     } else G.side = Math.random() < 0.5 ? 1 : -1; // which end of the bench they take
 
     // where things go on the table: the board in front, the tankard to the right
@@ -341,7 +377,10 @@ export class Dine implements Chore {
 
     // what's on: next course, or time to go
     if (this.leaveAt === Infinity && t >= seatedAt) {
-      if (this.cur && t - this.cur.t0 >= this.cur.dur) this.cur = null;
+      if (this.cur && t - this.cur.t0 >= this.cur.dur) {
+        if (this.cur.kind === 'apple' || this.cur.kind === 'fish') this.ate++;
+        this.cur = null;
+      }
       if (!this.cur) {
         const k = this.queue.shift();
         if (k) {

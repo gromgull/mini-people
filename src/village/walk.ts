@@ -22,6 +22,8 @@ export interface Goal {
   ignore?: Obstacle | null;
   /** Go here first (not ignoring anything), then step in to the goal: for spots tucked up against what you're working on. */
   via?: { x: number; z: number } | null;
+  /** (the via is a detour round something we got stuck on) */
+  detour?: boolean;
 }
 
 const TURN_RATE = 3.2; // rad/s
@@ -82,6 +84,7 @@ export class Walker {
   private best = Infinity;
   private bestAt = 0;
   private clock = 0;
+  private detours = 0;
 
   constructor(public x: number, public z: number, public yaw: number) {}
 
@@ -102,8 +105,9 @@ export class Walker {
     const g = this.goal;
     this.clock += dt;
     if (!g) return 0;
-    if (g.via && Math.hypot(g.via.x - this.x, g.via.z - this.z) < 0.15) {
+    if (g.via && (Math.hypot(g.via.x - this.x, g.via.z - this.z) < 0.15 || (g.detour && this.clock - this.bestAt > 2.5))) {
       g.via = null;
+      g.detour = false;
       this.best = Infinity;
       this.bestAt = this.clock;
     }
@@ -117,8 +121,17 @@ export class Walker {
     }
     // blocked just short of it (the spot is up against something): stop
     // trying to get closer, and settle where we are
-    if (g.via && this.clock - this.bestAt > 2) g.via = null; // can't get to the approach point: just go in
-    else if (dist >= ARRIVE && dist < 0.7 && this.clock - this.bestAt > 2) {
+    if (g.via && !g.detour && this.clock - this.bestAt > 2) g.via = null; // can't get to the approach point: just go in
+    else if (dist >= 0.7 && this.clock - this.bestAt > 3) {
+      // stuck in a pocket on a long walk: step well off to one side (alternating), then try again
+      this.detours++;
+      const side = this.detours % 2 ? 1 : -1;
+      const ux = (tx - this.x) / dist, uz = (tz - this.z) / dist;
+      g.via = { x: this.x - uz * side * 1.6 - ux * 0.4, z: this.z + ux * side * 1.6 - uz * 0.4 };
+      g.detour = true;
+      this.best = Infinity;
+      this.bestAt = this.clock;
+    } else if (dist >= ARRIVE && dist < 0.7 && this.clock - this.bestAt > 2) {
       g.x = this.x;
       g.z = this.z;
       dx = dz = 0;
@@ -145,8 +158,10 @@ export class Walker {
     // obstacles across the path: bend toward whichever side clears them
     let sx = 0, sz = 0;
     const look = Math.min(AHEAD, dist);
+    // (the thing they're stepping up to is only ignored for the last bit)
+    const ignoring = !g.via && dist < 0.8 ? g.ignore : null;
     for (const o of obstacles) {
-      if (o === g.ignore && !g.via) continue;
+      if (o === ignoring) continue;
       const cx = o.x - this.x, cz = o.z - this.z;
       const along = cx * dx + cz * dz;
       const size = o.kind === 'circle' ? o.r : o.kind === 'radial' ? o.maxR : Math.max(o.hx, o.hz);
@@ -189,8 +204,10 @@ export class Walker {
       this.x += Math.sin(this.yaw) * speed * dt;
       this.z += Math.cos(this.yaw) * speed * dt;
     }
+    const g = this.goal;
+    const ignoring = g && !g.via && Math.hypot(g.x - this.x, g.z - this.z) < 0.8 ? g.ignore : null;
     for (const o of obstacles) {
-      if (o === this.goal?.ignore && !this.goal.via) continue;
+      if (o === ignoring) continue;
       const n = nearest(o, this.x, this.z);
       if (n.gap < BODY) {
         this.x += n.nx * (BODY - n.gap);

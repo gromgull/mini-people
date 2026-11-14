@@ -379,6 +379,11 @@ export const DEMO_SITES: Site[] = [
 export class Houses {
   readonly group = new THREE.Group();
   readonly buildings: Building[] = [];
+  /** Each building's window panes (same order as buildings). */
+  readonly windows: THREE.Mesh[] = [];
+  private toonMat: THREE.Material;
+  /** Lamplight: unlit, so it glows at night. */
+  private static lamp = new THREE.MeshBasicMaterial({ color: '#ffcf6a' });
   private shadows: { hull: THREE.Vector3[] }[] = [];
   private shadowGeo = new THREE.BufferGeometry();
   private lastLight = new THREE.Vector3(NaN, 0, 0);
@@ -387,7 +392,7 @@ export class Houses {
   constructor(toon: THREE.Material, outline: THREE.Material, shadowMat: THREE.Material, seed = 23, sites = DEMO_SITES) {
     const r = mulberry32(seed);
     const all: Part[] = [];
-    const panes: Part[] = [];
+    const paneSets: Part[][] = [];
     for (const s of sites) {
       const b = s.kind === 'inn' ? inn(r) : cabin(r);
       // face the village middle, give or take (unless told which way)
@@ -396,7 +401,7 @@ export class Houses {
       place(b.parts, s.x, s.z, yaw);
       place(b.panes, s.x, s.z, yaw);
       all.push(...b.parts);
-      panes.push(...b.panes);
+      paneSets.push(b.panes);
       const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(s.x, 0, s.z);
       this.shadows.push({ hull: b.hull.map((p) => p.clone().applyMatrix4(m)) });
       const toWorld = (p: { x: number; z: number }) => v(p.x, 0, p.z).applyMatrix4(m);
@@ -405,15 +410,32 @@ export class Houses {
     const { flat, smooth } = bake(all);
     const mesh = new THREE.Mesh(flat, toon);
     const hull = new THREE.Mesh(smooth, outline);
-    const glass = new THREE.Mesh(bake(panes).flat, toon);
-    for (const m of [mesh, hull, glass]) m.raycast = () => {};
-    this.group.add(mesh, hull, glass);
+    for (const m of [mesh, hull]) m.raycast = () => {};
+    this.group.add(mesh, hull);
+    // each building's window panes on their own, so they can light up
+    this.toonMat = toon;
+    for (const set of paneSets) {
+      const glass = new THREE.Mesh(bake(set).flat, toon);
+      glass.raycast = () => {};
+      this.windows.push(glass);
+      this.group.add(glass);
+    }
     // shadows: one dynamic mesh for all of them, rebuilt when the sun moves
     const sh = new THREE.Mesh(this.shadowGeo, shadowMat);
     sh.position.y = 0.002;
     sh.raycast = () => {};
     sh.frustumCulled = false;
     this.group.add(sh);
+  }
+
+  /** Light (or put out) the lamps behind building i's windows. */
+  setLit(i: number, on: boolean) {
+    const w = this.windows[i];
+    if (w) w.material = on ? Houses.lamp : this.toonMat;
+  }
+
+  isLit(i: number) {
+    return this.windows[i]?.material === Houses.lamp;
   }
 
   /**

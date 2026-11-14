@@ -201,7 +201,7 @@ export type ItemPlace =
 
 export interface Item {
   id: number;
-  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug';
+  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal';
   place: ItemPlace;
   mesh: THREE.Object3D;
   /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
@@ -435,6 +435,15 @@ export function makeMug(stage: Stage) {
   ]), stage);
 }
 
+/** Supper: a cooked fish on a pewter plate (item mesh). */
+export function makeMeal(stage: Stage) {
+  return outlined(bake([
+    { geo: new THREE.CylinderGeometry(0.1, 0.09, 0.014, 12).scale(1.45, 1, 1).translate(0, 0.007, 0), row: ROWS.stone[1] },
+    { geo: new THREE.SphereGeometry(1, 8, 6).scale(0.1, 0.03, 0.036).translate(0.01, 0.034, 0), row: ROWS.food[2] },
+    { geo: new THREE.ConeGeometry(0.04, 0.06, 4).rotateZ(Math.PI / 2).scale(1, 1, 0.3).translate(-0.12, 0.034, 0), row: ROWS.stockfish[1] },
+  ]), stage);
+}
+
 /**
  * A wicker basket for apples: a store that moves (it's carried about in an
  * armful), five apples inside. Its group is the basket itself.
@@ -586,6 +595,14 @@ export class Spot extends Store {
 
   workSpot() {
     return this.stand;
+  }
+
+  /** Move it (a plate's spot follows whoever's sitting there). */
+  set(at: THREE.Vector3, yaw: number, stand: { x: number; z: number; yaw: number }) {
+    this.group.position.set(at.x, 0, at.z);
+    this.group.rotation.y = yaw;
+    this.slots[0].pos.set(0, at.y, 0);
+    this.stand = stand;
   }
 }
 

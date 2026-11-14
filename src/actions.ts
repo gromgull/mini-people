@@ -218,7 +218,7 @@ export class Actor {
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
       /** Dining: at a real table (built from this person's worldFurniture()), staying till told to leave. */
-      atTable?: boolean;
+      atTable?: boolean | { top: number; edge: number; h: number };
       /** Hold: where the hands go each frame. */
       hold?: HoldPlan;
       /** Armful: the things to gather (their meshes) and where each lies. */
@@ -293,7 +293,7 @@ export class Actor {
     if (isDine(kind)) {
       // one table for all three: it's the same sitting down, just a different meal
       const d = (this.chores.dine ??= new Dine(this.p, this.kit)) as Dine;
-      d.plan(kind, { world: opts.atTable });
+      d.plan(kind, { world: !!opts.atTable, table: typeof opts.atTable === 'object' ? opts.atTable : null });
       this.chore = d;
       d.start();
     }
