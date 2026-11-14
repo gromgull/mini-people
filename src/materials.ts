@@ -42,7 +42,8 @@ const FOG_GLSL = /* glsl */ `
 /**
  * Rigid skinning for merged characters (see skin.ts): every vertex belongs to
  * exactly one part, and the part's matrix (relative to the character root)
- * comes from a uniform array. Without SKINNED this is a no-op.
+ * comes from a uniform array. Without SKINNED this is a no-op. Instanced
+ * meshes get their instance matrix applied on top.
  */
 export const MAX_BONES = 48;
 const SKIN_GLSL = /* glsl */ `
@@ -50,11 +51,19 @@ const SKIN_GLSL = /* glsl */ `
   attribute float aBone;
   attribute float aEdge;
   uniform mat4 uBones[MAX_BONES];
-  vec3 skinPos() { return (uBones[int(aBone + 0.5)] * vec4(position, 1.0)).xyz; }
-  vec3 skinNormal() { return mat3(uBones[int(aBone + 0.5)]) * normal; }
+  vec3 skinPos0() { return (uBones[int(aBone + 0.5)] * vec4(position, 1.0)).xyz; }
+  vec3 skinNormal0() { return mat3(uBones[int(aBone + 0.5)]) * normal; }
   #else
-  vec3 skinPos() { return position; }
-  vec3 skinNormal() { return normal; }
+  vec3 skinPos0() { return position; }
+  vec3 skinNormal0() { return normal; }
+  #endif
+  // instanced meshes (forest trees, stumps): three supplies instanceMatrix
+  #ifdef USE_INSTANCING
+  vec3 skinPos() { return (instanceMatrix * vec4(skinPos0(), 1.0)).xyz; }
+  vec3 skinNormal() { return mat3(instanceMatrix) * skinNormal0(); }
+  #else
+  vec3 skinPos() { return skinPos0(); }
+  vec3 skinNormal() { return skinNormal0(); }
   #endif
 `;
 

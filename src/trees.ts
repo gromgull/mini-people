@@ -58,6 +58,59 @@ function pine(r: () => number): { parts: Part[]; h: number; rad: number } {
   return { parts, h: y + tiers[2].h * s * 0.45, rad: tiers[0].rad * s };
 }
 
+/**
+ * A pine described by numbers, so the same tree can be drawn standing (the
+ * village forest), cut at any height (the stump), and rebuilt above the cut
+ * (the part that falls when someone chops it down).
+ */
+export interface PineSpec {
+  rt: number; // trunk radius at the bottom
+  trunkTop: number; // where the bare trunk ends and the boughs begin
+  tiers: { rad: number; h: number; rot: number }[]; // cones, bottom up
+  bark: number;
+  needles: number;
+}
+
+/** A village pine: tall bare trunk (boughs above head height), three cone tiers. */
+export function villagePine(r: () => number, k = 1): PineSpec {
+  return {
+    rt: 0.065 * k,
+    trunkTop: 1.05 * k,
+    tiers: [
+      { rad: 0.7 * k, h: 0.95 * k, rot: r() * Math.PI },
+      { rad: 0.54 * k, h: 0.8 * k, rot: r() * Math.PI },
+      { rad: 0.36 * k, h: 0.7 * k, rot: r() * Math.PI },
+    ],
+    bark: pick(r, ROWS.bark),
+    needles: pick(r, ROWS.pine),
+  };
+}
+
+export const scaleSpec = (s: PineSpec, k: number): PineSpec => ({ ...s, rt: s.rt * k, trunkTop: s.trunkTop * k, tiers: s.tiers.map((t) => ({ ...t, rad: t.rad * k, h: t.h * k })) });
+
+/** Overall height of a pine. */
+export const pineHeight = (s: PineSpec) => s.tiers.reduce((y, t, i) => (i < s.tiers.length - 1 ? y + t.h * 0.55 : y + t.h), s.trunkTop);
+
+/** Everything above height `from` (0 = the whole tree), with `from` at y = 0. */
+export function pineParts(s: PineSpec, from = 0): Part[] {
+  const len = s.trunkTop - from + s.tiers[0].h * 0.3; // the trunk runs on up into the boughs
+  const rBot = s.rt * (1.1 - (0.15 * from) / Math.max(1e-3, s.trunkTop));
+  const parts: Part[] = [{ geo: new THREE.CylinderGeometry(s.rt * 0.72, rBot, len, 7).translate(0, len / 2, 0), row: s.bark }];
+  let y = s.trunkTop - from;
+  for (const t of s.tiers) {
+    const g = new THREE.ConeGeometry(t.rad, t.h, 7, 1).rotateY(t.rot).translate(0, y + t.h / 2, 0);
+    parts.push({ geo: g, row: s.needles });
+    y += t.h * 0.55;
+  }
+  return parts;
+}
+
+/** The stump left after a cut at height h. */
+export const stumpPart = (s: PineSpec, h: number): Part => ({
+  geo: new THREE.CylinderGeometry(s.rt * (1.1 - (0.15 * h) / s.trunkTop), s.rt * 1.12, h, 7).translate(0, h / 2, 0),
+  row: s.bark,
+});
+
 function appleTree(r: () => number, seed: number): { parts: Part[]; h: number; rad: number } {
   const s = 0.85 + r() * 0.3;
   const parts: Part[] = [];
@@ -113,7 +166,7 @@ export function bake(parts: Part[]) {
 }
 
 /** Poisson-ish scatter in a disc: rejection with a minimum spacing. */
-function scatter(r: () => number, cx: number, cz: number, R: number, n: number, minD: number) {
+export function scatter(r: () => number, cx: number, cz: number, R: number, n: number, minD: number) {
   const pts: { x: number; z: number }[] = [];
   for (let tries = 0; pts.length < n && tries < n * 60; tries++) {
     const a = r() * Math.PI * 2;

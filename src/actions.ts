@@ -174,7 +174,10 @@ export class Actor {
     return this.kind !== null;
   }
 
-  start(kind: ActionKind, opts: { push?: THREE.Vector3; side?: 'L' | 'R' } = {}) {
+  /** Sawing a real log on a real sawhorse (village): its size; no conjured trestles. */
+  private sawLog: { r: number; len: number } | null = null;
+
+  start(kind: ActionKind, opts: { push?: THREE.Vector3; side?: 'L' | 'R'; sawLog?: { r: number; len: number } } = {}) {
     if (this.kind === 'fall') return; // let them finish falling/getting up
     // already at the table: have that next instead of getting up and sitting down again
     if (isDine(kind) && this.kind && isDine(this.kind) && (this.chore as Dine).want(kind)) return;
@@ -185,6 +188,7 @@ export class Actor {
     this.push.copy(opts.push ?? new THREE.Vector3());
     this.holdSpeed = kind !== 'wave' && kind !== 'jump';
     this.stopNow = kind === 'fall';
+    this.sawLog = opts.sawLog ?? null;
     this.lastU = 0;
     this.lastStroke = -1;
     if (kind === 'hammer') this.showHammer(true);
@@ -383,22 +387,7 @@ export class Actor {
     }
     this.saw.visible = true;
 
-    // FK the mid-stroke pose to find where the blade cuts
-    const joints = [J.spine, J.shoulderR, J.elbowR];
-    const saved = joints.map((j) => j.quaternion.clone());
-    const mid = this.sawStroke(0.5);
-    J.spine.rotation.set(0.45, 0, 0);
-    J.shoulderR.rotation.set(mid.x, 0, -mid.z, 'ZYX');
-    J.elbowR.rotation.set(-mid.elbow, 0, 0);
-    p.root.updateMatrixWorld(true);
-    const cut = p.root.worldToLocal(this.saw.localToWorld(new THREE.Vector3(0, -0.2, 0.012)));
-    joints.forEach((j, i) => j.quaternion.copy(saved[i]));
-    p.root.updateMatrixWorld(true);
-    cut.y -= SAW_CROUCH * d.legLen; // the crouch lowers everything
-
-    const r = 0.055 * s;
-    const len = 0.24 * s; // per half
-    const y = Math.max(r, cut.y - r * 0.1); // blade runs through the log, not over it
+    const { cut, r, len, y, trestles } = this.sawFit(this.sawLog ?? undefined);
     this.logSet!.position.set(cut.x, 0, cut.z);
     this.logHalves.forEach((h, i) => {
       h.position.set(0, y, 0);
@@ -408,11 +397,51 @@ export class Actor {
     });
     this.logSet!.children.forEach((c) => {
       if (c.userData.side === undefined) return;
-      c.position.set(c.userData.side > 0 ? len * 1.15 : -len * 0.4, 0, 0);
-      c.scale.set(0.025 * s, Math.max(0.001, y - r * 0.6), r * 2.6);
-      c.visible = y > r * 1.5;
+      const tr = trestles[c.userData.side > 0 ? 0 : 1];
+      c.position.set(tr.x, 0, 0);
+      c.scale.set(0.025 * s, tr.h, r * 2.6);
+      // (a sawhorse that's really there replaces the conjured trestles)
+      c.visible = tr.show && !this.sawLog;
     });
     this.logSet!.visible = true;
+  }
+
+  /**
+   * Where this person's saw cuts, in their root frame, and the log and
+   * trestles that fit it: the blade's mid-stroke point (plain FK of the
+   * stroke pose, minus the crouch), a log centred just under it, trestles
+   * either side. `log` overrides the log's radius and half-length (a real
+   * log off the pile instead of a conjured one).
+   */
+  sawFit(log?: { r: number; len: number }) {
+    const p = this.p;
+    const J = p.joints;
+    const d = p.dims;
+    const s = Math.sqrt(d.height);
+    // a stand-in for the saw in the fist, to read the blade point through
+    const hand = new THREE.Object3D();
+    hand.position.y = -d.handR * 0.7;
+    hand.scale.setScalar(s);
+    J.wristR.add(hand);
+    const joints = [J.spine, J.shoulderR, J.elbowR];
+    const saved = joints.map((j) => j.quaternion.clone());
+    const mid = this.sawStroke(0.5);
+    J.spine.rotation.set(0.45, 0, 0);
+    J.shoulderR.rotation.set(mid.x, 0, -mid.z, 'ZYX');
+    J.elbowR.rotation.set(-mid.elbow, 0, 0);
+    p.root.updateMatrixWorld(true);
+    const cut = p.root.worldToLocal(hand.localToWorld(new THREE.Vector3(0, -0.2, 0.012)));
+    joints.forEach((j, i) => j.quaternion.copy(saved[i]));
+    hand.removeFromParent();
+    p.root.updateMatrixWorld(true);
+    cut.y -= SAW_CROUCH * d.legLen; // the crouch lowers everything
+
+    const r = log?.r ?? 0.055 * s;
+    const len = log?.len ?? 0.24 * s; // per half
+    const y = Math.max(r, cut.y - r * 0.1); // blade runs through the log, not over it
+    const h = Math.max(0.001, y - r * 0.6);
+    const trestles = [len * 1.15, -len * 0.4].map((x) => ({ x, h, show: y > r * 1.5 }));
+    return { cut, r, len, y, trestles };
   }
 
   /** Arm angles for a saw stroke, u = 0 (pulled back) … 1 (pushed through). */

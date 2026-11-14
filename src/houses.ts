@@ -363,7 +363,10 @@ function cabin(r: Rng): Built {
 
 // ---------------------------------------------------------------- the village
 
-const SITES: { kind: 'inn' | 'cabin'; x: number; z: number }[] = [
+export type Site = { kind: 'inn' | 'cabin'; x: number; z: number; yaw?: number };
+
+/** The demo's layout. */
+export const DEMO_SITES: Site[] = [
   { kind: 'inn', x: -5, z: -13 },
   { kind: 'cabin', x: -13, z: -7.5 },
   { kind: 'cabin', x: -0.5, z: -19 },
@@ -378,14 +381,15 @@ export class Houses {
   private lastLight = new THREE.Vector3(NaN, 0, 0);
   private lastLen = NaN;
 
-  constructor(toon: THREE.Material, outline: THREE.Material, shadowMat: THREE.Material, seed = 23) {
+  constructor(toon: THREE.Material, outline: THREE.Material, shadowMat: THREE.Material, seed = 23, sites = DEMO_SITES) {
     const r = mulberry32(seed);
     const all: Part[] = [];
     const panes: Part[] = [];
-    for (const s of SITES) {
+    for (const s of sites) {
       const b = s.kind === 'inn' ? inn(r) : cabin(r);
-      // face the village middle, give or take
-      const yaw = Math.atan2(-s.x, -s.z) + (r() - 0.5) * 0.35;
+      // face the village middle, give or take (unless told which way)
+      const wobble = (r() - 0.5) * 0.35;
+      const yaw = s.yaw ?? Math.atan2(-s.x, -s.z) + wobble;
       place(b.parts, s.x, s.z, yaw);
       place(b.panes, s.x, s.z, yaw);
       all.push(...b.parts);
