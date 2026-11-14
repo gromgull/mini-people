@@ -166,6 +166,21 @@ So far it has one chain:
 - **The innkeeper** keeps the larder crate by the kitchen hatch stocked with
   dried fish fetched from the rack, using the same delivery job as the
   firewood. Guests eat one every so often.
+- **The apple picker** fetches the basket (wherever it was left), carries it
+  to a tree with ripe apples in reach, sets it down and picks into it one
+  apple at a time: they stand exactly where their stretch meets that apple,
+  and the arm is solved onto it. With five they carry the basket to the
+  cider mill and tip the apples into its hopper. Picked apples grow back.
+- **The miller** turns the mill's crank once the hopper holds twelve apples;
+  the apples go down one by one, and a keg of cider stands full under the
+  spout, which they carry to the keg rack.
+- **The innkeeper** also fetches kegs to the inn, and serves: when the
+  regular's tankard is empty they draw a fresh one from a keg and bring it
+  to the table.
+- **The regular** has no job. They sit at the inn's table (built to them),
+  sip cider every so often, and wait when the tankard's empty.
+- **Smoke** rises from the inn's chimney while its fire has firewood, and
+  thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
   bench (built to the woodworker's height) or play their instrument, the
   woodworker a banjo and the lumberjack a fiddle, standing or seated. They
@@ -184,7 +199,7 @@ and the haul and the saw use the actual log.
 | click | follow that person |
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
-| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack |
+| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, kegs at the inn |
 
 The panel at the bottom left shows who's doing what, the woodpile and the
 tallies. `npm run test:village` runs the village headless for ten simulated
@@ -240,9 +255,11 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench; items and the stores that hold them: firewood stacks, the drying rack, the larder crate), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
+| `src/village/` | the village: `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the basket, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
+| `src/smoke.ts` | chimney smoke |
+| `src/hold.ts` | hands on something that moves (a crank, a tap) |
 | `src/banjo.ts` | playing the banjo (the shared tune's banjo part), standing or seated |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)

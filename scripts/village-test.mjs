@@ -9,11 +9,12 @@
 //     containers agree with it (pile, stacks, sawhorse, whoever carries it);
 //     stacks' promised room and pieces add up
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
-//   - nobody stays in the same step for more than 90 s (waiting about and
-//     sitting on the bench don't count)
+//   - nobody stays in the same step for more than 90 s (waiting about,
+//     sitting on a bench and playing don't count; nor does the regular)
 //   - positions are finite
 //   - by the end, trees have been felled, logs sawn, firewood delivered, fish
-//     caught, and (given time to dry) dried fish brought to the larder
+//     caught, and (given time to dry) dried fish brought to the larder; apples
+//     picked, (given time) cider made, and the regular served
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 
@@ -60,7 +61,7 @@ const result = await page.evaluate((secs) => {
       if (p.at === 'stack' && p.stack.items[p.slot] !== pc) say(`piece ${pc.id} says ${p.stack.name} slot ${p.slot}, slot has ${p.stack.items[p.slot]?.id}`);
       if (p.at === 'carried' && !d.jobs[p.by]?.armful.includes(pc)) say(`piece ${pc.id} says carried by ${p.by}, who doesn't have it`);
     }
-    for (const st of [v.yard, v.inn, v.rack, v.larder]) {
+    for (const st of [v.yard, v.inn, v.rack, v.larder, v.basket, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot]) {
       st.items.forEach((pc, i) => {
         if (!pc) return;
         if (!v.items.includes(pc)) say(`${st.name} slot ${i} holds a piece that no longer exists`);
@@ -86,7 +87,7 @@ const result = await page.evaluate((secs) => {
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (j.doing !== 'idle' && j.doing !== 'sitting' && s - at > 90) {
+      else if (!['idle', 'sitting', 'playing'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
         since.set(i, [j.doing, s]);
       }
@@ -102,9 +103,13 @@ if (result.stats.sawn < 1) problems.push('no log was sawn');
 if (result.stats.delivered < 1) problems.push('no firewood reached the inn');
 if (result.stats.caught < 1) problems.push('no fish were caught');
 if (Number(seconds) >= 400 && result.stats.fishIn < 1) problems.push('no dried fish reached the larder');
+if (result.stats.picked < 1) problems.push('no apples were picked');
+if (Number(seconds) >= 400 && result.stats.kegs < 1) problems.push('no cider was made');
+if (result.stats.poured < 1) problems.push('nobody was served cider');
 problems.push(...errors);
 console.log(`${seconds}s simulated (seed ${seed}): felled ${result.stats.felled}, sawn ${result.stats.sawn}, logs about ${result.logs}, pile ${result.pile}, trees standing ${result.standing}/${result.trees}`);
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
+console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);
 console.log(problems.length ? `✗ ${problems.length} problem(s):\n  ${problems.join('\n  ')}` : '✓ consistent throughout');
 await browser.close();

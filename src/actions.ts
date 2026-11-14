@@ -12,12 +12,13 @@ import { type DineAsk, Dine } from './dine';
 import { Haul, type LogSpot } from './haul';
 import { Banjo } from './banjo';
 import { Armful, type ItemPose } from './armful';
+import { Hold, type HoldPlan } from './hold';
 import type { PineSpec } from './trees';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
 const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
@@ -193,8 +194,11 @@ export class Actor {
   choreOf(kind: 'banjo'): Banjo;
   choreOf(kind: 'armful'): Armful;
   choreOf(kind: 'fish'): Fish;
-  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish'): Chore {
-    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish }[kind];
+  choreOf(kind: 'pick'): PickApple;
+  choreOf(kind: 'hold'): Hold;
+  choreOf(kind: 'dine'): Dine;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine }[kind];
     return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
@@ -207,10 +211,16 @@ export class Actor {
       sawLog?: { r: number; len: number };
       /** Chopping: a real tree's shape (stands where it is; no conjured tree). */
       tree?: PineSpec;
+      /** Picking: a real apple, where it hangs (world); no conjured tree; ends once it's in the hand. */
+      apple?: THREE.Vector3;
       /** Fishing: real water ahead (no conjured pool; ends once the fish is off the hook). */
       water?: boolean;
       /** Hauling: a real log's mesh, where it lies, its radius. */
       log?: { mesh: THREE.Object3D; from: LogSpot; r: number };
+      /** Dining: at a real table (built from this person's worldFurniture()), staying till told to leave. */
+      atTable?: boolean;
+      /** Hold: where the hands go each frame. */
+      hold?: HoldPlan;
       /** Armful: the things to gather (their meshes) and where each lies. */
       items?: { meshes: THREE.Object3D[]; from: ItemPose[] };
       /** Music: how many phrases to play (default: to the end of the next full one). */
@@ -253,6 +263,7 @@ export class Actor {
       this.chore = this.chores[kind] ??= new C(this.p, this.kit);
       if (kind === 'chop') (this.chore as Chop).aim(opts.tree ?? null);
       if (kind === 'fish') (this.chore as Fish).aimWater(!!opts.water);
+      if (kind === 'pick') (this.chore as PickApple).aimAt(opts.apple ?? null);
       this.chore.start();
     }
     if (kind === 'banjo') {
@@ -260,6 +271,12 @@ export class Actor {
       b.plan(this.beatTime, this.playLength(0.6, this.phrases));
       this.chore = b;
       b.start();
+    }
+    if (kind === 'hold') {
+      const h = this.choreOf('hold');
+      if (opts.hold) h.aim(opts.hold);
+      this.chore = h;
+      h.start();
     }
     if (kind === 'armful') {
       const a = this.choreOf('armful');
@@ -276,7 +293,7 @@ export class Actor {
     if (isDine(kind)) {
       // one table for all three: it's the same sitting down, just a different meal
       const d = (this.chores.dine ??= new Dine(this.p, this.kit)) as Dine;
-      d.plan(kind);
+      d.plan(kind, { world: opts.atTable });
       this.chore = d;
       d.start();
     }

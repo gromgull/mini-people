@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Bench, type Crate, type Item, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Stack, type Store, type Woodpile } from './things';
+import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, type Store, type Woodpile } from './things';
+import type { Apple, Orchard } from './orchard';
 import type { Pond } from '../pond';
 import type { ItemPose } from '../armful';
 import { PIECE_L, PIECE_R } from '../firewood';
@@ -35,6 +36,14 @@ export const ARMFUL = 4;
 export const CATCH = 3;
 /** The inn's larder wants at least this many dried fish. */
 export const LARDER_WANT = 4;
+/** Apples in a basketful. */
+export const BASKET = 5;
+/** Apples the mill turns into a keg. */
+export const MILL_BATCH = 12;
+/** Tankards of cider in a keg. */
+export const SERVINGS = 8;
+/** The inn wants this many kegs on hand. */
+export const INN_KEGS = 2;
 
 export interface Village {
   forest: Forest;
@@ -45,8 +54,8 @@ export interface Village {
   removeLog(l: Log): void;
   treeObstacle(t: Tree): Obstacle | null;
   horseObstacle: Obstacle;
-  /** Somewhere to sit (with the obstacle to step past onto it). */
-  benches: { bench: Bench; obstacle: Obstacle }[];
+  /** Somewhere to sit (with the obstacle to step past onto it, and whose it is: −1 = anyone's). */
+  benches: { bench: Bench; obstacle: Obstacle; owner: number }[];
   time: number;
   /** Firewood: the stack by the sawhorse, the inn's stack by the kitchen, every piece. */
   yard: Stack;
@@ -55,12 +64,27 @@ export interface Village {
   pond: Pond;
   rack: Rack;
   larder: Crate;
-  /** Every item (firewood and fish). */
+  /** Apples and cider: the orchard, the picker's basket, the mill, kegs at the mill and at the inn. */
+  orchard: Orchard;
+  basket: Basket;
+  mill: CiderMill;
+  millKegs: KegRack;
+  innKegs: KegRack;
+  /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
+  tankardSpot: Spot;
+  seat: { x: number; z: number; yaw: number; via: { x: number; z: number }; obstacle: Obstacle };
+  /** A full tankard has just been set down at the regular's place. */
+  served(): void;
+  /** Is anyone at the table who needs a refill? */
+  wantsRefill(): boolean;
+  /** This simulation step's length. */
+  dt: number;
+  /** Every item (firewood, fish, apples, kegs, tankards). */
   items: Item[];
   newItem(kind: Item['kind']): Item;
   removeItem(it: Item): void;
   /** Bookkeeping for the overlay and the tests. */
-  stats: { felled: number; sawn: number; delivered: number; burned: number; caught: number; dried: number; fishIn: number; eaten: number };
+  stats: { felled: number; sawn: number; delivered: number; burned: number; caught: number; dried: number; fishIn: number; eaten: number; picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number };
 }
 
 export interface Worker {
@@ -214,6 +238,13 @@ export abstract class Job {
         to.incoming = Math.max(0, to.incoming - this.armful.length);
         if (to === v.inn) v.stats.delivered += this.armful.length;
         if (to === v.larder) v.stats.fishIn += this.armful.length;
+        if (to === v.innKegs) v.stats.kegsIn += this.armful.length;
+        if (to === v.tankardSpot) {
+          this.armful = [];
+          this.step = { kind: 'idle' };
+          v.served();
+          return;
+        }
         this.armful = [];
         this.step = { kind: 'idle' };
         return;
@@ -237,7 +268,9 @@ export abstract class Job {
     this.restAfter = v.time + 5 + Math.random() * 6;
     const r = Math.random();
     const me = this.w.walker;
-    const free = v.benches.filter((b) => b.bench.claimedBy < 0);
+    // their own bench if they have one, else any free one that's nobody's
+    const mine = v.benches.filter((b) => b.owner === this.w.i);
+    const free = (mine.length ? mine : v.benches.filter((b) => b.owner < 0)).filter((b) => b.bench.claimedBy < 0);
     if (free.length && r < 0.6) {
       const b = free.reduce((a, b) => (Math.hypot(b.bench.x - me.x, b.bench.z - me.z) < Math.hypot(a.bench.x - me.x, a.bench.z - me.z) ? b : a));
       b.bench.claimedBy = this.w.i;
@@ -294,6 +327,7 @@ export abstract class Job {
         if (work && a.busy) a.stopPlaying(true);
         if (!a.busy) {
           this.wasPlaying = false;
+          this.restAfter = v.time + 6 + Math.random() * 8; // a breather before anything else
           this.step = { kind: 'idle' };
         }
         return;
@@ -750,18 +784,445 @@ export class Innkeeper extends Job {
     return short > 0 ? Math.min(ARMFUL, this.dryOnRack(v), v.larder.room) : 0;
   }
 
+  /** Kegs at the mill nobody's come for, if the inn's short. */
+  private kegsWanted(v: Village) {
+    const short = INN_KEGS - v.innKegs.count - v.innKegs.incoming;
+    return short > 0 ? Math.min(1, v.millKegs.available, v.innKegs.room) : 0;
+  }
+
+  /** Someone's tankard is empty, nobody's bringing one, and there's cider. */
+  private refill(v: Village) {
+    return v.wantsRefill() && v.tankardSpot.incoming === 0 && v.tankardSpot.count === 0 && v.innKegs.available > 0;
+  }
+
   protected hasWork(v: Village) {
-    return this.larderWants(v) > 0;
+    return this.refill(v) || this.larderWants(v) > 0 || this.kegsWanted(v) > 0;
   }
 
   protected run(v: Village) {
-    if (this.step.kind !== 'idle' || v.time < this.waitUntil) return;
+    const s = this.step;
+    const a = this.w.actor;
+    switch (s.kind) {
+      case 'to the kegs': {
+        if (!this.arrived) return;
+        // draw a tankard from the top keg: hands at its tap a moment
+        const slot = v.innKegs.top(1)[0];
+        if (slot === undefined) {
+          v.tankardSpot.incoming = 0;
+          this.step = { kind: 'idle' };
+          return;
+        }
+        const tap = v.innKegs.slotWorld(slot).pos;
+        const front = new THREE.Vector3(Math.sin(v.innKegs.yaw), 0, Math.cos(v.innKegs.yaw)).multiplyScalar(0.12);
+        a.start('hold', { hold: { right: () => tap.clone().add(front).setY(tap.y + 0.02), left: () => tap.clone().add(front).setY(tap.y - 0.05), lean: 0.35 } });
+        this.step = { kind: 'drawing cider', slot, until: v.time + 1.6 };
+        return;
+      }
+      case 'drawing cider': {
+        if (v.time < (s.until as number)) return;
+        if (a.kind === 'hold') {
+          a.choreOf('hold').release();
+          return;
+        }
+        if (a.busy) return;
+        const slot = s.slot as number;
+        const keg = v.innKegs.items[slot];
+        if (keg) {
+          keg.dry -= 1;
+          if (keg.dry <= 0) {
+            // that's the keg empty
+            v.innKegs.items[slot] = null;
+            v.removeItem(keg);
+          }
+        }
+        const r = this.w.root;
+        const mug = v.newItem('mug');
+        const pos = r.position.clone().add(new THREE.Vector3(Math.sin(r.rotation.y) * 0.3, 0.55, Math.cos(r.rotation.y) * 0.3));
+        mug.place = { at: 'ground', pos, quat: r.quaternion.clone() };
+        this.gather([mug], [{ pos, quat: r.quaternion.clone() }], v.tankardSpot);
+        v.stats.poured++;
+        return;
+      }
+    }
+    if (s.kind !== 'idle' || v.time < this.waitUntil) return;
+    if (this.refill(v)) {
+      v.tankardSpot.incoming += 1;
+      const at = v.innKegs.workSpot();
+      this.go(at.x, at.z, at.yaw);
+      this.step = { kind: 'to the kegs' };
+      return;
+    }
     const n = this.larderWants(v);
     if (n > 0) {
       this.fetch(v.rack, v.larder, n, (it) => it.dry >= 1);
       return;
     }
+    if (this.kegsWanted(v) > 0) {
+      this.fetch(v.millKegs, v.innKegs, 1);
+      return;
+    }
     if (this.leisure(v)) return;
     this.waitUntil = v.time + 2;
+  }
+}
+
+/**
+ * The apple picker: while the mill's hopper has room for a basketful, fetch
+ * the basket (wherever it was left), carry it to a tree with ripe apples in
+ * reach, set it down, pick into it one apple at a time (moving round the
+ * tree, or on to the next), then carry the full basket to the mill and tip
+ * the apples into the hopper. The basket stays there till next time.
+ */
+export class Picker extends Job {
+  private apple: Apple | null = null;
+  private lastPick: ItemPose | null = null;
+
+  constructor(w: Worker) {
+    super(w, 'picker');
+  }
+
+  /** How high this person can pick (the apple at full stretch, on tiptoe). */
+  private reachY() {
+    return this.w.actor.choreOf('pick').reach().y + 0.04;
+  }
+
+  protected hasWork(v: Village) {
+    return v.mill.hopper.room >= BASKET && v.orchard.ripe(this.reachY()).length >= 2;
+  }
+
+  /** Take up the basket (from wherever it lies) in both arms. */
+  private takeBasket(v: Village) {
+    const b = v.basket.group;
+    this.w.actor.start('armful', { items: { meshes: [b], from: [{ pos: b.position.clone(), quat: b.quaternion.clone() }] } });
+  }
+
+  /** Set it down beside us (right and a little ahead). */
+  private setDownBasket() {
+    const r = this.w.root;
+    const yaw = r.rotation.y;
+    const pos = r.position.clone().add(new THREE.Vector3(-Math.cos(yaw) * 0.38 + Math.sin(yaw) * 0.1, 0, Math.sin(yaw) * 0.38 + Math.cos(yaw) * 0.1));
+    this.w.actor.choreOf('armful').putDown([{ pos, quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw) }]);
+  }
+
+  private get carryingBasket() {
+    return this.w.actor.kind === 'armful' && this.w.actor.choreOf('armful').carrying;
+  }
+
+  /** The nearest ripe apple in reach (on this tree first, if there's one left). */
+  private nextApple(v: Village, tree = -1) {
+    const me = this.w.walker;
+    const ripe = v.orchard.ripe(this.reachY());
+    const near = (a: Apple) => Math.hypot(a.pos.x - me.x, a.pos.z - me.z) - (a.tree === tree ? 10 : 0);
+    return ripe.length ? ripe.reduce((b, a) => (near(a) < near(b) ? a : b)) : null;
+  }
+
+  /** Where to stand so the apple is right where a full stretch puts the hand, facing the tree. */
+  private standFor(a: Apple, v: Village) {
+    const t = v.orchard.trees[a.tree];
+    const out = Math.atan2(a.pos.x - t.x, a.pos.z - t.z);
+    const yaw = out + Math.PI;
+    const h = this.w.actor.choreOf('pick').reach();
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    // root frame (h.x, h.z) turned by yaw: (x c + z s, −x s + z c)
+    return { x: a.pos.x - (h.x * c + h.z * s), z: a.pos.z - (-h.x * s + h.z * c), yaw };
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const basket = v.basket;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        if (this.hasWork(v)) {
+          v.mill.hopper.incoming += BASKET; // room in the hopper for this basketful
+          const at = basket.workSpot();
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to basket' };
+          return;
+        }
+        if (this.leisure(v)) return;
+        this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to basket': {
+        if (!this.arrived) return;
+        this.takeBasket(v);
+        this.step = { kind: 'taking the basket' };
+        return;
+      }
+      case 'taking the basket': {
+        if (!this.carryingBasket) return;
+        this.toNextApple(v, -1);
+        return;
+      }
+      case 'to the tree': {
+        if (!this.arrived) return;
+        this.setDownBasket();
+        this.step = { kind: 'setting down', then: 'pick' };
+        return;
+      }
+      case 'setting down': {
+        if (a.kind === 'armful') return;
+        if (s.then === 'pick') this.pickNext(v);
+        else this.step = { kind: 'idle' };
+        return;
+      }
+      case 'to apple': {
+        if (!this.arrived) return;
+        a.start('pick', { apple: this.apple!.pos });
+        this.step = { kind: 'picking' };
+        return;
+      }
+      case 'picking': {
+        if (a.kind === 'pick') {
+          this.lastPick = a.choreOf('pick').catchPose();
+          return;
+        }
+        // into the basket with it
+        const ap = this.apple!;
+        v.orchard.picked(ap, v.time);
+        v.stats.picked++;
+        const slot = basket.free(1)[0];
+        const it = v.newItem('apple');
+        it.place = { at: 'stack', stack: basket, slot };
+        basket.items[slot] = it;
+        if (this.lastPick) it.tween = { pos: this.lastPick.pos.clone(), quat: this.lastPick.quat.clone(), t0: v.time, dur: 0.4 };
+        this.apple = null;
+        if (basket.count >= BASKET) {
+          // full: take it to the mill
+          const at = basket.workSpot();
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to full basket' };
+          return;
+        }
+        this.pickNext(v, ap.tree);
+        return;
+      }
+      case 'to full basket': {
+        if (!this.arrived) return;
+        this.takeBasket(v);
+        this.step = { kind: 'lifting the basket' };
+        return;
+      }
+      case 'lifting the basket': {
+        if (!this.carryingBasket) return;
+        const at = v.mill.hopper.workSpot();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to the mill' };
+        return;
+      }
+      case 'to the mill': {
+        if (!this.arrived) return;
+        this.setDownBasket();
+        this.step = { kind: 'tipping' };
+        return;
+      }
+      case 'tipping': {
+        if (a.kind === 'armful') return;
+        // the apples go into the hopper one after another
+        const hop = v.mill.hopper;
+        const slots = hop.free(basket.count);
+        const from = basket.top(BASKET);
+        from.forEach((bi, k) => {
+          const it = basket.items[bi]!;
+          const w = basket.slotWorld(bi);
+          basket.items[bi] = null;
+          hop.items[slots[k]] = it;
+          it.place = { at: 'stack', stack: hop, slot: slots[k] };
+          it.tween = { pos: w.pos, quat: w.quat, t0: v.time + k * 0.22, dur: 0.45 };
+        });
+        hop.incoming = Math.max(0, hop.incoming - BASKET);
+        a.events.push('thunk');
+        this.waitUntil = v.time + 1.5;
+        this.step = { kind: 'idle' };
+        return;
+      }
+    }
+  }
+
+  /** Walk (with the basket) to the next apple's tree, or pick it if it's on this one. */
+  private toNextApple(v: Village, tree: number) {
+    const ap = this.nextApple(v, tree);
+    if (!ap) {
+      // nothing in reach after all: put the basket down and call it a day
+      this.setDownBasket();
+      v.mill.hopper.incoming = Math.max(0, v.mill.hopper.incoming - BASKET);
+      this.step = { kind: 'setting down', then: 'idle' };
+      return;
+    }
+    ap.claimedBy = this.w.i;
+    this.apple = ap;
+    const at = this.standFor(ap, v);
+    this.go(at.x, at.z, at.yaw);
+    this.step = { kind: 'to the tree' };
+  }
+
+  /** The next apple: on this tree if one's left (the basket stays put), else carry the basket on. */
+  private pickNext(v: Village, tree = -1) {
+    const ap = this.apple ?? this.nextApple(v, tree);
+    if (!ap) {
+      this.step = { kind: 'idle' };
+      return;
+    }
+    if (tree >= 0 && ap.tree !== tree) {
+      // on to another tree: basket and all
+      this.apple = null;
+      const at = v.basket.workSpot();
+      this.go(at.x, at.z, at.yaw);
+      this.step = { kind: 'to basket' };
+      return;
+    }
+    ap.claimedBy = this.w.i;
+    this.apple = ap;
+    const at = this.standFor(ap, v);
+    this.go(at.x, at.z, at.yaw);
+    this.step = { kind: 'to apple' };
+  }
+}
+
+/**
+ * The miller: when the hopper holds a batch (and there's room for a keg),
+ * turn the crank, the apples going down one by one, until a keg of cider
+ * stands full under the spout; then carry it to the keg rack.
+ */
+export class Miller extends Job {
+  private fed = 0;
+  private turned = 0;
+
+  constructor(w: Worker) {
+    super(w, 'miller');
+  }
+
+  private ready(v: Village) {
+    return v.mill.hopper.top(MILL_BATCH).length >= MILL_BATCH;
+  }
+
+  protected hasWork(v: Village) {
+    return this.ready(v) && v.millKegs.room >= 1;
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const mill = v.mill;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        if (this.hasWork(v)) {
+          v.millKegs.incoming += 1;
+          const at = mill.crankSpot();
+          this.go(at.x, at.z, at.yaw, null);
+          this.step = { kind: 'to the crank' };
+          return;
+        }
+        if (this.leisure(v)) return;
+        this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to the crank': {
+        if (!this.arrived) return;
+        this.fed = 0;
+        this.turned = 0;
+        a.start('hold', { hold: { right: () => mill.handle(), left: () => mill.steady(), lean: 0.22, bob: () => 0.03 * (1 + Math.sin(mill.angle)) } });
+        this.step = { kind: 'cranking' };
+        return;
+      }
+      case 'cranking': {
+        // round and round; every so often an apple goes down
+        const spin = Math.min(1, a.t / 0.6) * 4.2; // rad/s
+        mill.turn(mill.angle + spin * v.dt);
+        this.turned += spin * v.dt;
+        if (this.turned > (this.fed + 1) * 4 && this.fed < MILL_BATCH) {
+          const slot = mill.hopper.top(1)[0];
+          if (slot !== undefined) {
+            v.removeItem(mill.hopper.items[slot]!);
+            mill.hopper.items[slot] = null;
+          }
+          this.fed++;
+          v.stats.milled++;
+          a.events.push('crunch');
+        }
+        if (this.fed >= MILL_BATCH) {
+          // full: a keg of cider under the spout
+          const keg = v.newItem('keg');
+          keg.dry = SERVINGS;
+          const sp = mill.spout();
+          keg.place = { at: 'ground', pos: sp.pos, quat: sp.quat };
+          keg.tween = { pos: sp.pos.clone().setY(sp.pos.y + 0.25), quat: sp.quat.clone(), t0: v.time, dur: 0.5 };
+          v.stats.kegs++;
+          a.events.push('splash');
+          a.choreOf('hold').release();
+          this.step = { kind: 'letting go', keg };
+        }
+        return;
+      }
+      case 'letting go': {
+        if (a.busy) return;
+        const at = mill.frontSpot();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to the spout', keg: s.keg };
+        return;
+      }
+      case 'to the spout': {
+        if (!this.arrived) return;
+        const keg = s.keg as Item;
+        const pl = keg.place as { pos: THREE.Vector3; quat: THREE.Quaternion };
+        this.gather([keg], [{ pos: pl.pos.clone(), quat: pl.quat.clone() }], v.millKegs);
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * The regular: no job, all the time in the world. Sits at the inn's table and
+ * sips cider every so often while the tankard has any in it; when it's empty,
+ * waits for the innkeeper to bring another.
+ */
+export class Regular extends Job {
+  private nextSip = 0;
+
+  constructor(w: Worker) {
+    super(w, 'regular');
+  }
+
+  protected hasWork() {
+    return false;
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    switch (s.kind) {
+      case 'idle': {
+        const st = v.seat;
+        // in from the end of the bench (stepping between it and the table)
+        this.w.walker.go({ x: st.x, z: st.z, yaw: st.yaw, ignore: st.obstacle, via: { ...st.via } });
+        this.step = { kind: 'to the table' };
+        return;
+      }
+      case 'to the table': {
+        if (!this.arrived) return;
+        a.start('dine', { atTable: true });
+        this.nextSip = v.time + 4;
+        this.step = { kind: 'waiting for a refill' };
+        return;
+      }
+      default: {
+        if (!a.busy) {
+          // (got up somehow): back to the table
+          this.step = { kind: 'idle' };
+          return;
+        }
+        const d = a.choreOf('dine');
+        this.step = { kind: d.needsRefill ? 'waiting for a refill' : 'drinking cider' };
+        if (!d.needsRefill && !d.drinking && v.time >= this.nextSip) {
+          a.start('drink');
+          v.stats.drunk++;
+          this.nextSip = v.time + 10 + Math.random() * 10;
+        }
+      }
+    }
   }
 }

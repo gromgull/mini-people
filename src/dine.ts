@@ -73,6 +73,13 @@ export class Dine implements Chore {
   private rest = { L: new THREE.Vector3(), R: new THREE.Vector3() };
   // the meal
   private ask: DineAsk = 'dine';
+  /**
+   * At a real table (village): no conjured furniture, no shuffling in (the
+   * table stands just clear of them), the tankard only there once someone
+   * brings one, and they stay put until leave().
+   */
+  private world = false;
+  private stay = false;
   private queue: Course[] = [];
   private cur: { kind: Course; t0: number; dur: number } | null = null;
   private tau = 0;
@@ -143,7 +150,9 @@ export class Dine implements Chore {
   }
 
   /** What they sat down for (set before start). */
-  plan(ask: DineAsk) {
+  plan(ask: DineAsk, opts: { world?: boolean } = {}) {
+    this.world = !!opts.world;
+    this.stay = this.world;
     this.ask = ask;
   }
 
@@ -153,7 +162,49 @@ export class Dine implements Chore {
     const c = this.courseFor(ask);
     if (this.queue[0] !== c) this.queue.unshift(c);
     if (this.queue.at(-1) !== 'rest') this.queue.push('rest');
+    // (no need to sit out the rest of a rest first)
+    if (this.cur?.kind === 'rest') this.cur.dur = Math.min(this.cur.dur, this.tau + 0.05);
     return true;
+  }
+
+  /** Get up and go (after whatever course is on). */
+  leave() {
+    this.stay = false;
+  }
+
+  /** The tankard's empty (or there isn't one yet). */
+  get needsRefill() {
+    return this.tankOn === 0 || this.level < 0.05;
+  }
+
+  /** Busy with a drink right now. */
+  get drinking() {
+    return this.cur?.kind === 'drink';
+  }
+
+  /** A full tankard set down in front of them (the empty one goes). */
+  serve() {
+    this.tankOn = 1;
+    this.level = 1;
+  }
+
+  /**
+   * For a real table: the fit for this person (as start() will make it at a
+   * real table), and the table and both benches built to it, in their seated
+   * frame (where their feet are once sat, facing +z). Also the tankard's
+   * spot, and a box round the lot.
+   */
+  worldFurniture() {
+    this.world = true;
+    this.fit();
+    const group = new THREE.Group();
+    const t = new THREE.Group(), f = new THREE.Group(), n = new THREE.Group();
+    this.build(t, f, n);
+    group.add(t, f, n);
+    const G = this.g, H = this.p.dims.height;
+    const L = 2 * 0.44 * H + 0.16 * H;
+    const nearZ = n.position.z;
+    return { group, tankAt: this.tankAt.clone(), side: G.side, box: { x: t.position.x, z: (nearZ + G.farZ) / 2, hx: L / 2 + 0.02, hz: (G.farZ - nearZ) / 2 + 0.12 } };
   }
 
   private courseFor(ask: DineAsk): Course {
@@ -163,6 +214,28 @@ export class Dine implements Chore {
   }
 
   start() {
+    this.fit();
+    if (!this.world) this.build(this.table, this.farBench, this.nearBench);
+    this.queue =
+      this.world ? ['rest']
+      : this.ask === 'eat' ? [this.courseFor('eat'), 'rest']
+      : this.ask === 'drink' ? ['drink', 'rest']
+      : ['rest', this.courseFor('dine'), Math.random() < 0.6 ? 'drink' : 'rest', 'rest'];
+    this.cur = null;
+    this.leaveAt = Infinity;
+    this.shift = this.scooted = 0;
+    this.boardOn = this.tankOn = 0;
+    this.level = this.world ? 0 : 1;
+    this.onBoard = null;
+    this.pop = 0;
+    for (const o of [this.table, this.farBench, this.nearBench]) {
+      o.scale.setScalar(1e-3);
+      o.visible = !this.world;
+    }
+  }
+
+  /** Size the seat and table to this person, and where things go on the table. */
+  private fit() {
     const p = this.p;
     const d = p.dims;
     const H = d.height;
@@ -182,8 +255,12 @@ export class Dine implements Chore {
     const front = Math.max(d.waistR, d.hipR) * d.torsoDepth + d.bustR * 0.5;
     G.edge = -G.seatZ + front + 0.03 * H;
     G.S = Math.max(0.03 * H, front + 0.05 * H - G.edge);
-    G.side = Math.random() < 0.5 ? 1 : -1; // which end of the bench they take
-    this.build();
+    if (this.world) {
+      // a real table doesn't shuffle: it stands just clear of them standing
+      G.edge = front + 0.03 * H;
+      G.S = 0;
+      G.side = 1;
+    } else G.side = Math.random() < 0.5 ? 1 : -1; // which end of the bench they take
 
     // where things go on the table: the board in front, the tankard to the right
     const shZ = -G.seatZ;
@@ -199,26 +276,10 @@ export class Dine implements Chore {
       r.set(sd * d.shoulderX * 0.75, G.top + d.handR * 0.85, Math.min(shZ + d.foreArmLen * 1.05, G.edge + 0.2 * H));
       r.z = Math.max(r.z, G.edge + d.handR);
     }
-
-    this.queue =
-      this.ask === 'eat' ? [this.courseFor('eat'), 'rest']
-      : this.ask === 'drink' ? ['drink', 'rest']
-      : ['rest', this.courseFor('dine'), Math.random() < 0.6 ? 'drink' : 'rest', 'rest'];
-    this.cur = null;
-    this.leaveAt = Infinity;
-    this.shift = this.scooted = 0;
-    this.boardOn = this.tankOn = 0;
-    this.level = 1;
-    this.onBoard = null;
-    this.pop = 0;
-    for (const o of [this.table, this.farBench, this.nearBench]) {
-      o.scale.setScalar(1e-3);
-      o.visible = true;
-    }
   }
 
-  /** The table and both benches, sized to the sitter. */
-  private build() {
+  /** The table and both benches, sized to the sitter, into these groups. */
+  private build(tableG: THREE.Group, farG: THREE.Group, nearG: THREE.Group) {
     for (const m of this.built) disposeMesh(m);
     this.built = [];
     const d = this.p.dims;
@@ -242,9 +303,10 @@ export class Dine implements Chore {
     }
     parts.push(box(2 * tx, 0.045 * H, 0.03 * H, 0, G.top * 0.3, 0, dark));
     const table = baked(parts, this.kit);
-    this.table.add(table);
+    tableG.clear();
+    tableG.add(table);
     G.tableZ = G.edge + W / 2;
-    this.table.position.set(cx, 0, G.tableZ);
+    tableG.position.set(cx, 0, G.tableZ);
     // benches: a plank on two slab legs
     const bd = Math.max(0.13 * H, d.thighLen * 1.05);
     const bt = 0.03 * H;
@@ -257,11 +319,13 @@ export class Dine implements Chore {
       return m;
     };
     const nearZ = -G.seatZ - d.thighLen * 0.05;
-    this.nearBench.add(bench());
-    this.nearBench.position.set(cx, 0, nearZ);
-    this.farBench.add(bench());
+    nearG.clear();
+    nearG.add(bench());
+    nearG.position.set(cx, 0, nearZ);
+    farG.clear();
+    farG.add(bench());
     G.farZ = G.edge + W + (G.edge - nearZ);
-    this.farBench.position.set(cx, 0, G.farZ);
+    farG.position.set(cx, 0, G.farZ);
     this.built.push(table);
   }
 
@@ -283,7 +347,8 @@ export class Dine implements Chore {
         if (k) {
           this.cur = { kind: k, t0: t, dur: k === 'rest' ? 2 + Math.random() * 2 : DUR[k] };
           this.prevTau = this.tau = 0;
-        } else this.leaveAt = t;
+        } else if (this.stay) this.cur = { kind: 'rest', t0: t, dur: 1e9 };
+        else this.leaveAt = t;
       }
     }
     const end = this.leaveAt + tOut + tUp + 0.35;
@@ -504,7 +569,7 @@ export class Dine implements Chore {
       this.tankard.position.lerpVectors(tankPos, atLips, lift);
       this.tankard.position.y += 0.05 * H * Math.sin(Math.PI * lift) * (1 - drink);
       this.tankard.quaternion.copy(_q);
-      if (drink > 0) this.level = Math.max(0.15, this.level - dt * 0.12 * drink);
+      if (drink > 0) this.level = Math.max(this.world ? 0 : 0.15, this.level - dt * 0.12 * drink);
       const handle = _t.copy(this.grip).applyQuaternion(_q).add(this.tankard.position);
       fistR.lerp(handle.addScaledVector(_a.set(-1, 0, 0), d.handR * 0.2), reach);
       if (lift > 0.5) out.focus = p.root.localToWorld(mouth.clone().addScaledVector(fwd, 3 * H).setY(mouth.y));

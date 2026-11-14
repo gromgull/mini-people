@@ -201,10 +201,10 @@ export type ItemPlace =
 
 export interface Item {
   id: number;
-  kind: 'wood' | 'fish';
+  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug';
   place: ItemPlace;
   mesh: THREE.Object3D;
-  /** Fish: how dry, 0 fresh … 1 stockfish. */
+  /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
   dry: number;
   /** Easing into its place from somewhere else (dropped, tossed), started at t0 (sim seconds). */
   tween?: { pos: THREE.Vector3; quat: THREE.Quaternion; t0: number; dur: number };
@@ -398,6 +398,195 @@ export function makeFish(stage: Stage) {
 export function setDry(mesh: THREE.Object3D, dried: boolean) {
   mesh.children[0].visible = !dried;
   mesh.children[1].visible = dried;
+}
+
+// ---------------------------------------------------------------- apples and cider
+
+export const APPLE_R = 0.065;
+export const KEG_R = 0.095;
+export const KEG_L = 0.26;
+
+/** An apple (item mesh). */
+export function makeApple(stage: Stage) {
+  return outlined(bake([
+    { geo: new THREE.IcosahedronGeometry(APPLE_R, 1).scale(1, 0.92, 1), row: ROWS.apple[0] },
+    { geo: new THREE.CylinderGeometry(0.006, 0.006, 0.035, 4).translate(0, APPLE_R + 0.01, 0), row: ROWS.bark[0] },
+  ]), stage);
+}
+
+/** A small cider keg lying along x: bulging staves, two iron hoops, a pale end with a bung. */
+export function makeKeg(stage: Stage) {
+  const prof: [number, number][] = [[0.001, -KEG_L / 2], [KEG_R * 0.8, -KEG_L / 2], [KEG_R, 0], [KEG_R * 0.8, KEG_L / 2], [0.001, KEG_L / 2]];
+  const body = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 10).rotateZ(Math.PI / 2);
+  const parts: Part[] = [{ geo: body, row: ROWS.log[0] }];
+  for (const x of [-0.32, 0.32]) parts.push({ geo: new THREE.CylinderGeometry(KEG_R * 0.94, KEG_R * 0.94, 0.014, 10).rotateZ(Math.PI / 2).translate(x * KEG_L, 0, 0), row: ROWS.stone[2] });
+  parts.push({ geo: new THREE.CylinderGeometry(0.012, 0.012, 0.03, 5).translate(0, KEG_R, 0), row: ROWS.log[1] }); // bung
+  return outlined(bake(parts), stage);
+}
+
+/** A tankard of cider (item mesh), upright, its handle to its right (−x). */
+export function makeMug(stage: Stage) {
+  const r = 0.055, h = 0.13;
+  return outlined(bake([
+    { geo: new THREE.CylinderGeometry(r, r * 1.06, h, 9).translate(0, h / 2, 0), row: ROWS.wood[1] },
+    { geo: new THREE.CylinderGeometry(r * 1.08, r * 1.1, 0.012, 9).translate(0, 0.025, 0), row: ROWS.stone[2] },
+    { geo: new THREE.SphereGeometry(r * 0.97, 9, 4, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.35, 1).translate(0, h, 0), row: ROWS.cloud[0] },
+    { geo: new THREE.BoxGeometry(0.014, 0.075, 0.016).translate(-r - 0.03, 0.068, 0), row: ROWS.wood[1] },
+  ]), stage);
+}
+
+/**
+ * A wicker basket for apples: a store that moves (it's carried about in an
+ * armful), five apples inside. Its group is the basket itself.
+ */
+export class Basket extends Store {
+  constructor(stage: Stage, x: number, z: number) {
+    super('basket', x, z, 0);
+    const r = 0.16, h = 0.16;
+    const parts: Part[] = [
+      { geo: new THREE.CylinderGeometry(r, r * 0.8, h, 10, 1, true).translate(0, h / 2, 0), row: ROWS.wood[2] },
+      { geo: new THREE.CylinderGeometry(r * 0.8, r * 0.8, 0.01, 10).translate(0, 0.005, 0), row: ROWS.wood[1] },
+      { geo: new THREE.CylinderGeometry(r * 1.02, r * 1.02, 0.02, 10, 1, true).translate(0, h, 0), row: ROWS.wood[1] },
+      { geo: new THREE.TorusGeometry(r * 0.9, 0.012, 4, 10, Math.PI).translate(0, h, 0), row: ROWS.wood[1] }, // handle
+    ];
+    for (const [px, pz, py] of [[0.06, 0.05, 0], [-0.06, 0.05, 0], [0, -0.07, 0], [0.02, 0.0, 1], [-0.04, -0.02, 1]] as const)
+      this.slots.push({ pos: new THREE.Vector3(px, 0.06 + py * 0.08, pz), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), px * 20) });
+    this.reach = 0.4;
+    this.place(stage, parts);
+  }
+
+  /** Stand here (facing it) to work with it, from where it lies now. */
+  workSpot() {
+    const p = this.group.position;
+    const yaw = this.group.rotation.y;
+    return { x: p.x + Math.sin(yaw) * this.reach, z: p.z + Math.cos(yaw) * this.reach, yaw: yaw + Math.PI };
+  }
+}
+
+/** The mill's hopper: apples heaped in it. */
+class Hopper extends Store {
+  constructor(stage: Stage, x: number, z: number, yaw: number, top: number) {
+    super('hopper', x, z, yaw);
+    for (let k = 0; k < 15; k++) {
+      const ring = k < 7 ? 0 : k < 12 ? 1 : 2;
+      const n = [7, 5, 3][ring], i = k - [0, 7, 12][ring];
+      const a = (i / n) * Math.PI * 2 + ring * 0.5;
+      const rr = [0.15, 0.09, 0.04][ring];
+      this.slots.push({ pos: new THREE.Vector3(Math.cos(a) * rr, top - 0.11 + ring * 0.07, Math.sin(a) * rr), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a) });
+    }
+    this.reach = 0.62;
+    this.place(stage, []);
+  }
+}
+
+/** Kegs waiting, lying side by side on a low cradle. */
+export class KegRack extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number, n = 4) {
+    super(name, x, z, yaw);
+    const w = KEG_R * 2.15;
+    for (let i = 0; i < n; i++) this.slots.push({ pos: new THREE.Vector3(0, 0.05 + KEG_R, (i - (n - 1) / 2) * w), quat: new THREE.Quaternion() });
+    const parts: Part[] = [];
+    for (const sx of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.05, 0.06, n * w + 0.06).translate(sx * KEG_L * 0.3, 0.03, 0), row: ROWS.log[1] });
+    this.reach = 0.5;
+    this.place(stage, parts);
+  }
+}
+
+/**
+ * The cider mill: a stout wooden frame with a hopper on top for apples, a
+ * big flywheel with a crank handle on its side, and a spout in front where
+ * a keg stands to fill. Turning the crank feeds the apples down one by one.
+ */
+export class CiderMill {
+  readonly group = new THREE.Group();
+  readonly hopper: Hopper;
+  readonly wheel = new THREE.Group();
+  /** The crank's turn (radians). */
+  angle = 0;
+  private readonly crankR = 0.24;
+  private readonly axleY = 0.62;
+  private readonly side = 0.36; // the wheel sits this far out on the +x side
+
+  constructor(stage: Stage, readonly x: number, readonly z: number, readonly yaw: number) {
+    const top = 1.0;
+    const parts: Part[] = [];
+    // four corner posts, rails, side planks
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.07, top - 0.2, 0.07).translate(sx * 0.24, (top - 0.2) / 2, sz * 0.2), row: ROWS.log[1] });
+    parts.push({ geo: new THREE.BoxGeometry(0.5, 0.36, 0.42).translate(0, 0.42, 0), row: ROWS.log[2] });
+    parts.push({ geo: new THREE.BoxGeometry(0.56, 0.05, 0.48).translate(0, 0.62, 0), row: ROWS.log[1] });
+    // the hopper: a wide-mouthed open box above
+    const hop = new THREE.CylinderGeometry(0.26, 0.13, 0.3, 4, 1, true).rotateY(Math.PI / 4).translate(0, top - 0.15, 0);
+    parts.push({ geo: hop, row: ROWS.log[0] });
+    parts.push({ geo: new THREE.CylinderGeometry(0.27, 0.27, 0.03, 4, 1, true).rotateY(Math.PI / 4).translate(0, top, 0), row: ROWS.log[1] });
+    // the spout, front middle, over where the keg stands
+    parts.push({ geo: new THREE.BoxGeometry(0.06, 0.04, 0.16).translate(0, 0.38, 0.27), row: ROWS.log[1] });
+    // the axle stub out to the wheel
+    parts.push({ geo: new THREE.CylinderGeometry(0.025, 0.025, 0.16, 6).rotateZ(Math.PI / 2).translate(0.29, this.axleY, 0), row: ROWS.stone[2] });
+    this.group.add(outlined(bake(parts), stage));
+    // the flywheel (spokes and rim) with its handle, turning about x
+    const wp: Part[] = [{ geo: new THREE.TorusGeometry(0.3, 0.022, 4, 16).rotateY(Math.PI / 2), row: ROWS.log[2] }];
+    for (let k = 0; k < 4; k++) wp.push({ geo: new THREE.BoxGeometry(0.02, 0.6, 0.03).rotateX((k * Math.PI) / 4), row: ROWS.log[1] });
+    wp.push({ geo: new THREE.CylinderGeometry(0.015, 0.015, 0.16, 5).rotateZ(Math.PI / 2).translate(0.08, 0, this.crankR), row: ROWS.log[0] }); // handle
+    this.wheel.add(outlined(bake(wp), stage));
+    this.wheel.position.set(this.side, this.axleY, 0);
+    this.group.add(this.wheel);
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+    // the hopper's apples (a store at the mill's spot)
+    this.hopper = new Hopper(stage, x, z, yaw, top);
+  }
+
+  private local(v: THREE.Vector3) {
+    this.group.updateMatrixWorld();
+    return v.applyMatrix4(this.group.matrixWorld);
+  }
+
+  /** Turn the crank to this angle. */
+  turn(angle: number) {
+    this.angle = angle;
+    this.wheel.rotation.x = angle;
+  }
+
+  /** The handle's grip (world), and a point on the frame for the other hand. */
+  handle() {
+    const a = this.angle;
+    return this.local(new THREE.Vector3(this.side + 0.13, this.axleY + Math.sin(a) * -this.crankR + 0, Math.cos(a) * this.crankR));
+  }
+  steady() {
+    return this.local(new THREE.Vector3(0.27, 0.66, 0.16));
+  }
+
+  /** Where to stand (facing the wheel) to turn the crank. */
+  crankSpot() {
+    const p = this.local(new THREE.Vector3(this.side + 0.62, 0, 0));
+    return { x: p.x, z: p.z, yaw: this.yaw - Math.PI / 2 };
+  }
+
+  /** Where a keg stands to fill (world pose, lying under the spout's mouth). */
+  spout() {
+    const pos = this.local(new THREE.Vector3(0, KEG_R + 0.005, 0.38));
+    return { pos, quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw) };
+  }
+
+  /** Stand here, facing the mill's front, to take the keg from under the spout. */
+  frontSpot() {
+    const p = this.local(new THREE.Vector3(0, 0, 0.85));
+    return { x: p.x, z: p.z, yaw: this.yaw + Math.PI };
+  }
+}
+
+/** A single spot (where a tankard goes on a table), with a place to stand to put it there. */
+export class Spot extends Store {
+  constructor(stage: Stage, name: string, at: THREE.Vector3, yaw: number, private stand: { x: number; z: number; yaw: number }) {
+    super(name, at.x, at.z, yaw);
+    this.slots.push({ pos: new THREE.Vector3(0, at.y, 0), quat: new THREE.Quaternion() });
+    this.place(stage, []);
+  }
+
+  workSpot() {
+    return this.stand;
+  }
 }
 
 /** Make a log mesh (added to the scene by the caller). */

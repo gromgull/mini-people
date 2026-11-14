@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { type Person, withRow } from './body';
-import { type ActionPose, type ArmAngles, type PropKit, inRoot, lerp, smooth, withFK } from './actionkit';
+import { type ActionPose, type ArmAngles, type PropKit, inRoot, lerp, reachFist, smooth, withFK } from './actionkit';
 import { ROWS } from './palette';
 import { type Part, type PineSpec, bake, pineParts, wobble } from './trees';
 
@@ -349,6 +349,29 @@ export class PickApple implements Chore {
   private built: THREE.Mesh[] = [];
   private picked = false;
   private times = { reach: 0.45, grab: 1.3, tug: 1.35, snap: 1.95, down: 2.7 };
+  /** A real apple to pick (village), in the world: no conjured tree. */
+  private world: THREE.Vector3 | null = null;
+  private wReach = 0;
+
+  /** Pick this real apple on the next start (stand where reach() says), or null to conjure. */
+  aimAt(apple: THREE.Vector3 | null) {
+    this.world = apple ? apple.clone() : null;
+  }
+
+  /** Where the apple is at full stretch, in this person's root frame (stand so the real apple is there). */
+  reach() {
+    const p = this.p;
+    const d = p.dims;
+    const hand = withFK(p, { spineX: -0.1, R: REACH }, () => inRoot(p, p.joints.wristR, _v.set(0, -d.handR * 1.6, d.handR * 0.3), new THREE.Vector3()));
+    hand.y += TIPTOE * d.height + 0.06 * Math.sqrt(d.height);
+    return hand;
+  }
+
+  /** Where the picked apple is now (world): for handing it over when the chore ends. */
+  catchPose() {
+    this.p.root.updateMatrixWorld(true);
+    return { pos: this.apple.getWorldPosition(new THREE.Vector3()), quat: this.apple.getWorldQuaternion(new THREE.Quaternion()) };
+  }
 
   constructor(private p: Person, private kit: PropKit) {
     const g = withRow(new THREE.IcosahedronGeometry(0.075, 1), ROWS.apple[0]);
@@ -365,9 +388,21 @@ export class PickApple implements Chore {
     const d = p.dims;
     const H = d.height;
     const s = Math.sqrt(H);
+    this.picked = false;
+    if (this.world) {
+      // a real apple on a real tree: just ours to hold, where it hangs
+      this.tree.visible = false;
+      p.root.updateMatrixWorld(true);
+      p.root.add(this.apple);
+      this.apple.position.copy(p.root.worldToLocal(this.world.clone()));
+      this.apple.rotation.set(0, 0, 0);
+      this.apple.scale.setScalar(s);
+      this.apple.visible = true;
+      return;
+    }
+    this.apple.visible = true;
     // the hand at full stretch (on tiptoe), and the apple just above the fingers
-    const hand = withFK(p, { spineX: -0.1, R: REACH }, () => inRoot(p, p.joints.wristR, _v.set(0, -d.handR * 1.6, d.handR * 0.3), new THREE.Vector3()));
-    hand.y += TIPTOE * H + 0.06 * s;
+    const hand = this.reach();
 
     // the crown: a lumpy ball like the glade's apple trees, sized to the picker
     for (const m of this.built) disposeMesh(m);
@@ -421,14 +456,18 @@ export class PickApple implements Chore {
     const s = Math.sqrt(H);
     const slow = 1 / Math.sqrt(tempo);
     const at = (k: keyof typeof T) => T[k] * slow;
-    const done = at('down') + CARRY_TIME;
-    if (t > done + 0.4) return false;
-    // side-on to the tree while picking (so the crown isn't over the face),
-    // square again once the tree has gone and they set off
-    P.spin = -0.85 * smooth(t / 0.4) * (1 - smooth((t - at('snap') - 0.2) / (at('down') - at('snap') - 0.2)));
-    const pop = t < 0.4 ? grow(t / 0.4) : Math.max(1e-3, 1 - smooth((t - at('snap') - 0.25) / 0.35));
-    this.tree.scale.setScalar(pop);
-    this.tree.visible = pop > 2e-3;
+    // (a real apple: done once it's down in the hand; whoever sent them takes it from there)
+    const done = this.world ? at('down') : at('down') + CARRY_TIME;
+    if (t > done + (this.world ? 0 : 0.4)) return false;
+    this.wReach = t < at('reach') ? 0 : t < at('grab') ? smooth((t - at('reach')) / (at('grab') - at('reach'))) : t < at('snap') ? 1 : 1 - smooth((t - at('snap')) / (at('down') - at('snap')));
+    if (!this.world) {
+      // side-on to the tree while picking (so the crown isn't over the face),
+      // square again once the tree has gone and they set off
+      P.spin = -0.85 * smooth(t / 0.4) * (1 - smooth((t - at('snap') - 0.2) / (at('down') - at('snap') - 0.2)));
+      const pop = t < 0.4 ? grow(t / 0.4) : Math.max(1e-3, 1 - smooth((t - at('snap') - 0.25) / 0.35));
+      this.tree.scale.setScalar(pop);
+      this.tree.visible = pop > 2e-3;
+    }
 
     // the arm: up to the apple, a couple of tugs, then down to carry it
     let a: ArmAngles = REACH;
@@ -480,10 +519,21 @@ export class PickApple implements Chore {
     return true;
   }
 
-  post() {}
+  post() {
+    // a real apple hangs wherever it hangs: put the fist right under it
+    if (!this.world || this.picked || this.wReach <= 0) return;
+    const p = this.p;
+    const d = p.dims;
+    p.root.updateMatrixWorld(true);
+    const apple = this.apple.position.clone();
+    const sh = p.root.worldToLocal(p.joints.shoulderR.getWorldPosition(new THREE.Vector3()));
+    const fist = apple.addScaledVector(apple.clone().sub(sh).normalize(), -d.handR * 1.1);
+    reachFist(p, 'R', fist, this.wReach, _w.set(-0.6, -0.4, -0.6));
+  }
 
   hide() {
     this.tree.visible = false;
+    this.apple.visible = !this.world;
     if (this.apple.parent !== this.crown) this.crown.add(this.apple);
   }
 
