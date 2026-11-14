@@ -13,6 +13,7 @@ import { randomGenome } from '../genome';
 import { Forest } from './forest';
 import { Bench, Crate, type Item, LOG_L, LOG_R, type Log, Rack, Sawhorse, Stack, type Store, Woodpile, makeFish, makeLog, setDry } from './things';
 import { Pond } from '../pond';
+import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
 import { Fisher, Innkeeper, type Job, Lumberjack, type Village, Woodworker } from './jobs';
@@ -52,6 +53,15 @@ const SITES: Site[] = [
 ];
 const houses = new Houses(stage.toon, stage.outline, stage.shadowMat, 23, SITES);
 stage.scene.add(houses.group);
+// smoke: the inn's kitchen chimney while its fire has wood, thin wisps from the cabins
+const smoke = new Smoke();
+stage.scene.add(smoke.group);
+let innChimney: Chimney | null = null;
+for (const b of houses.buildings) {
+  if (!b.chimney) continue;
+  const c = smoke.add(b.chimney, b.kind === 'inn' ? 1.8 : 0.45, b.kind === 'inn' ? 1.15 : 0.8);
+  if (b.kind === 'inn') innChimney = c;
+}
 const forest = new Forest(stage, -11.5, -1, 4.2, 26);
 stage.scene.add(forest.group);
 // a good-sized pond off to the east, for the fisher
@@ -322,6 +332,9 @@ function simulate(dt: number) {
   }
   placeLogs();
   placeItems();
+  // the kitchen fire smokes while there's firewood to burn
+  if (innChimney) innChimney.rate = innStack.count > 0 ? 1.8 : 0.15;
+  smoke.update(dt, stage.toon.uniforms.uTint.value);
 }
 
 stage.controls.target.set(num('tx', -2), 0.5, num('tz', -1));

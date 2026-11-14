@@ -30,6 +30,8 @@ export interface Building {
   pickup?: THREE.Vector3;
   /** Footprint half-sizes (local x, z), for keeping people out later. */
   half: { x: number; z: number };
+  /** The top of the chimney (world), if it has one: where smoke comes out. */
+  chimney: THREE.Vector3 | null;
 }
 
 const T = 0.085; // timber thickness
@@ -129,6 +131,7 @@ interface Built {
   door: { x: number; z: number };
   pickup?: { x: number; z: number };
   half: { x: number; z: number };
+  chimney?: THREE.Vector3;
 }
 
 /**
@@ -255,7 +258,7 @@ function inn(r: Rng): Built {
     v(-W / 2 - 0.32, eave + rise + 0.1, 0), v(W / 2 + 0.32, eave + rise + 0.1, 0),
     v(cx - 0.25, chTop, -0.3), v(cx + 0.25, chTop, 0.3), v(cx + 0.25, 0, 0.3), v(cx + 0.25, 0, -0.3),
   ];
-  return { parts, panes, hull, door: { x: px(1), z: D / 2 + 0.55 }, pickup: { x: px(3), z: D / 2 + 0.6 }, half: { x: W / 2 + 0.6, z: D2 } };
+  return { parts, panes, hull, door: { x: px(1), z: D / 2 + 0.55 }, pickup: { x: px(3), z: D / 2 + 0.6 }, half: { x: W / 2 + 0.6, z: D2 }, chimney: v(cx - 0.06, chTop + 0.1, 0) };
 }
 
 // ---------------------------------------------------------------- log cabins
@@ -358,7 +361,7 @@ function cabin(r: Rng): Built {
     v(-ox, H + rise + 0.05, 0), v(ox, H + rise + 0.05, 0),
     ...(chimney ? [chimney] : []),
   ];
-  return { parts, panes, hull, door: { x: dx, z: face + 0.5 }, half: { x: W / 2 + stick, z: D / 2 + stick } };
+  return { parts, panes, hull, door: { x: dx, z: face + 0.5 }, half: { x: W / 2 + stick, z: D / 2 + stick }, chimney: chimney ? chimney.clone().setY(chimney.y + 0.05) : undefined };
 }
 
 // ---------------------------------------------------------------- the village
@@ -397,7 +400,7 @@ export class Houses {
       const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(s.x, 0, s.z);
       this.shadows.push({ hull: b.hull.map((p) => p.clone().applyMatrix4(m)) });
       const toWorld = (p: { x: number; z: number }) => v(p.x, 0, p.z).applyMatrix4(m);
-      this.buildings.push({ kind: s.kind, x: s.x, z: s.z, yaw, door: toWorld(b.door), doorFacing: yaw + Math.PI, pickup: b.pickup && toWorld(b.pickup), half: b.half });
+      this.buildings.push({ kind: s.kind, x: s.x, z: s.z, yaw, door: toWorld(b.door), doorFacing: yaw + Math.PI, pickup: b.pickup && toWorld(b.pickup), half: b.half, chimney: b.chimney ? b.chimney.clone().applyMatrix4(m) : null });
     }
     const { flat, smooth } = bake(all);
     const mesh = new THREE.Mesh(flat, toon);
