@@ -29,8 +29,10 @@ export interface DogWorld {
   obstacles: Obstacle[];
   /** Everyone's walkers, the dog's own included (so they keep out of each other's way). */
   walkers: Walker[];
-  /** Play a sound (a bark). */
-  sound: (kind: 'woof') => void;
+  /** Where the camera is (a dog will look up at you now and then). */
+  camera: THREE.Vector3;
+  /** Play a sound (a bark, a paw down). */
+  sound: (kind: 'woof' | 'step') => void;
 }
 
 const SUPPER = new Set(['waiting for supper', 'eating']);
@@ -51,6 +53,8 @@ export class VillageDog {
   /** Where it's going once it's up on its feet (a pose has to be got out of first). */
   private pending: { x: number; z: number; yaw: number | null; fast: boolean } | null = null;
   private fast = false;
+  private nextGlance = 0;
+  private glance: (() => THREE.Vector3) | null = null;
 
   constructor(readonly dog: Quadruped, x: number, z: number, yaw: number) {
     this.anim = new QuadAnimator(dog);
@@ -93,6 +97,7 @@ export class VillageDog {
       } else if (this.doing === 'going home' && me.arrived && !this.pending) {
         this.doing = 'asleep';
         this.settle('lie', null, 0, Infinity);
+        this.anim.eyesShut = true;
       }
     } else if (SUPPER.has(o.doing)) {
       // supper: sat by the owner's place, begging
@@ -172,6 +177,9 @@ export class VillageDog {
       }
     }
 
+    if (this.doing !== 'asleep') this.anim.eyesShut = false;
+    this.eyes(w);
+
     // --- moving: up on its feet first, then off
     if (this.pending && !this.anim.down) {
       const p = this.pending;
@@ -192,6 +200,45 @@ export class VillageDog {
     this.dog.root.rotation.y = me.yaw;
     this.anim.advance(this.m, w.dt);
     this.anim.update(this.m, w.dt);
-    for (const e of this.anim.events) if (e === 'woof') w.sound('woof');
+    for (const e of this.anim.events) if (e === 'woof' || e === 'step') w.sound(e);
+  }
+
+  /**
+   * What its eyes are on: ahead when it's going somewhere, the ground in front
+   * of its nose when it's sniffing, whoever its head's turned to (its owner,
+   * someone it's greeting); otherwise glances about: someone nearby, up at its
+   * owner, now and then at you, or off at nothing much.
+   */
+  private eyes(w: DogWorld) {
+    const a = this.anim;
+    const root = this.dog.root;
+    const fwd = new THREE.Vector3(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
+    if (a.look) {
+      a.gazeAt = null; // (the eyes go with the head)
+      return;
+    }
+    if (a.pose.sniff > 0.5) {
+      a.gazeAt = root.position.clone().addScaledVector(fwd, this.dog.dims.bodyLen * 0.6 + 0.3).setY(0);
+      return;
+    }
+    if (this.m.speed > 0.1) {
+      a.gazeAt = root.position.clone().addScaledVector(fwd, 2.5).setY(0.25);
+      return;
+    }
+    if (w.time >= this.nextGlance) {
+      this.nextGlance = w.time + 1 + Math.random() * 2.5;
+      const me = this.walker;
+      const near = w.people.filter((p) => p.root.visible && Math.hypot(p.walker.x - me.x, p.walker.z - me.z) < 4);
+      const r = Math.random();
+      const face = (p: (typeof w.people)[number]) => () => p.root.position.clone().setY(p.height * 0.85);
+      if (r < 0.4 && near.length) this.glance = face(near[Math.floor(Math.random() * near.length)]);
+      else if (r < 0.65 && w.people[w.owner].root.visible) this.glance = face(w.people[w.owner]);
+      else if (r < 0.8) this.glance = () => w.camera.clone();
+      else {
+        const at = root.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0.2, (Math.random() - 0.5) * 4)).addScaledVector(fwd, 1.5);
+        this.glance = () => at;
+      }
+    }
+    a.gazeAt = this.glance?.() ?? null;
   }
 }

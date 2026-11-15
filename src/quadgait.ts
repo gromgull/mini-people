@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { twoBoneIK, aimDown } from './ik';
+import { placePupils } from './gaze';
+import { Spring } from './springs';
 import type { Quadruped } from './quadruped';
 
 /**
@@ -101,8 +103,16 @@ export class QuadAnimator {
   /** How far into each pose it is now (0 … 1), and where it's heading. */
   readonly pose = { sit: 0, lie: 0, sniff: 0 };
   private want = { sit: 0, lie: 0, sniff: 0 };
-  /** Where it's looking (world), or nowhere in particular. */
+  /** Where it's looking, head and all (world), or nowhere in particular. */
   look: THREE.Vector3 | null = null;
+  /** Where its eyes are on (world): a glance; the head turns part of the way. (`look` wins.) */
+  gazeAt: THREE.Vector3 | null = null;
+  private pupils: Spring[][];
+  private nextBlink = 1 + Math.random() * 3;
+  private blinkT = -1;
+  private lastLp: number[] = [0, 0, 0, 0];
+  /** Eyes shut (asleep). */
+  eyesShut = false;
   private lookYaw = 0;
   private lookPitch = 0;
   private barkT = -1;
@@ -138,6 +148,7 @@ export class QuadAnimator {
     this.chestUp = J.chest.position.y;
     this.chestRestY = J.hips.position.y + J.chest.position.y;
     this.G = d.girth;
+    this.pupils = dog.eyes.map(() => [new Spring(), new Spring()]);
     this.tailRest = [J.tail0.rotation.x, J.tail1.rotation.x, J.tail2.rotation.x];
     dog.root.updateMatrixWorld(true);
     const inRoot = (o: THREE.Object3D) => dog.root.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
@@ -197,8 +208,11 @@ export class QuadAnimator {
     const fold = Math.max(sit, lie);
 
     // --- where each paw is
+    let landed = false;
     this.legs.forEach((leg, i) => {
       const lp = (((m.phase - g.off[i]) % 1) + 1) % 1; // this leg's own phase: 0 = it lands
+      if (lp < this.lastLp[i] - 0.5 && m.speed > 0.05) landed = true; // (wrapped round: a paw down)
+      this.lastLp[i] = lp;
       leg.at.copy(leg.rest);
       if (lp < g.duty) {
         leg.at.z += D * (0.5 - lp / g.duty);
@@ -228,6 +242,8 @@ export class QuadAnimator {
       }
       return drop;
     };
+    // (paws landing together, as a trot's diagonal pair does, are one patter)
+    if (landed) this.events.push('step');
     const walkH = this.hipsRest.y - sink(false);
     const walkC = this.chestRestY - sink(true);
     const sitH = G * 1.15, sitC = this.chestRestY + G * 0.1;
@@ -257,11 +273,14 @@ export class QuadAnimator {
 
     // --- head: steady against the bob; down to the ground sniffing; lower lying; toward whatever it's looking at
     let wantYaw = 0, wantPitch = 0;
-    if (this.look) {
+    const headAt = this.look ?? this.gazeAt;
+    if (headAt) {
+      // (a glance turns the head only part of the way: the eyes do the rest)
+      const k = this.look ? 1 : 0.4;
       dog.root.updateMatrixWorld(true);
-      const local = J.chest.worldToLocal(this.look.clone());
-      wantYaw = Math.max(-1.2, Math.min(1.2, Math.atan2(local.x, local.z)));
-      wantPitch = Math.max(-0.5, Math.min(0.5, -Math.atan2(local.y - G * 2, Math.hypot(local.x, local.z))));
+      const local = J.chest.worldToLocal(headAt.clone());
+      wantYaw = k * Math.max(-1.2, Math.min(1.2, Math.atan2(local.x, local.z)));
+      wantPitch = k * Math.max(-0.5, Math.min(0.5, -Math.atan2(local.y - G * 2, Math.hypot(local.x, local.z))));
     }
     this.lookYaw += (wantYaw - this.lookYaw) * Math.min(1, dt * 5);
     this.lookPitch += (wantPitch - this.lookPitch) * Math.min(1, dt * 5);
@@ -309,6 +328,20 @@ export class QuadAnimator {
       _qPitch.setFromAxisAngle(X, 0.6 * leg.swing);
       foot.quaternion.copy(_qParent.invert()).multiply(_qRoot).multiply(_qPitch);
     }
+
+    // --- eyes: on whatever it's looking at (blinking now and then)
+    if (this.t >= this.nextBlink && this.blinkT < 0) this.blinkT = 0;
+    let lid = this.eyesShut ? 0.08 : 1;
+    if (this.blinkT >= 0 && !this.eyesShut) {
+      this.blinkT += dt;
+      lid = Math.max(0.08, Math.abs(1 - this.blinkT / 0.07));
+      if (this.blinkT > 0.14) {
+        this.blinkT = -1;
+        this.nextBlink = this.t + 1.5 + Math.random() * 4;
+      }
+    }
+    dog.root.updateMatrixWorld(true);
+    placePupils(dog.eyes, this.gazeAt ?? this.look, this.pupils, dt, lid);
   }
 
   /** The hind leg's raised segment (hock above the paw) now: tilted back as the paw comes up, down flat behind it sitting. */

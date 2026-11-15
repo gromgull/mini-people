@@ -103,6 +103,7 @@ function stepDogs(dt: number) {
       dog.root.position.set(g.home.x + R * Math.sin(g.a) - R * 0, 0, g.home.z + R * Math.cos(g.a) - R);
       dog.root.rotation.y = g.a + Math.PI / 2;
     }
+    g.anim.gazeAt = camera.position; // (the demo's dogs keep an eye on you)
     g.anim.advance(g.m, dt);
     g.anim.update(g.m, dt);
   });

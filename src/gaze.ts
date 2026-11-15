@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Person } from './body';
+import type { Eye, Person } from './body';
 import { Spring, type SpringParams } from './springs';
 
 export const LOOK_MODES = ['auto', 'cursor', 'camera', 'selected'] as const;
@@ -169,31 +169,38 @@ export class Gaze {
       }
     }
 
-    p.eyes.forEach((e, k) => {
-      if (this.hasTarget) {
-        e.pivot.worldToLocal(_d.copy(this.target)).normalize();
-      } else {
-        _d.set(0, -0.05, 1); // forward, slightly down
-      }
-      // keep the pupil on the front of the eyeball
-      const ang = Math.acos(THREE.MathUtils.clamp(_d.z, -1, 1));
-      if (ang > MAX_ANGLE) {
-        const k2 = Math.sin(MAX_ANGLE) / Math.max(1e-4, Math.hypot(_d.x, _d.y));
-        _d.set(_d.x * k2, _d.y * k2, Math.cos(MAX_ANGLE));
-      }
-      const [sx, sy] = this.springs[k];
-      let x = sx.update(dt, _d.x, PUPIL);
-      let y = sy.update(dt, _d.y, PUPIL);
-      const l = Math.hypot(x, y);
-      const lim = Math.sin(MAX_ANGLE * 1.15); // springs may overshoot a bit — that's the googly bit
-      if (l > lim) {
-        x *= lim / l;
-        y *= lim / l;
-      }
-      const z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
-      e.pupil.position.set(x, y, z).multiplyScalar(e.r * 0.72);
-      e.pupil.lookAt(e.pupil.position.clone().multiplyScalar(2).applyMatrix4(e.pivot.matrixWorld));
-      e.pivot.scale.set(1, lid, 1);
-    });
+    placePupils(p.eyes, this.hasTarget ? this.target : null, this.springs, dt, lid);
   }
+}
+
+/**
+ * Put googly pupils where they look (a world point, or ahead and a touch
+ * down), on springs so they swing and overshoot a little, kept on the front
+ * of the eyeball; `lid` squashes the eyes for a blink. Shared by people and
+ * animals. (Call after the body's posed and its matrices are up to date.)
+ */
+export function placePupils(eyes: Eye[], target: THREE.Vector3 | null, springs: Spring[][], dt: number, lid: number) {
+  eyes.forEach((e, k) => {
+    if (target) e.pivot.worldToLocal(_d.copy(target)).normalize();
+    else _d.set(0, -0.05, 1); // forward, slightly down
+    // keep the pupil on the front of the eyeball
+    const ang = Math.acos(THREE.MathUtils.clamp(_d.z, -1, 1));
+    if (ang > MAX_ANGLE) {
+      const k2 = Math.sin(MAX_ANGLE) / Math.max(1e-4, Math.hypot(_d.x, _d.y));
+      _d.set(_d.x * k2, _d.y * k2, Math.cos(MAX_ANGLE));
+    }
+    const [sx, sy] = springs[k];
+    let x = sx.update(dt, _d.x, PUPIL);
+    let y = sy.update(dt, _d.y, PUPIL);
+    const l = Math.hypot(x, y);
+    const lim = Math.sin(MAX_ANGLE * 1.15); // springs may overshoot a bit — that's the googly bit
+    if (l > lim) {
+      x *= lim / l;
+      y *= lim / l;
+    }
+    const z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+    e.pupil.position.set(x, y, z).multiplyScalar(e.r * 0.72);
+    e.pupil.lookAt(e.pupil.position.clone().multiplyScalar(2).applyMatrix4(e.pivot.matrixWorld));
+    e.pivot.scale.set(1, lid, 1);
+  });
 }

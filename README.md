@@ -236,7 +236,11 @@ So far it has one chain:
   sniffs about, or goes to say hello to whoever's near with a wag and
   sometimes a bark. At supper it sits begging by its owner's place at the
   table; on the green it trots about among the dancers; at night it lies
-  at its owner's door till morning. (`?follow=8` follows it.)
+  at its owner's door till morning, eyes shut. Its googly eyes are on
+  whatever it's minding (ahead on the move, the ground when sniffing, its
+  owner, whoever it's greeting), or glancing about at people nearby and
+  now and then at you; it blinks, and its paws patter. (`?follow=8`
+  follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
   on each other. Diners at a table talk in pairs while they wait for supper,

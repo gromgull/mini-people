@@ -318,6 +318,8 @@ const dog = (() => {
   const h = homes[DOG_OWNER];
   return new VillageDog(body, h.x + Math.cos(h.yaw) * 0.6, h.z - Math.sin(h.yaw) * 0.6, h.yaw);
 })();
+/** The dog's footfalls: a person's step, as light as it gets. */
+const DOG_PAWS = { f0: 300, formant: 1.6, rate: 1, weight: 0 };
 /** Everyone's walkers, the dog's too: so they keep out of each other's way. */
 const allWalkers = [...walkers, dog.walker];
 const houseObstacles: Obstacle[] = houses.buildings.map((b) => ({ kind: 'box', x: b.x, z: b.z, yaw: b.yaw, hx: b.half.x, hz: b.half.z }));
@@ -642,9 +644,13 @@ function simulate(dt: number) {
     green: L.green,
     obstacles: obs,
     walkers: allWalkers,
-    sound: () => {
+    camera: stage.camera.position,
+    sound: (kind) => {
       const w = crowd.whereAt(dog.dog.root, dog.dog.height);
-      if (w && crowd.sound.live) crowd.sound.woof(dog.dog.genome.size, w);
+      if (!w || !crowd.sound.live) return;
+      if (kind === 'woof') crowd.sound.woof(dog.dog.genome.size, w);
+      // a paw down: the people's footstep, feather-light and quieter
+      else crowd.sound.step(DOG_PAWS, { pan: w.pan, gain: w.gain * 0.7 });
     },
   });
   crowd.endStep(dt);
