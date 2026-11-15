@@ -39,7 +39,6 @@ export interface Tune {
 export const SECTION_BARS = 4;
 export const FORM_SLOTS = 4 * SECTION_BARS * 8; // A A B B, 8 eighths per bar
 export const PHRASE_SLOTS = SECTION_BARS * 8;
-export const VOICES = ['melody', 'harmony', 'bass'] as const;
 /** The banjo's part (parts[BANJO]). */
 export const BANJO = 3;
 /** The double bass's part (parts[BASS]). */
@@ -267,9 +266,6 @@ let current = makeTune(Math.random);
 const playing = [0, 0, 0, 0, 0]; // fiddlers per part, then banjos, then basses
 
 export const tune = () => current;
-export function setTune(t: Tune) {
-  current = t;
-}
 
 /**
  * Join in: a fiddle takes the first free part (melody first), a banjo plays

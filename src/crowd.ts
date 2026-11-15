@@ -24,9 +24,6 @@ import { q, type Stage } from './stage';
 export interface CrowdSettings {
   gait: GaitParams;
   personality: number;
-  segments: number;
-  eyes: boolean;
-  merge: boolean;
   lookAt: LookMode;
 }
 
@@ -105,8 +102,7 @@ export class Crowd {
 
   /** Build a body (plus its drop shadow) and add it to the scene. */
   spawn(genome: Genome, index: number) {
-    const s = this.settings;
-    const p = buildPerson(genome, this.stage.toon, this.stage.outline, { segments: s.segments, eyes: s.eyes, skin: s.merge ? this.stage.skinMats : null });
+    const p = buildPerson(genome, this.stage.toon, this.stage.outline, { segments: 8, eyes: true, skin: this.stage.skinMats });
     p.root.userData.index = index;
     // drop shadow: an ellipse in a pivot that turns it away from the sun (see Stage.orient)
     const c = this.stage.makeCaster(Math.max(p.dims.hipR, p.dims.shoulderR, p.dims.waistR) * 1.35, p.dims.height);

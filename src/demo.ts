@@ -35,9 +35,6 @@ const settings = {
   count: num('count', 48),
   spacing: num('spacing', 0.9),
   spin: q.has('spin'),
-  segments: num('segs', 8),
-  eyes: true,
-  merge: q.get('merge') !== '0', // one draw call per person (rigid skinning) instead of one per part
   mode: (MODES.includes(q.get('mode') as Mode) ? q.get('mode') : 'parade') as Mode,
   speed: num('speed', WALK_SPEED),
   animFps: num('fps', 0), // 0 = smooth; 8–12 = classic sprite feel
@@ -496,7 +493,6 @@ sndF.add(sound.settings, 'steps', 0, 1.5, 0.01).name('footsteps').onChange(apply
 sndF.add(sound.settings, 'voices', 0, 1.5, 0.01).onChange(applySound);
 sndF.add(sound.settings, 'tools', 0, 1.5, 0.01).name('tools & props').onChange(applySound);
 sndF.add(sound.settings, 'music', 0, 1.5, 0.01).onChange(applySound);
-sndF.add(sound.settings, 'crunch').name('retro crunch').onChange(applySound);
 // sound lab: audition each recipe on its own, with the selected person's voice
 const lab = sndF.addFolder('Sound lab').close();
 const labV = () => (people[selected] ? voiceOf(people[selected]) : { f0: 150, formant: 1, rate: 1, weight: 0.5 });
@@ -589,7 +585,6 @@ const refill = () => stage.refillAtlas();
 look.add(settings, 'pixelSize', 1, 8, 1).name('pixel size').onChange(resize);
 look.add(settings, 'maxFps', { '15': 15, '24': 24, '30': 30, '60': 60, uncapped: 0 }).name('max fps');
 const statsCtl = look.add(settings, 'stats').name('show fps  [S]');
-look.add(settings, 'sky').name('sky & horizon');
 look.add(settings.ramp, 'bands', 1, 5, 1).onChange(refill);
 look.add(settings.ramp, 'smooth').onChange(refill);
 look.add(settings.ramp, 'bias', 0.3, 3, 0.05).name('shadow bias').onChange(refill);
@@ -605,12 +600,8 @@ look.add(settings, 'shadowLength', 0, 1.5, 0.05).name('shadow length');
 look.add(settings, 'outline');
 look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
 look.addColor(settings, 'outlineColor').name('outline color');
-look.add(settings, 'segments', 4, 16, 2).onFinishChange(rebuildAll);
-look.add(settings, 'eyes').onChange(rebuildAll);
-look.add(settings, 'merge').name('one draw call each').onChange(rebuildAll);
 
 const grassF = look.addFolder('Ground').close();
-grassF.add(settings.grass, 'enabled').name('grass patches');
 grassF.add(settings.grass, 'scale', 1, 20, 0.1).name('patch size');
 grassF.add(settings.grass, 'ragged', 0, 0.4, 0.005).name('edge raggedness');
 grassF.add(settings.grass, 'tooth', 0.05, 1.5, 0.01).name('tooth size');

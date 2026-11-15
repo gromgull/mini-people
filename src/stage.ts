@@ -35,7 +35,6 @@ export interface Look {
   ramp: typeof defaultRamp;
   maxFps: number;
   stats: boolean;
-  sky: boolean;
   grass: typeof defaultGrass;
 }
 
@@ -56,8 +55,7 @@ export function lookFromQuery(defaults: { time?: number } = {}): Look {
     ramp: { ...defaultRamp, smooth: q.get('smooth') === '1' },
     maxFps: num('maxfps', 30), // render cap; 0 = every display refresh (60/120 Hz)
     stats: q.has('stats'), // fps / frame time / draw calls overlay
-    sky: q.get('sky') !== '0',
-    grass: { ...defaultGrass, enabled: q.get('grass') !== '0', flowers: num('flowers', defaultGrass.flowers) },
+    grass: { ...defaultGrass, flowers: num('flowers', defaultGrass.flowers) },
   };
 }
 
@@ -144,7 +142,7 @@ export class Stage {
       const g = new THREE.PlaneGeometry(1600, 1600);
       g.rotateX(-Math.PI / 2);
       g.setAttribute('aRow', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(ROWS.ground[0]), 1));
-      this.ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(g, this.toon);
+      this.ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(g, this.groundMat);
       this.scene.add(this.ground);
     }
 
@@ -264,7 +262,6 @@ export class Stage {
     const look = this.look;
     this.toon.uniforms.uWrap.value = look.wrap;
     const gm = this.groundMat.uniforms;
-    this.ground.material = look.grass.enabled ? this.groundMat : this.toon;
     gm.uScale.value = look.grass.scale;
     gm.uRagged.value = look.grass.ragged;
     gm.uTooth.value = look.grass.tooth;
@@ -275,40 +272,34 @@ export class Stage {
     const fog = this.fog;
     const camera = this.camera;
     const tgt = this.controls.target;
-    this.sky.visible = this.clouds.group.visible = look.sky;
-    if (!look.sky) this.sun.group.visible = this.moon.group.visible = false;
-    if (!look.sky) {
-      fog.uFogFar.value = fog.uFogNear.value = 1e9;
-    } else {
-      // keep everyone well inside the clear zone; ease so the horizon doesn't jump
-      const want = Math.max(24, extent * 4 + 14);
-      this.horizonFar += (want - this.horizonFar) * Math.min(1, dt * 2);
-      const horizonFar = this.horizonFar;
-      const fwd = this._fwd.subVectors(tgt, camera.position).setY(0).normalize();
-      fog.uFogC.value.set(tgt.x, tgt.z);
-      fog.uFogDir.value.set(fwd.x, fwd.z);
-      fog.uFogFar.value = horizonFar;
-      fog.uFogNear.value = horizonFar * 0.8;
-      this.clouds.update(camera, tgt, horizonFar, dt);
-      this.sun.update(camera, tgt, horizonFar, this.sunWorld);
-      this.moon.update(camera, tgt, horizonFar, this.moonWorld);
-      this.sun.setColor(this.day.sun);
-      this._hz.copy(tgt).setY(0).addScaledVector(fwd, horizonFar).project(camera);
-      const u = this.sky.material.uniforms;
-      u.uHorizon.value = this._hz.y;
-      u.uRes.value.set(this.rt.width, this.rt.height);
-      // time of day: sky colours, a glow around the sun when it faces us, stars at night
-      u.uTop.value.copy(this.day.top);
-      u.uGlow.value.copy(this.day.glow);
-      u.uGlowAmt.value = this.day.glowAmt * THREE.MathUtils.smoothstep(this.sun.facing, -0.2, 0.6);
-      u.uSunX.value = this._sunNdc.copy(this.sun.at).project(camera).x;
-      u.uStars.value = this.day.stars;
-      // a full turn of the view slides the stars by three screen widths, and round again
-      const wrap = Math.round(this.rt.width * 3);
-      u.uStarWrap.value = wrap;
-      u.uStarShift.value = (((Math.atan2(fwd.x, fwd.z) / (Math.PI * 2)) * wrap) % wrap + wrap) % wrap;
-      u.uTime.value = performance.now() / 1000;
-    }
+    // keep everyone well inside the clear zone; ease so the horizon doesn't jump
+    const want = Math.max(24, extent * 4 + 14);
+    this.horizonFar += (want - this.horizonFar) * Math.min(1, dt * 2);
+    const horizonFar = this.horizonFar;
+    const fwd = this._fwd.subVectors(tgt, camera.position).setY(0).normalize();
+    fog.uFogC.value.set(tgt.x, tgt.z);
+    fog.uFogDir.value.set(fwd.x, fwd.z);
+    fog.uFogFar.value = horizonFar;
+    fog.uFogNear.value = horizonFar * 0.8;
+    this.clouds.update(camera, tgt, horizonFar, dt);
+    this.sun.update(camera, tgt, horizonFar, this.sunWorld);
+    this.moon.update(camera, tgt, horizonFar, this.moonWorld);
+    this.sun.setColor(this.day.sun);
+    this._hz.copy(tgt).setY(0).addScaledVector(fwd, horizonFar).project(camera);
+    const u = this.sky.material.uniforms;
+    u.uHorizon.value = this._hz.y;
+    u.uRes.value.set(this.rt.width, this.rt.height);
+    // time of day: sky colours, a glow around the sun when it faces us, stars at night
+    u.uTop.value.copy(this.day.top);
+    u.uGlow.value.copy(this.day.glow);
+    u.uGlowAmt.value = this.day.glowAmt * THREE.MathUtils.smoothstep(this.sun.facing, -0.2, 0.6);
+    u.uSunX.value = this._sunNdc.copy(this.sun.at).project(camera).x;
+    u.uStars.value = this.day.stars;
+    // a full turn of the view slides the stars by three screen widths, and round again
+    const wrap = Math.round(this.rt.width * 3);
+    u.uStarWrap.value = wrap;
+    u.uStarShift.value = (((Math.atan2(fwd.x, fwd.z) / (Math.PI * 2)) * wrap) % wrap + wrap) % wrap;
+    u.uTime.value = performance.now() / 1000;
     this.outline.visible = look.outline;
     this.skinMats.outline.visible = look.outline;
     this.cloudOutline.visible = look.outline;

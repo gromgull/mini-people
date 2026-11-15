@@ -129,14 +129,11 @@ Handy for sharing a particular scene, e.g.
 | `fps` | animate on twos (e.g. 10) |
 | `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
 | `stats` | start with the fps / frame time / draw call overlay on |
-| `merge` | `0` draws every body part separately (about 37 draw calls per person instead of 3), for comparison |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
-| `sky=0` | no sky or horizon |
 | `time` | time of day in hours, 0–24 (default 10; 18 ≈ sunset, 0 = midnight) |
 | `daycycle=0` | stop the clock (by default a day passes in `daymin` minutes) |
 | `daymin` | real minutes per day when the clock runs (default 30) |
-| `grass=0` | plain ground, no grass patches |
 | `flowers` | flower density, 0–1 (0 = none) |
 | `trees=0` | no forest or apple trees |
 | `pond=0` | no pond |

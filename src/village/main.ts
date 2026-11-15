@@ -48,9 +48,6 @@ if (!q.has('seed')) {
 const settings: CrowdSettings & { seed: number; paused: boolean; speed: number; panel: boolean } = {
   gait: { ...defaultGait },
   personality: 1,
-  segments: num('segs', 8),
-  eyes: true,
-  merge: q.get('merge') !== '0',
   lookAt: 'auto',
   seed: num('seed', 1),
   paused: q.has('paused'),

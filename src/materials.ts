@@ -212,7 +212,6 @@ export function createOutlineMaterial(fog: FogUniforms = createFog(1e9)) {
 }
 
 export interface GrassSettings {
-  enabled: boolean;
   scale: number; // world size of the colour patches
   ragged: number; // how hard the zig-zag teeth bite across patch edges
   tooth: number; // world size of the triangles the edges zig-zag over
@@ -221,7 +220,7 @@ export interface GrassSettings {
   flowerSize: number; // petal length (world units)
 }
 
-export const defaultGrass: GrassSettings = { enabled: true, scale: 7, ragged: 0.01, tooth: 0.3, contrast: 0.6, flowers: 0.6, flowerSize: 0.1 };
+export const defaultGrass: GrassSettings = { scale: 7, ragged: 0.01, tooth: 0.3, contrast: 0.6, flowers: 0.6, flowerSize: 0.1 };
 
 /**
  * Toon ground with painted-looking grass patches: two independent world-space

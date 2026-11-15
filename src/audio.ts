@@ -24,7 +24,6 @@ export interface AudioSettings {
   voices: number;
   tools: number;
   music: number;
-  crunch: boolean;
 }
 
 /**
@@ -41,7 +40,7 @@ export interface VoiceFx {
 }
 export const defaultVoiceFx: VoiceFx = { wobble: true, cascade: true, hums: true, room: true, softRing: true, warm: true };
 
-export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, music: 0.7, crunch: false };
+export const defaultAudio: AudioSettings = { enabled: true, volume: 0.7, steps: 0.45, voices: 0.8, tools: 0.8, music: 0.7 };
 
 const VOWELS: [number, number][] = [
   [800, 1200], // a
@@ -59,8 +58,6 @@ export class Sound {
   private offline = false;
   private master!: GainNode;
   private bus!: { steps: GainNode; voices: GainNode; tools: GainNode; music: GainNode };
-  private crusher!: WaveShaperNode;
-  private dry!: GainNode;
   private noise!: AudioBuffer;
   private tokens = { steps: 0, voices: 0, tools: 0, music: 0 };
   private lastRefill = 0;
@@ -94,12 +91,8 @@ export class Sound {
     comp.threshold.value = -18;
     comp.ratio.value = 4;
     this.master = ctx.createGain();
-    this.dry = ctx.createGain();
-    this.crusher = ctx.createWaveShaper();
-    this.crusher.curve = crushCurve(5);
     const mix = ctx.createGain();
-    mix.connect(this.dry).connect(this.master);
-    mix.connect(this.crusher).connect(this.master);
+    mix.connect(this.master);
     this.master.connect(comp).connect(ctx.destination);
     this.bus = { steps: ctx.createGain(), voices: ctx.createGain(), tools: ctx.createGain(), music: ctx.createGain() };
     const { voices, ...others } = this.bus;
@@ -122,7 +115,7 @@ export class Sound {
     this.apply();
   }
 
-  /** Push settings (volume, bus levels, crunch) into the graph. */
+  /** Push settings (volume, bus levels) into the graph. */
   apply() {
     if (!this.ctx) return;
     const s = this.settings;
@@ -131,12 +124,9 @@ export class Sound {
     this.bus.voices.gain.value = s.voices;
     this.bus.tools.gain.value = s.tools;
     this.bus.music.gain.value = s.music;
-    this.dry.gain.value = s.crunch ? 0 : 1;
     this.roomSend.gain.value = this.voiceFx.room ? 0.14 : 0;
     this.voiceSat.curve = this.voiceFx.warm ? satCurve(2.2) : null;
     this.voiceShelf.gain.value = this.voiceFx.warm ? -6 : 0;
-    this.crusher.disconnect();
-    if (s.crunch) this.crusher.connect(this.master);
   }
 
   /** Pause/resume the whole engine (e.g. while the tab is hidden). */
@@ -833,14 +823,3 @@ function satCurve(drive: number) {
   return c;
 }
 
-/** Bit-depth reduction curve for the optional retro crunch. */
-function crushCurve(bits: number) {
-  const n = 4096;
-  const c = new Float32Array(n);
-  const steps = 2 ** bits;
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    c[i] = Math.round(x * steps) / steps;
-  }
-  return c;
-}
