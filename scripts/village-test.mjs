@@ -160,6 +160,9 @@ if (Number(seconds) >= 400 && result.stats.kegs < 1) problems.push('no cider was
 if (result.stats.poured < 1) problems.push('nobody was served cider');
 if (Number(seconds) >= 900 && result.stats.mown < 1) problems.push('no wheat was mown');
 if (Number(seconds) >= 900 && result.stats.sheaves < 2) problems.push('no sheaves were stood in the stook');
+if (Number(seconds) >= 900 && result.stats.threshed < 2) problems.push('no sheaves were threshed');
+// (flour only if the sails turned a while: a calm day grinds nothing, and that's as it should be)
+if (Number(seconds) >= 900 && result.stats.sailing >= 120 && result.stats.threshed >= 2 && result.stats.flour < 1) problems.push(`the sails turned ${Math.round(result.stats.sailing)}s, but no flour was milled`);
 if (result.stats.kegsBack < 1) problems.push('the cooper fetched no empty keg back from the inn');
 if (result.stats.hooped < 1) problems.push('the cooper hooped no keg');
 // (kegs: only ever reused, made by the cooper, or on their way: never made from nothing, never more than allowed)
@@ -182,6 +185,7 @@ console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stat
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
 console.log(`  day ${result.day} now; the wind was ${result.winds.join(', ')}`);
 console.log(`  wheat: strips mown ${result.stats.mown}, sheaves stooked ${result.stats.sheaves}`);
+console.log(`  windmill: threshed ${result.stats.threshed}, sails turned ${Math.round(result.stats.sailing)}s, flour ${result.stats.flour}`);
 console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);

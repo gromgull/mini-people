@@ -15,13 +15,14 @@ import { crouchFor, lowerOnto, seatFit, sitTimes, thighRest } from './seat';
 import { Fiddle } from './fiddle';
 import { Hoop, type HoopPlan, Shave } from './cooper';
 import { Scythe } from './scythe';
+import { Flail } from './flail';
 import { Armful, type ItemPose } from './armful';
 import { Hold, type HoldPlan } from './hold';
 import type { PineSpec } from './trees';
 import { BPM, PHRASE_SLOTS } from './tune';
 export { BPM };
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe', 'shave', 'hoop', 'scythe'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe', 'shave', 'hoop', 'scythe', 'flail'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /**
@@ -70,6 +71,7 @@ export const KIND_INFO: Record<ActionKind, KindInfo> = {
   shave: { working: true, staysPut: true, seated: true },
   hoop: { working: true, staysPut: true },
   scythe: { working: true, moving: true },
+  flail: { working: true, staysPut: true },
 };
 /** Is this action (if any) of this sort? */
 export const kindIs = (k: ActionKind | null | undefined, trait: keyof KindInfo) => !!k && !!KIND_INFO[k][trait];
@@ -239,8 +241,9 @@ export class Actor {
   choreOf(kind: 'shave'): Shave;
   choreOf(kind: 'hoop'): Hoop;
   choreOf(kind: 'scythe'): Scythe;
-  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine' | 'bass' | 'pipe' | 'fiddle' | 'shave' | 'hoop' | 'scythe'): Chore {
-    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine, bass: DoubleBass, pipe: Pipe, fiddle: Fiddle, shave: Shave, hoop: Hoop, scythe: Scythe }[kind];
+  choreOf(kind: 'flail'): Flail;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine' | 'bass' | 'pipe' | 'fiddle' | 'shave' | 'hoop' | 'scythe' | 'flail'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine, bass: DoubleBass, pipe: Pipe, fiddle: Fiddle, shave: Shave, hoop: Hoop, scythe: Scythe, flail: Flail }[kind];
     return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
@@ -275,6 +278,8 @@ export class Actor {
       staves?: number;
       /** Mowing: how many swings. */
       swings?: number;
+      /** Threshing: how many blows of the flail. */
+      blows?: number;
       /** Hoops: the keg (a real one, else one's conjured), how many blows, a new one to raise. */
       hoop?: HoopPlan;
       /** Sit down for it (on a conjured seat) and get up after. */
@@ -350,6 +355,12 @@ export class Actor {
       h.aim(opts.hoop ?? { blows: 10, raise: Math.random() < 0.5 });
       this.chore = h;
       h.start();
+    }
+    if (kind === 'flail') {
+      const fl = this.choreOf('flail');
+      fl.plan(opts.blows ?? 6);
+      this.chore = fl;
+      fl.start();
     }
     if (kind === 'scythe') {
       const sc = this.choreOf('scythe');

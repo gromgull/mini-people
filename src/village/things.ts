@@ -210,7 +210,7 @@ export type ItemPlace =
 
 export interface Item {
   id: number;
-  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal' | 'sheaf';
+  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal' | 'sheaf' | 'flour';
   place: ItemPlace;
   mesh: THREE.Object3D;
   /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
@@ -415,7 +415,7 @@ export const APPLE_R = 0.065;
 
 /** How high an item's middle sits lying on the ground (dropped). */
 export function restY(kind: Item['kind']) {
-  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0, sheaf: SHEAF_R }[kind];
+  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0, sheaf: SHEAF_R, flour: 0 }[kind];
 }
 export { KEG_L, KEG_R };
 
@@ -907,5 +907,40 @@ export class Stook extends Store {
     }
     this.reach = 0.55;
     this.place(stage, []);
+  }
+}
+
+/** A sack of flour (item mesh): stood up, tied at the neck, its origin at the bottom. */
+export function makeFlour(stage: Stage) {
+  const body = new THREE.SphereGeometry(0.11, 8, 6).scale(1, 1.25, 0.85).translate(0, 0.13, 0);
+  return outlined(bake([
+    { geo: body, row: ROWS.plaster[0] },
+    { geo: new THREE.CylinderGeometry(0.035, 0.05, 0.05, 6).translate(0, 0.27, 0), row: ROWS.plaster[1] },
+    { geo: new THREE.CylinderGeometry(0.038, 0.038, 0.015, 6).translate(0, 0.255, 0), row: ROWS.bark[0] },
+  ]), stage);
+}
+
+/** The threshing floor: a square of boards on the ground where sheaves are laid to be flailed. */
+export class ThreshingFloor extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number) {
+    super(name, x, z, yaw);
+    for (const dz of [-0.09, 0.09]) this.slots.push({ pos: new THREE.Vector3(0, 0.045 + SHEAF_R * 0.8, dz), quat: new THREE.Quaternion() });
+    const parts: Part[] = [];
+    for (let k = 0; k < 5; k++) parts.push({ geo: new THREE.BoxGeometry(1.0, 0.04, 0.19).translate(0, 0.02, (k - 2) * 0.2), row: k % 2 ? ROWS.wood[1] : ROWS.wood[0] });
+    this.reach = 0.7;
+    this.place(stage, parts);
+  }
+}
+
+/** A low pallet that sacks of flour stand on, side by side in two rows. */
+export class SackRack extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number, n = 6) {
+    super(name, x, z, yaw);
+    for (let i = 0; i < n; i++) {
+      const row = i % 2, col = Math.floor(i / 2);
+      this.slots.push({ pos: new THREE.Vector3((col - (n / 2 - 1) / 2) * 0.22, 0.06, (row - 0.5) * 0.22), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), i * 0.7) });
+    }
+    this.reach = 0.55;
+    this.place(stage, [{ geo: new THREE.BoxGeometry((n / 2) * 0.24, 0.06, 0.5).translate(0, 0.03, 0), row: ROWS.timber[1] }]);
   }
 }

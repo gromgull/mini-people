@@ -27,6 +27,7 @@ const shots = process.argv[2]
       ['act-shave', 'mode=single&seed=1&who=3&act=shave&actAt=0.1&zoom=3&az=50&el=12&t=3.55&paused&nogui'],
       ['act-hoop', 'mode=single&seed=1&who=3&act=hoop&actAt=0.1&zoom=3&az=50&el=12&t=2.95&paused&nogui'],
       ['act-scythe', 'mode=single&seed=1&who=3&act=scythe&actAt=0.1&zoom=2.6&az=35&el=18&t=1.33&paused&nogui'],
+      ['act-flail', 'mode=single&seed=1&who=3&act=flail&actAt=0.1&zoom=2.6&az=80&el=10&t=1.15&paused&nogui'],
       ['act-talk', 'mode=wander&count=2&seed=4&select=0&act=talk&actAt=0.5&t=2.5&paused&focus&zoom=3&az=90&nogui'],
       ['act-auto', 'mode=stand&seed=2&auto&t=12&nogui'],
       ['parade-auto', 'seed=3&auto&t=10&nogui'],

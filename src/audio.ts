@@ -409,7 +409,7 @@ export class Sound {
    * Sounds of the outdoor chores: axe, falling tree, leaves, apples, and
    * fishing (cast, float, splashes, the reel's ratchet).
    */
-  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'shave' | 'clank' | 'swish', w: Where) {
+  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'shave' | 'clank' | 'swish' | 'thud', w: Where) {
     // the reel's ratchet ticks fast and quietly: not worth a rate-limit token
     if (!this.live || (kind !== 'tick' && !this.allow('tools'))) return;
     const t = this.ctx!.currentTime + 0.003;
@@ -503,6 +503,12 @@ export class Sound {
         // a draw-knife down a stave: a bright, papery curl of a hiss, falling as the shaving comes off
         this.noiseSweep(t, o, rand(3200, 3800), rand(1700, 2100), 1.8, 0.5, 0.03, 0.4);
         this.noiseSrc(t + 0.05, 0.3).connect(this.filter('bandpass', rand(900, 1100), 1.5)).connect(this.env(t + 0.05, 0.18, 0.05, 0.22)).connect(o);
+        break;
+      case 'thud':
+        // a flail landing flat on straw: a soft, deep whump with a dry rustle round it
+        this.tone('sine', t, rand(95, 115), 55, 0.16).connect(this.env(t, 0.8, 0.003, 0.13)).connect(o);
+        this.noiseSrc(t, 0.12).connect(this.filter('lowpass', 700, 0.8)).connect(this.env(t, 0.5, 0.002, 0.08)).connect(o);
+        this.noiseSrc(t + 0.01, 0.2).connect(this.filter('bandpass', 3400, 1.2)).connect(this.env(t + 0.01, 0.16, 0.01, 0.16)).connect(o);
         break;
       case 'swish':
         // a scythe through standing wheat: a long, dry, falling hiss with a crisp edge

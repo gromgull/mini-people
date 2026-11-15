@@ -520,7 +520,7 @@ gaitF.add(G, 'footRoll', 0, 0.8, 0.01).name('foot roll');
 gaitF.add({ reset: () => { Object.assign(G, defaultGait); gaitF.controllersRecursive().forEach((c) => c.updateDisplay()); } }, 'reset');
 
 const actF = gui.addFolder('Actions');
-for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]'], ['haul', '🪵 haul a log  [H]'], ['banjo', '🪕 banjo  [B]'], ['bass', '🎻 double bass  [U]'], ['pipe', '💨 smoke a pipe  [P]'], ['armful', '🔥 armful of firewood  [G]'], ['shave', '🪒 shave staves  [V]'], ['hoop', '🛢 drive hoops on a keg  [K]'], ['scythe', '🌾 mow with a scythe  [M]']] as const)
+for (const [k, label] of [['wave', '👋 wave  [1]'], ['hammer', '🔨 hammer  [2]'], ['jump', '⤴ jump  [3]'], ['fall', '🤕 trip  [4]'], ['carry', '📦 carry  [5]'], ['sit', '🪑 sit  [6]'], ['talk', '💬 talk  [7]'], ['saw', '🪚 saw  [8]'], ['fiddle', '🎻 fiddle  [9]'], ['dance', '💃 dance  [0]'], ['chop', '🪓 chop a tree  [C]'], ['pick', '🍎 pick an apple  [A]'], ['fish', '🎣 fish  [F]'], ['dine', '🍽 sit at a table  [T]'], ['eat', '🐟 eat  [E]'], ['drink', '🍺 drink  [D]'], ['haul', '🪵 haul a log  [H]'], ['banjo', '🪕 banjo  [B]'], ['bass', '🎻 double bass  [U]'], ['pipe', '💨 smoke a pipe  [P]'], ['armful', '🔥 armful of firewood  [G]'], ['shave', '🪒 shave staves  [V]'], ['hoop', '🛢 drive hoops on a keg  [K]'], ['scythe', '🌾 mow with a scythe  [M]'], ['flail', '🌾 thresh with a flail  [L]']] as const)
   actF.add({ go: () => act(selected, k) }, 'go').name(label);
 actF.add({ all: () => people.forEach((_, i) => setTimeout(() => act(i, 'jump'), Math.random() * 400)) }, 'all').name('everyone jump!');
 actF.add({ all: () => people.forEach((_, i) => act(i, 'fall')) }, 'all').name('everyone trip!');
@@ -575,7 +575,7 @@ labBtn(labTools, 'box down (thunk)', () => sound.thunk(C, 1));
 labBtn(labTools, 'log down (thunk)', () => sound.thunk(C, 0.8));
 labBtn(labTools, 'bench creak', () => sound.creak(C));
 labBtn(labTools, 'clap', () => sound.clap(C));
-for (const k of ['chop', 'crack', 'whump', 'rustle', 'snap', 'crunch', 'whoosh', 'plop', 'splash', 'tick', 'munch', 'gulp', 'clunk', 'scrape', 'shave', 'clank', 'swish'] as const) labBtn(labTools, k, () => sound.chore(k, C));
+for (const k of ['chop', 'crack', 'whump', 'rustle', 'snap', 'crunch', 'whoosh', 'plop', 'splash', 'tick', 'munch', 'gulp', 'clunk', 'scrape', 'shave', 'clank', 'swish', 'thud'] as const) labBtn(labTools, k, () => sound.chore(k, C));
 
 const labMusic = lab.addFolder('Music').close();
 labBtn(labMusic, 'fiddle tune', () => {
@@ -627,7 +627,7 @@ labBtn(labDog, 'paws: trotting', () => labAt([0, 1, 2, 3, 4, 5, 6, 7].map((k) =>
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];
-  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink', h: 'haul', b: 'banjo', u: 'bass', p: 'pipe', g: 'armful', v: 'shave', k: 'hoop', m: 'scythe' } as const)[e.key.toLowerCase() as 'c'];
+  const k2 = ({ c: 'chop', a: 'pick', f: 'fish', t: 'dine', e: 'eat', d: 'drink', h: 'haul', b: 'banjo', u: 'bass', p: 'pipe', g: 'armful', v: 'shave', k: 'hoop', m: 'scythe', l: 'flail' } as const)[e.key.toLowerCase() as 'c'];
   if (k) act(selected, k);
   if (k2 && !e.ctrlKey && !e.metaKey) act(selected, k2);
   if (e.key === 'w' || e.key === 'W') walkCtl.setValue(!settings.walk);

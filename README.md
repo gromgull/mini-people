@@ -154,7 +154,7 @@ The layout comes from the seed (`?seed=n`), along with the villagers.
 Without one you get a village of your own: a random seed, put in the address
 so a reload or a shared link keeps it. A woodyard sits in the middle, with
 five districts around it: the forest with the lumberjack's cabin; the wheat
-field with its stook and the farmer's cabin; the pond
+field with its stook, the windmill and the farmer's cabin; the pond
 with the fisher's cabin and bench; the inn with its three tables, kegs, flags,
 street-lamp and the green where they dance; and the orchard with the cider
 mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
@@ -214,7 +214,13 @@ So far it has one chain:
   to cut and some days little. For a ripe strip they walk down it with the
   scythe, a swing and a step at a time, the wheat falling to stubble behind
   the blade; at the far end they bind it into sheaves and stand them in the
-  stook at the field's edge to dry.
+  stook at the field's edge to dry. With nothing to mow, they carry sheaves
+  to the threshing floor by the windmill and beat the grain out with the
+  flail.
+- **The windmill** is a post mill: the whole body turns on its post to face
+  into the wind, and the sails turn as hard as it blows. While they turn it
+  grinds the threshed grain into sacks of flour, set out on a rack by the
+  floor. On a calm day the sails stand still and nothing's ground.
 - **The cooper** (who lives with the woodworker) looks after the kegs. When
   one runs dry at the inn they fetch it back to their block and drive its
   hoops tight again. When there aren't enough empties to go round, they

@@ -11,7 +11,8 @@ import type { Site } from '../houses';
  *   pond    – the pond, the fisher's cabin, the fisher's bench
  *   inn     – the inn (facing the yard), its three tables, its kegs, the
  *             street-lamp, two flags, and the green in front where they dance of an evening
- *   field   – the wheat field, the stook its sheaves stand in, the farmer's cabin
+ *   field   – the wheat field, the stook its sheaves stand in, the windmill
+ *             (its threshing floor and sack rack), the farmer's cabin
  *   orchard – the apple trees, the cider mill and its kegs, the pickers'
  *             baskets and ladders, the picker's and cider maker's cabin and the other picker's
  *
@@ -46,6 +47,8 @@ export interface Layout {
   /** The wheat field (its middle; strips run along its yaw) and the stook beside it. */
   field: Pose;
   stook: Pose;
+  /** The windmill (its trestle's middle); the threshing floor and the sack rack are laid out round it. */
+  windmill: Pose;
   pond: Round;
   mill: Pose;
   millKegs: Pose;
@@ -121,6 +124,7 @@ const TEMPLATE: Record<string, Piece> = {
   site5: P('orchard', -8.6, 9.4, 1.9, 2.3),
   field: P('field', 0, 14, 0, 3.6),
   stook: P('field', 3.5, 11.6, 0, 0.5),
+  windmill: P('field', 5.6, 16.4, 0, 2.6),
   site6: P('field', -4.8, 12.4, 0.6, 2.3),
   site1: P('yard', 7.6, -7.6, -0.5, 2.3), // the woodworker's: placed on its own, in the widest gap
   cooperage: P('yard', 4.6, -4.9, Math.atan2(-4.6, 4.9), 1.3), // placed on its own, beside the woodworker's on the yard side
@@ -160,6 +164,7 @@ export function makeLayout(seed: number): Layout {
     orchard: round('orchard'),
     field: pose('field'),
     stook: pose('stook'),
+    windmill: pose('windmill'),
     pond: round('pond'),
     mill: pose('mill'),
     millKegs: pose('millKegs'),

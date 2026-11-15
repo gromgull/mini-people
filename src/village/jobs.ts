@@ -11,6 +11,7 @@ import { restY } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
 import type { Wind } from './wind';
 import { Field } from './field';
+import { GRAIN_MAX, type Windmill } from './windmill';
 
 /**
  * The jobs. Each person runs a small routine of steps (walk somewhere, do
@@ -27,7 +28,10 @@ import { Field } from './field';
  *     while the other one's at it, by the yard's stack).
  *   farmer: when a strip of the wheat field is ripe, mows it with the
  *     scythe (a swing, a step, a swing…), binds what's cut into sheaves at
- *     the end, and stands them in the stook at the field's edge.
+ *     the end, and stands them in the stook at the field's edge. Otherwise
+ *     threshes: carries sheaves from the stook to the threshing floor by
+ *     the windmill and beats the grain out with the flail; the windmill
+ *     grinds it when the wind turns its sails.
  *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
  *     there aren't enough empties to go round, takes firewood from the yard
  *     (if the inn can spare it), shaves it into staves and raises a new keg.
@@ -120,9 +124,12 @@ export interface Village {
   innKegs: KegRack;
   /** Where the keg stands under the mill's spout to be filled (one slot). */
   spout: Spot;
-  /** The wheat field, and the stook its sheaves stand in. */
+  /** The wheat field, the stook its sheaves stand in, the windmill and its threshing floor and sack rack. */
   field: Field;
   stook: Stook;
+  windmill: Windmill;
+  floor: Store;
+  sacks: Store;
   /** The cooper's: the shaving horse, the block, firewood waiting to be staves, empty kegs ready for the mill. */
   cooperage: { horse: ShavingHorse; horseObstacle: Obstacle; block: HoopBlock; staves: Stack; empties: KegRack };
   /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
@@ -175,6 +182,8 @@ export interface Village {
     shaved: number; kegsMade: number; kegsBack: number; hooped: number;
     /** Strips of wheat mown, sheaves stood in the stook. */
     mown: number; sheaves: number;
+    /** Sheaves threshed, sacks of flour milled, seconds the sails turned. */
+    threshed: number; flour: number; sailing: number;
     /** Trips (falls while walking), and things picked up again after one. */
     trips: number; pickedUp: number;
     meals: number; hungry: number; slept: number;
@@ -280,6 +289,8 @@ export type StepKind =
   | 'to the strip'
   | 'mowing'
   | 'binding'
+  | 'to the floor'
+  | 'threshing'
   | 'tripped'
   | 'picking up'
   | 'to the horse'
@@ -2233,8 +2244,24 @@ export class Farmer extends Job {
     return v.field.strips.filter((s) => s.state === 'ripe' && s.claimedBy < 0);
   }
 
-  protected hasWork(v: Village) {
+  /** Ripe wheat, and room in the stook for what it'll make. */
+  private canMow(v: Village) {
     return this.ripe(v).length > 0 && v.stook.room >= SHEAVES;
+  }
+
+  /** Sheaves on the threshing floor nobody's threshing. */
+  private toThresh(v: Village) {
+    return v.floor.available;
+  }
+
+  /** Sheaves to carry from the stook to the floor (as many as the mill has room for the grain of). */
+  private toCarry(v: Village) {
+    const pending = v.windmill.grain + v.floor.count + v.floor.incoming;
+    return Math.max(0, Math.min(SHEAVES, v.stook.available, v.floor.room, GRAIN_MAX - pending));
+  }
+
+  protected hasWork(v: Village) {
+    return this.canMow(v) || this.toThresh(v) > 0 || this.toCarry(v) > 0;
   }
 
   /** Where they stand to mow: `along` (0 … 1) down strip i, back from the blade's reach. */
@@ -2251,7 +2278,23 @@ export class Farmer extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (this.hasWork(v)) {
+        if (!this.canMow(v)) {
+          // no mowing to do: threshing, then
+          const n = this.toThresh(v);
+          if (n > 0) {
+            this.book(v.floor, 'reserved', n);
+            const at = v.floor.workSpot();
+            this.go(at.x, at.z, at.yaw);
+            this.step = { kind: 'to the floor', n };
+            return;
+          }
+          const c = this.toCarry(v);
+          if (c > 0) {
+            this.fetch(v.stook, v.floor, c);
+            return;
+          }
+        }
+        if (this.canMow(v)) {
           // the nearest ripe strip
           const me = this.w.walker;
           const strip = this.ripe(v).reduce((b, x) => {
@@ -2271,6 +2314,26 @@ export class Farmer extends Job {
         const w = this.w.walker;
         if (Math.hypot(w.x - at.x, w.z - at.z) > 0.4 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw);
         this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to the floor': {
+        if (!this.arrived) return;
+        a.start('flail', { blows: 4 * (s.n as number) });
+        this.step = { ...s, kind: 'threshing' };
+        return;
+      }
+      case 'threshing': {
+        if (a.busy) return;
+        // the grain's out: up into the mill with it; the straw's cleared away
+        const slots = v.floor.top(s.n as number);
+        for (const k of slots) {
+          v.removeItem(v.floor.items[k]!);
+          v.floor.items[k] = null;
+        }
+        this.unbook(v.floor, 'reserved', s.n as number);
+        v.windmill.grain += slots.length;
+        v.stats.threshed += slots.length;
+        this.step = { kind: 'idle' };
         return;
       }
       case 'to the strip': {
