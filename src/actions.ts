@@ -11,6 +11,7 @@ import { Haul, type LogSpot } from './haul';
 import { Banjo } from './banjo';
 import { DoubleBass } from './bass';
 import { Pipe } from './pipe';
+import { crouchFor, lowerOnto, seatFit, sitTimes, thighRest } from './seat';
 import { Fiddle } from './fiddle';
 import { Armful, type ItemPose } from './armful';
 import { Hold, type HoldPlan } from './hold';
@@ -554,18 +555,9 @@ export class Actor {
     this.box.visible = true;
   }
 
-  /**
-   * The seat that fits this person: knee height, far enough behind their feet
-   * that the thighs lie on it; how far the hips go back (z) and down (crouch,
-   * × leg length) to sit on it; where the bench's middle is (root frame), and
-   * its depth.
-   */
+  /** The seat that fits this person (see seat.ts). */
   sitFit() {
-    const d = this.p.dims;
-    const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
-    const h = d.footH + d.shinLen * 0.92;
-    const z = d.thighLen * 0.85;
-    return { h, z, crouch: (standY - (h + d.hipBelow * 0.9)) / d.legLen, benchZ: -z - d.thighLen * 0.05, depth: d.thighLen * 1.1 };
+    return seatFit(this.p.dims);
   }
 
   // ------------------------------------------------------------ seated or standing
@@ -585,10 +577,8 @@ export class Actor {
     Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
     if (opts.seatH !== undefined) {
       // a real seat, whatever height it is: lower by however far their legs need
-      const d = this.p.dims;
-      const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
       this.seat.h = opts.seatH;
-      this.seat.crouch = (standY - (opts.seatH + d.hipBelow * 0.9)) / d.legLen;
+      this.seat.crouch = crouchFor(this.p.dims, opts.seatH);
     }
     if (!this.posture.want && this.posture.k === 0) this.posture.creaked = false;
     this.posture.want = true;
@@ -626,11 +616,10 @@ export class Actor {
     const ps = this.posture;
     if (ps.autoUp && !this.kind) this.getUp();
     if (!ps.want && ps.k === 0) return pose;
-    const tDown = 0.9 / Math.sqrt(tempo);
-    const tUp = 0.8 / Math.sqrt(tempo);
+    const T = sitTimes(tempo);
     const was = ps.k;
-    ps.k = ps.want ? Math.min(1, ps.k + dt / tDown) : Math.max(0, ps.k - dt / tUp);
-    if (ps.want && was < 0.85 && ps.k >= 0.85 && !ps.creaked) {
+    ps.k = ps.want ? Math.min(1, ps.k + dt / T.down) : Math.max(0, ps.k - dt / T.up);
+    if (ps.want && was < T.creak && ps.k >= T.creak && !ps.creaked) {
       ps.creaked = true;
       this.events.push('creak');
     }
@@ -641,16 +630,11 @@ export class Actor {
       Object.assign(P.arms.R, arm());
     }
     const k = smooth(ps.k);
-    const moving = ps.k > 0 && ps.k < 1 ? Math.sin(Math.PI * k) : 0;
-    // push the hips back first, then drop: reads as lowering onto a seat
-    P.sitZ = this.seat.z * smooth(Math.min(1, k * 1.6));
-    P.crouch += this.seat.crouch * smooth(Math.max(0, (k - 0.15) / 0.85));
-    P.spineX += 0.45 * moving - 0.04 * k;
-    P.headX -= 0.2 * moving;
+    const moving = lowerOnto(P, this.seat, k);
     for (const sd of ['L', 'R'] as const) {
       // hands on the thighs unless the action has them busy (a chat can still take them: see armFree)
       this.thighRest[sd] = P.arms[sd].w < 0.01;
-      if (this.thighRest[sd]) Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
+      if (this.thighRest[sd]) Object.assign(P.arms[sd], { w: k, ...thighRest(moving), stiff: 1 });
     }
     if (ps.conjured && this.bench) {
       this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, smooth(Math.min(1, ps.k * 2.5))));
@@ -699,15 +683,12 @@ export class Actor {
       this.bench.add(mesh(g.slab, this.kit), ...legs);
       p.root.add(this.bench);
     }
-    // seat at knee height, far enough back that the thighs lie on it
-    const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
-    const h = d.footH + d.shinLen * 0.92;
-    this.seat.h = h;
-    this.seat.z = d.thighLen * 0.85;
-    this.seat.crouch = (standY - (h + d.hipBelow * 0.9)) / d.legLen;
-    this.benchScale.set(d.hipR * 3.2, h, d.thighLen * 1.1);
+    // their own seat: knee height, far enough back that the thighs lie on it
+    const f = this.sitFit();
+    Object.assign(this.seat, { h: f.h, z: f.z, crouch: f.crouch });
+    this.benchScale.set(d.hipR * 3.2, f.h, f.depth);
     this.bench.scale.setScalar(1e-3);
-    this.bench.position.set(0, 0, -this.seat.z - d.thighLen * 0.05);
+    this.bench.position.set(0, 0, f.benchZ);
     this.bench.visible = true;
   }
 
@@ -1011,8 +992,7 @@ export class Actor {
 
       case 'sit': {
         const tIn = 0.35; // bench appears
-        const tDown = 0.9 / Math.sqrt(tempo);
-        const tUp = 0.8 / Math.sqrt(tempo);
+        const { down: tDown, up: tUp, creak } = sitTimes(tempo);
         const upAt = tIn + tDown + 6;
         const dur = upAt + tUp + 0.25;
         if (t >= dur) return this.finish();
@@ -1021,19 +1001,13 @@ export class Actor {
         else if (t < tIn + tDown) k = smooth((t - tIn) / tDown);
         else if (t < upAt) k = 1;
         else k = 1 - smooth((t - upAt) / tUp);
-        const moving = k > 0 && k < 1 ? Math.sin(Math.PI * k) : 0;
-        if (this.crossed(tIn + tDown * 0.85)) this.events.push('creak');
-        // push the hips back first, then drop: reads as lowering onto a seat
-        const back = smooth(Math.min(1, k * 1.6));
-        P.sitZ = this.seat.z * back;
-        P.crouch = this.seat.crouch * smooth(Math.max(0, (k - 0.15) / 0.85));
-        P.spineX = 0.45 * moving - 0.04 * k; // lean forward to balance, then sit up
-        P.headX = -0.2 * moving;
+        if (this.crossed(tIn + tDown * creak)) this.events.push('creak');
+        const moving = lowerOnto(P, this.seat, k);
         const pop = t < tIn ? smooth(t / tIn) : t > dur - 0.25 ? smooth((dur - t) / 0.25) : 1;
         if (this.bench) this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, pop));
         for (const sd of ['L', 'R'] as const) {
           // hands rest on the thighs; push off them when moving
-          Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
+          Object.assign(P.arms[sd], { w: k, ...thighRest(moving), stiff: 1 });
         }
         return P;
       }

@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Person } from './body';
 import { twoBoneIK } from './ik';
 
+/** How straight a standing leg is: hip to ankle, × the leg's full length (seat.ts sits from this height too). */
+export const LEG_REACH = 0.997;
+
 /** Global walk tuning (milestone 3 will layer personality on top of this). */
 export interface GaitParams {
   stride: number; // cycle length as a multiple of leg length
@@ -151,7 +154,7 @@ export function applyGait(p: Person, m: Motion, g: GaitParams, x: BodyExtras): U
   // can while both feet stay reachable with a near-straight leg. Bob falls out
   // of the stride geometry. (Knee bend is very sensitive near full extension:
   // 0.985·L already bends the knee ~20°, so we aim for 0.997·L.)
-  const reach = L * 0.997;
+  const reach = L * LEG_REACH;
   let pelvisY = Infinity;
   for (const f of feet) {
     const hx = f.s * d.hipJointX * Math.cos(yaw) + swayX;

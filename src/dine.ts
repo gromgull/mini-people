@@ -4,6 +4,7 @@ import { type ActionPose, type ArmAngles, type PropKit, lerp, reachFist, smooth 
 import { type Chore, type ChoreOut, baked, disposeMesh, grow, mergeTwo, mixArm, pick, setArm, simpleMesh } from './chores';
 import { ROWS } from './palette';
 import type { Part } from './trees';
+import { crouchFor, lowerOnto, seatFit, sitTimes } from './seat';
 
 /**
  * Sitting down at a farmhouse table (two trestles, a bench either side, each
@@ -67,7 +68,7 @@ export class Dine implements Chore {
   private grip = new THREE.Vector3(); // the tankard's handle (local)
   private rim = new THREE.Vector3(); // the rim nearest the drinker (local)
   // fitted sizes (in the seated frame F = the root once fully shuffled in)
-  private g = { h: 0, crouch: 0, seatZ: 0, top: 0, edge: 0, S: 0, side: 1, s: 1, aR: 0, tankH: 0, tableZ: 0, farZ: 0 };
+  private g = { h: 0, crouch: 0, seatZ: 0, benchZ: 0, top: 0, edge: 0, S: 0, side: 1, s: 1, aR: 0, tankH: 0, tableZ: 0, farZ: 0 };
   private boardAt = new THREE.Vector3();
   private tankAt = new THREE.Vector3();
   private rest = { L: new THREE.Vector3(), R: new THREE.Vector3() };
@@ -282,11 +283,12 @@ export class Dine implements Chore {
     const s = Math.sqrt(H);
     const G = this.g;
     G.s = s;
-    // the seat: knee height, far enough back that the thighs lie on it
-    const standY = d.footH + (d.thighLen + d.shinLen) * 0.997;
-    G.h = d.footH + d.shinLen * 0.92;
-    G.seatZ = d.thighLen * 0.85;
-    G.crouch = (standY - (G.h + d.hipBelow * 0.9)) / d.legLen;
+    // the seat: their own (knee height, far enough back that the thighs lie on it)
+    const f = seatFit(d);
+    G.h = f.h;
+    G.seatZ = f.z;
+    G.crouch = f.crouch;
+    G.benchZ = f.benchZ;
     // table top a little under the elbows, but always clear of the thighs
     const shoulderY = G.h + d.hipBelow * 0.9 + d.hipAbove + d.shoulderY;
     G.top = Math.max(shoulderY - d.upperArmLen - 0.025 * H, G.h + 2.4 * d.thighR + 0.03 * H);
@@ -303,7 +305,7 @@ export class Dine implements Chore {
       if (this.realTable) {
         // someone else's table: sit to its bench and reach to its top
         G.h = this.realTable.h;
-        G.crouch = (standY - (G.h + d.hipBelow * 0.9)) / d.legLen;
+        G.crouch = crouchFor(d, G.h);
         G.top = this.realTable.top;
         G.edge = this.realTable.edge;
       }
@@ -365,7 +367,7 @@ export class Dine implements Chore {
       this.built.push(m);
       return m;
     };
-    const nearZ = -G.seatZ - d.thighLen * 0.05;
+    const nearZ = G.benchZ;
     nearG.clear();
     nearG.add(bench());
     nearG.position.set(cx, 0, nearZ);
@@ -378,13 +380,11 @@ export class Dine implements Chore {
 
   pre(t: number, dt: number, P: ActionPose, tempo: number, out: ChoreOut) {
     const G = this.g;
-    const slow = 1 / Math.sqrt(tempo);
     const T0 = 0.45; // furniture appears
-    const tDown = 0.9 * slow;
+    const { down: tDown, up: tUp, creak } = sitTimes(tempo);
     const tIn = 0.75; // shuffle up to the table
     const seatedAt = T0 + tDown + tIn;
     const tOut = 0.6;
-    const tUp = 0.8 * slow;
 
     // what's on: next course, or time to go
     if (this.leaveAt === Infinity && t >= seatedAt) {
@@ -411,21 +411,17 @@ export class Dine implements Chore {
     else if (t >= T0 + tDown) k = lt < tOut ? 1 : 1 - smooth((lt - tOut) / tUp);
     const sc = lt >= 0 ? 1 - hitch(lt / tOut) : t > T0 + tDown ? hitch((t - T0 - tDown) / tIn) : 0;
     const crossed = (a: number) => t - dt < a && t >= a;
-    if (crossed(T0 + tDown * 0.85)) out.events.push('creak');
+    if (crossed(T0 + tDown * creak)) out.events.push('creak');
     for (const a of [T0 + tDown, T0 + tDown + tIn * 0.55, this.leaveAt, this.leaveAt + tOut * 0.55]) if (crossed(a)) out.events.push('scrape');
     this.scooted = sc;
     this.shift = G.S * sc;
     P.fwd = this.shift;
-    const moving = k > 0 && k < 1 ? Math.sin(Math.PI * k) : 0;
-    const back = smooth(Math.min(1, k * 1.6));
-    P.sitZ = G.seatZ * back;
-    P.crouch = G.crouch * smooth(Math.max(0, (k - 0.15) / 0.85));
+    lowerOnto(P, { z: G.seatZ, crouch: G.crouch }, k);
     // each shuffle: weight forward, hips up a touch
     const shuffling = (t > T0 + tDown && t < seatedAt) || (lt > 0 && lt < tOut);
     const hop = shuffling ? Math.abs(Math.sin((sc * 2) * Math.PI)) : 0;
     P.crouch -= 0.02 * hop;
-    P.spineX = 0.45 * moving - 0.04 * k + 0.15 * hop;
-    P.headX = -0.2 * moving;
+    P.spineX += 0.15 * hop;
     this.pop = t < T0 ? grow(t / T0) : t > end - 0.35 ? Math.max(1e-3, 1 - smooth((t - end + 0.35) / 0.35)) : 1;
 
     // arms: hands on the thighs while getting in and out; on the table once in
