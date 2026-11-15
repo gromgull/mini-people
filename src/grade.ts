@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import type { Controller, GUI } from 'lil-gui';
 
 /**
  * A colour grade over the finished (pixel-art) frame, as it's copied to the
@@ -16,7 +15,7 @@ import type { Controller, GUI } from 'lil-gui';
  *     (it doesn't crawl from frame to frame)
  *   vignette (dithered, as is everything: no banding on a flat field)
  *
- * `none` leaves the frame exactly as it was.
+ * `hike` is the look; `none` leaves the frame exactly as it was rendered.
  */
 
 export interface Grade {
@@ -40,14 +39,14 @@ export const GRADES: Record<string, Grade> = {
   // muted, pastel, faded, a little paper grain: sage greens, cool teal shadows, warm peach light (Cody Gindy)
   storybook: { greens: 0.5, greenTo: 115, saturation: 0.78, contrast: 0.92, split: 0.3, shadows: '#3c6f7a', light: '#ffd6ad', fade: 0.12, paper: '#f2e2c4', grain: 0.025, vignette: 0.12 },
   // bright but harmonised: warm olive greens, purple-blue shadows, golden light (A Short Hike)
-  hike: { greens: 0.45, greenTo: 68, saturation: 1.0, contrast: 1.06, split: 0.28, shadows: '#4b4690', light: '#ffdc80', fade: 0.02, paper: '#fff1d6', grain: 0, vignette: 0.1 },
+  hike: { greens: 0.5, greenTo: 58, saturation: 1.0, contrast: 1.06, split: 0.28, shadows: '#4b4690', light: '#ffdc80', fade: 0.02, paper: '#fff1d6', grain: 0, vignette: 0.2 },
   // halfway: softer greens, a little less colour, a gentle warm/cool split
   soft: { greens: 0.3, greenTo: 88, saturation: 0.88, contrast: 0.96, split: 0.16, shadows: '#47607e', light: '#ffe2bc', fade: 0.06, paper: '#f4e8d0', grain: 0.015, vignette: 0.08 },
 };
 
-/** The grade named by ?grade=, else none. */
+/** The grade named by ?grade= (none, storybook, hike, soft), else hike: the look. */
 export function gradeFromQuery(q: URLSearchParams): Grade {
-  return { ...(GRADES[q.get('grade') ?? ''] ?? GRADES.none) };
+  return { ...(GRADES[q.get('grade') ?? ''] ?? GRADES.hike) };
 }
 
 /** The material that copies the frame to the screen, graded (see setGrade each frame). */
@@ -160,31 +159,3 @@ export function setGrade(m: THREE.ShaderMaterial, g: Grade, w: number, h: number
   u.uGrain.value = g.grain;
   u.uVignette.value = g.vignette;
 }
-
-/**
- * The grade's controls in a lil-gui folder: a preset to start from, then
- * every setting (`onChange` after any of them; the frame picks them up by
- * itself).
- */
-export function gradeGui(parent: GUI, g: Grade) {
-  const f = parent.addFolder('Colour grade');
-  const preset = { preset: Object.keys(GRADES).find((k) => JSON.stringify(GRADES[k]) === JSON.stringify(g)) ?? 'none' };
-  const ctrls: Controller[] = [];
-  f.add(preset, 'preset', Object.keys(GRADES)).onChange((k: string) => {
-    Object.assign(g, GRADES[k]);
-    for (const c of ctrls) c.updateDisplay();
-  });
-  ctrls.push(f.add(g, 'greens', 0, 1, 0.01));
-  ctrls.push(f.add(g, 'greenTo', 40, 180, 1).name('greens toward (hue°)'));
-  ctrls.push(f.add(g, 'saturation', 0, 1.5, 0.01));
-  ctrls.push(f.add(g, 'contrast', 0.6, 1.4, 0.01));
-  ctrls.push(f.add(g, 'split', 0, 1, 0.01).name('split tone'));
-  ctrls.push(f.addColor(g, 'shadows').name('shadows toward'));
-  ctrls.push(f.addColor(g, 'light').name('light toward'));
-  ctrls.push(f.add(g, 'fade', 0, 0.5, 0.01));
-  ctrls.push(f.addColor(g, 'paper').name('fade toward'));
-  ctrls.push(f.add(g, 'grain', 0, 0.15, 0.005));
-  ctrls.push(f.add(g, 'vignette', 0, 0.6, 0.01));
-  return f;
-}
-

@@ -329,7 +329,7 @@ and the haul and the saw use the actual log.
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
 | `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
-| `?follow=i` (or `dog`, a role, a name), `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n`, `?wind=s`, `?grade=…` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none), the wind held at s (0 still … 1 windy), a colour grade (`storybook`, `hike`, `soft`; on both pages, also in the menu under Colour grade) |
+| `?follow=i` (or `dog`, a role, a name), `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n`, `?wind=s`, `?grade=…` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none), the wind held at s (0 still … 1 windy), the colour grade (`hike`, the default; `none` for the frame as rendered, `storybook`, `soft`; on both pages) |
 
 It opens with the whole village in view, at the standard angle (zoomed to
 fit the window; `?zoom=`, `?tx=`/`?tz=` to start elsewhere). The panel at the bottom left (hidden at first: tick "who's doing what" in
