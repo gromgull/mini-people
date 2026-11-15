@@ -169,7 +169,7 @@ forest, the orchard and the pond's shape vary with the seed too.
 
 So far it has one chain:
 
-- **The lumberjack** keeps the woodpile topped up. When the pile, counting
+- **The lumberjacks** (two: one lodges with the fisher) keep the woodpile topped up. When the pile, counting
   logs already on their way and logs lying in the forest, has fewer than
   four, they claim the nearest free pine and walk up to it side-on. They
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
@@ -208,7 +208,9 @@ So far it has one chain:
   to the keg rack. No empty keg, no cider.
 - **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
-  to the table.
+  to the table. Supper is dried fish or the baker's bread, one plate at a
+  time to whoever's waited longest; bread when the fish runs out, and often
+  anyway when there's plenty of it.
 - **The farmer** mows the wheat. The field is in strips, each on its own
   clock: sown, growing green, ripe and gold, then mown to stubble, resting,
   and sown again, about a day and a half round, so some days there's a lot
@@ -227,7 +229,10 @@ So far it has one chain:
   wood in the clay oven and fires it (it smokes hard while it heats), kneads
   dough at the trough meanwhile, slides the loaves in with the long peel
   once it's hot, and takes them out baked onto the shelf to cool. Then
-  carries bread to the inn's basket by the kitchen hatch.
+  carries bread to the inn's basket by the kitchen hatch. At supper they
+  help out: before sitting down, and between tunes on the green once
+  they've eaten, they take a loaf from the basket to whoever's waited
+  longest.
 - **Firewood** has three users now. The inn's fire comes first: nobody else
   takes any while its stack is low, or once the woodworkers are stocking it
   for the evening. Then the baker's oven, then the cooper's staves.

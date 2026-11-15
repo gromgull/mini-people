@@ -91,9 +91,10 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'regular', home: 3, name: 'regular' },
   { role: 'picker', home: 5, name: 'picker 2', gear: 1 }, // (two pickers, to keep the mill busy)
   { role: 'cooper', home: 1, name: 'cooper' }, // (lives with the woodworker)
-  { role: 'woodworker', home: 0, name: 'woodworker 2' },
+  { role: 'woodworker', home: 0, name: 'woodworker 2' }, // (lodges with the lumberjack: one woodworker couldn't saw all the logs)
   { role: 'farmer', home: 6, name: 'farmer' }, // (in the cabin by the field)
-  { role: 'baker', home: 7, name: 'baker' }, // (in the cabin by the bakery) // (lodges with the lumberjack: one woodworker couldn't saw all the logs)
+  { role: 'baker', home: 7, name: 'baker' }, // (in the cabin by the bakery)
+  { role: 'lumberjack', home: 2, name: 'lumberjack 2' }, // (lodges with the fisher: three users of firewood now)
 ];
 const ROLES = VILLAGERS.map((v) => v.role);
 /** Which building each person lives in (index into SITES). */
@@ -193,7 +194,7 @@ const larder = (() => {
 const innBread = (() => {
   const b = houses.buildings.find((h) => h.kind === 'inn')!;
   const at = new THREE.Vector3(-0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
-  return new Crate(stage, 'bread basket', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw, 6);
+  return new Crate(stage, 'bread basket', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw, 8);
 })();
 // the bakery: the oven (its mouth toward the bakery's +z), the trough and the shelf either side in front, the flour and the firewood behind
 const bakery = (() => {
@@ -513,15 +514,19 @@ const village: Village = {
   })(),
   mealServed: (seat) => {
     const meal = seat.plate.items[0];
+    // (a plate from the kitchen, or a loaf the baker's brought round from the basket)
+    const food = meal?.kind === 'bread' ? 'bread' : (meal?.food ?? 'fish');
     if (meal) {
       seat.plate.items[0] = null;
       removeItem(meal);
     }
     // (whoever it was for gave up and went home before it came: it's cleared away, the seat stays as it is)
     if (seat.state !== 'seated' || seat.diner < 0) return;
-    crowd.actors[seat.diner]?.choreOf('dine').serveMeal('fish');
+    crowd.actors[seat.diner]?.choreOf('dine').serveMeal(food);
     seat.state = 'served';
     village.stats.meals++;
+    if (food === 'fish') village.stats.eaten++;
+    else village.stats.breadEaten++;
   },
   cameHome: (i) => {
     litUntil[HOME[i]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
@@ -554,7 +559,7 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, mown: 0, sheaves: 0, threshed: 0, flour: 0, sailing: 0, baked: 0, breadIn: 0, trips: 0, pickedUp: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, breadEaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, mown: 0, sheaves: 0, threshed: 0, flour: 0, sailing: 0, baked: 0, breadIn: 0, trips: 0, pickedUp: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const pk = VILLAGERS[i].gear;
@@ -776,6 +781,8 @@ function simulate(dt: number) {
   village.phase = phaseAt(village.hours);
   crowd.beginStep(simTime, null, -1);
   const obs = obstacles();
+  // (whoever's asleep is indoors: in nobody's way, though their walker waits at the door)
+  const about = allWalkers.filter((_, k) => k >= jobs.length || !jobs[k].asleep);
   people.forEach((p, i) => {
     const pose = crowd.pre(i, dt, simTime);
     const w = walkers[i];
@@ -786,7 +793,7 @@ function simulate(dt: number) {
       // stopped for a word
       m.targetSpeed = 0;
       faceTalker(i, dt);
-    } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, allWalkers, WALK_SPEED * crowd.styleOf(p).speedK);
+    } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, about, WALK_SPEED * crowd.styleOf(p).speedK);
     if (canTrip(i) && Math.random() < dt / TRIP_EVERY) {
       a.start('fall'); // (no push: a trip, pitching forward at their own pace)
       village.stats.trips++;
@@ -796,12 +803,10 @@ function simulate(dt: number) {
     if (a.rootLocked) wasDown[i] = true;
     else if (wasDown[i]) {
       wasDown[i] = false;
-      w.x = p.root.position.x;
-      w.z = p.root.position.z;
-      w.yaw = p.root.rotation.y;
+      w.moveTo(p.root.position.x, p.root.position.z, p.root.rotation.y);
     }
     if (!a.rootLocked) {
-      w.move(m.speed, dt, obs, allWalkers);
+      w.move(m.speed, dt, obs, about);
       const yaw = w.yaw + (pose?.spin ?? 0);
       const fwd = pose?.fwd ?? 0;
       p.root.position.set(w.x + Math.sin(yaw) * fwd, pose?.lift ?? 0, w.z + Math.cos(yaw) * fwd);
@@ -817,7 +822,7 @@ function simulate(dt: number) {
     home: homes[DOG_OWNER],
     green: L.green,
     obstacles: obs,
-    walkers: allWalkers,
+    walkers: about,
     camera: stage.camera.position,
     sound: (kind) => {
       const w = crowd.whereAt(dog.dog.root, dog.dog.height);

@@ -109,6 +109,16 @@ export class Walker {
     this.path = this.pathTo = null;
   }
 
+  /** Put somewhere else (got up where a fall left them): the way on is planned afresh from here. */
+  moveTo(x: number, z: number, yaw: number) {
+    this.x = x;
+    this.z = z;
+    this.yaw = yaw;
+    this.pathTo = null;
+    this.best = Infinity;
+    this.bestAt = this.clock;
+  }
+
   /** Decide heading and speed toward the goal (call before the gait advances). */
   think(dt: number, obstacles: Obstacle[], others: Walker[], prefSpeed: number): number {
     const g = this.goal;
@@ -123,7 +133,9 @@ export class Walker {
     const tx = g.via ? g.via.x : g.x, tz = g.via ? g.via.z : g.z;
     // the route there: planned on setting off, and again once the target moves (the via's done, a detour)
     if (!this.pathTo || this.pathTo.x !== tx || this.pathTo.z !== tz) {
-      this.path = planPath(this.x, this.z, tx, tz, obstacles, g.via ? null : (g.ignore ?? null), BODY + 0.03);
+      // (once stalled, the people about count too: someone sat at the end of a bench can close a gap)
+      const people: Obstacle[] = this.replans > 0 ? others.filter((o) => o !== this && Math.hypot(o.x - this.x, o.z - this.z) < 4).map((o) => ({ kind: 'circle', x: o.x, z: o.z, r: BODY * 0.8 })) : [];
+      this.path = planPath(this.x, this.z, tx, tz, people.length ? [...obstacles, ...people] : obstacles, g.via ? null : (g.ignore ?? null), BODY + 0.03);
       this.pathTo = { x: tx, z: tz };
     }
     const path = this.path;
@@ -143,8 +155,8 @@ export class Walker {
     // blocked just short of it (the spot is up against something): stop
     // trying to get closer, and settle where we are
     if (g.via && !g.detour && this.clock - this.bestAt > 2) g.via = null; // can't get to the approach point: just go in
-    else if (dist >= 0.7 && this.clock - this.bestAt > 3 && this.replans < 1) {
-      // stalled on the way: plan again from here (things move: a tree's grown, someone's sat down)
+    else if (dist >= 0.7 && this.clock - this.bestAt > 3 && this.replans < 2) {
+      // stalled on the way: plan again from here, round the people about too (things move: a tree's grown, someone's sat down)
       this.replans++;
       this.pathTo = null;
       this.best = Infinity;

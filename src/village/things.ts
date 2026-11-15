@@ -215,6 +215,8 @@ export interface Item {
   mesh: THREE.Object3D;
   /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
   dry: number;
+  /** A plate of supper: what's on it. */
+  food?: 'fish' | 'bread';
   /** Easing into its place from somewhere else (dropped, tossed), started at t0 (sim seconds). */
   tween?: { pos: THREE.Vector3; quat: THREE.Quaternion; t0: number; dur: number };
 }
@@ -445,11 +447,25 @@ export function makeMug(stage: Stage) {
 
 /** Supper: a cooked fish on a pewter plate (item mesh). */
 export function makeMeal(stage: Stage) {
-  return outlined(bake([
-    { geo: new THREE.CylinderGeometry(0.1, 0.09, 0.014, 12).scale(1.45, 1, 1).translate(0, 0.007, 0), row: ROWS.stone[1] },
+  const group = new THREE.Group();
+  group.add(outlined(bake([{ geo: new THREE.CylinderGeometry(0.1, 0.09, 0.014, 12).scale(1.45, 1, 1).translate(0, 0.007, 0), row: ROWS.stone[1] }]), stage));
+  const fish = outlined(bake([
     { geo: new THREE.SphereGeometry(1, 8, 6).scale(0.1, 0.03, 0.036).translate(0.01, 0.034, 0), row: ROWS.food[2] },
     { geo: new THREE.ConeGeometry(0.04, 0.06, 4).rotateZ(Math.PI / 2).scale(1, 1, 0.3).translate(-0.12, 0.034, 0), row: ROWS.stockfish[1] },
   ]), stage);
+  const loaf = outlined(bake([
+    { geo: new THREE.SphereGeometry(0.06, 9, 6).scale(1.3, 0.72, 1).translate(0, 0.055, 0), row: ROWS.stockfish[0] },
+    { geo: new THREE.BoxGeometry(0.1, 0.006, 0.012).translate(0, 0.097, 0), row: ROWS.stockfish[1] },
+  ]), stage);
+  loaf.visible = false;
+  group.add(fish, loaf);
+  return group;
+}
+
+/** What's on a plate of supper's mesh: the fish, or a loaf. */
+export function setMeal(mesh: THREE.Object3D, food: 'fish' | 'bread') {
+  mesh.children[1].visible = food === 'fish';
+  mesh.children[2].visible = food === 'bread';
 }
 
 /**
@@ -955,21 +971,23 @@ export function makeLoaf(stage: Stage) {
   ]), stage);
 }
 
-/** How long the oven takes to come up to heat once it's fired (s), and to cool from hot. */
+/** How long the oven takes to come up to heat once it's fired (s), holds it, and cools from hot. */
 const OVEN_FIRE = 25;
+const OVEN_HOLD = 90;
 const OVEN_COOL = 140;
 
 /**
  * An outdoor clay oven: a stone plinth with a dome of clay on it, an
  * arched mouth at the front (local +z) and a little chimney at the back.
  * Fired, it heats up over OVEN_FIRE seconds, smoking hard; hot, the mouth
- * glows; left, it cools off slowly.
+ * glows, and it holds its heat a while (OVEN_HOLD) before cooling slowly.
  */
 export class BreadOven {
   readonly group = new THREE.Group();
   /** 0 cold … 1 hot enough to bake. */
   heat = 0;
   firing = false;
+  private held = 0;
   private glow: THREE.Mesh;
   private glowOn = new THREE.MeshBasicMaterial({ color: '#ffb04a' });
   private glowOff = new THREE.MeshBasicMaterial({ color: '#2a201a' });
@@ -1018,14 +1036,18 @@ export class BreadOven {
   }
 
   get hot() {
-    return this.heat >= 1;
+    return this.heat >= 0.8;
   }
 
   update(dt: number) {
     if (this.firing) {
       this.heat = Math.min(1, this.heat + dt / OVEN_FIRE);
-      if (this.heat >= 1) this.firing = false; // (burnt down to embers: raked out, and it's hot)
-    } else this.heat = Math.max(0, this.heat - dt / OVEN_COOL);
+      if (this.heat >= 1) {
+        this.firing = false; // (burnt down to embers: raked out, and it's hot)
+        this.held = OVEN_HOLD;
+      }
+    } else if (this.held > 0) this.held -= dt;
+    else this.heat = Math.max(0, this.heat - dt / OVEN_COOL);
     this.glow.material = this.heat > 0.5 || this.firing ? this.glowOn : this.glowOff;
   }
 

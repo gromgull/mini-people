@@ -37,6 +37,8 @@ export interface Seat {
   state: SeatState;
   /** Who's (going to be) sitting there. */
   diner: number;
+  /** When they sat down (simulation seconds): the longest waiting is served first. */
+  since?: number;
   /** Where their plate goes, once they're sat (moves to fit them). */
   plate: Spot;
 }

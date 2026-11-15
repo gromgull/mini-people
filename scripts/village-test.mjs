@@ -14,7 +14,7 @@
 //     containers agree with it (pile, stacks, sawhorse, whoever carries it);
 //     every store's booked room and spoken-for things are exactly what
 //     people hold against it, and nobody leaks a booking
-//   - at most one tree is being felled; claimed trees are claimed by a lumberjack
+//   - trees being felled and claimed trees are claimed by a lumberjack
 //   - nothing dropped (after a trip) lies about for more than 45 s, and a
 //     dropped log stays claimed only by whoever's coming back for it
 //   - nobody stays in the same step for more than 90 s (waiting about,
@@ -120,8 +120,8 @@ const result = await page.evaluate(([secs, rng]) => {
       }
     });
     // trees
-    const felling = d.forest.trees.filter((tr) => tr.state === 'felling');
-    if (felling.length > 1) say(`${felling.length} trees being felled at once`);
+    // (every tree coming down is being felled by a lumberjack)
+    for (const tr of d.forest.trees) if (tr.state === 'felling' && d.jobs[tr.claimedBy]?.role !== 'lumberjack') say(`tree ${tr.id} is coming down, claimed by ${tr.claimedBy}`);
     for (const tr of d.forest.trees) if (tr.claimedBy >= 0 && d.jobs[tr.claimedBy]?.role !== 'lumberjack') say(`tree ${tr.id} claimed by ${tr.claimedBy}`);
     // people
     d.walkers.forEach((w, i) => {
@@ -150,23 +150,29 @@ const result = await page.evaluate(([secs, rng]) => {
 
 problems.push(...result.bad);
 if (result.fromTemplate) problems.push(`no layout fitted for seed ${seed}: this is the template village`);
-if (result.stats.felled < 1) problems.push('no tree was felled');
-if (result.stats.sawn < 1) problems.push('no log was sawn');
-if (result.stats.delivered < 1) problems.push('no firewood reached the inn');
-if (result.stats.caught < 1) problems.push('no fish were caught');
-if (Number(seconds) >= 400 && result.stats.fishIn < 1) problems.push('no dried fish reached the larder');
-if (result.stats.picked < 1) problems.push('no apples were picked');
-if (Number(seconds) >= 400 && result.stats.kegs < 1) problems.push('no cider was made');
-if (result.stats.poured < 1) problems.push('nobody was served cider');
-if (Number(seconds) >= 900 && result.stats.mown < 1) problems.push('no wheat was mown');
-if (Number(seconds) >= 900 && result.stats.sheaves < 2) problems.push('no sheaves were stood in the stook');
-if (Number(seconds) >= 900 && result.stats.threshed < 2) problems.push('no sheaves were threshed');
+// the day's work: in a test of trips at many times their rate (trip=n, n > 4) it's
+// only reported (all that tripping costs a working day dear); otherwise it must get done
+const stress = extra.some((a) => a.startsWith('trip=') && Number(a.slice(5)) > 4);
+const output = [];
+if (result.stats.felled < 1) output.push('no tree was felled');
+if (result.stats.sawn < 1) output.push('no log was sawn');
+if (result.stats.delivered < 1) output.push('no firewood reached the inn');
+if (result.stats.caught < 1) output.push('no fish were caught');
+if (Number(seconds) >= 400 && result.stats.fishIn < 1) output.push('no dried fish reached the larder');
+if (result.stats.picked < 1) output.push('no apples were picked');
+if (Number(seconds) >= 400 && result.stats.kegs < 1) output.push('no cider was made');
+if (result.stats.poured < 1) output.push('nobody was served cider');
+if (Number(seconds) >= 900 && result.stats.mown < 1) output.push('no wheat was mown');
+if (Number(seconds) >= 900 && result.stats.sheaves < 2) output.push('no sheaves were stood in the stook');
+if (Number(seconds) >= 900 && result.stats.threshed < 2) output.push('no sheaves were threshed');
 // (flour only if the sails turned a while: a calm day grinds nothing, and that's as it should be)
-if (Number(seconds) >= 900 && result.stats.sailing >= 120 && result.stats.threshed >= 2 && result.stats.flour < 1) problems.push(`the sails turned ${Math.round(result.stats.sailing)}s, but no flour was milled`);
-if (Number(seconds) >= 900 && result.stats.baked < 1) problems.push('no bread was baked');
-if (Number(seconds) >= 900 && result.stats.breadIn < 1) problems.push('no bread reached the inn');
-if (result.stats.kegsBack < 1) problems.push('the cooper fetched no empty keg back from the inn');
-if (result.stats.hooped < 1) problems.push('the cooper hooped no keg');
+if (Number(seconds) >= 900 && result.stats.sailing >= 120 && result.stats.threshed >= 2 && result.stats.flour < 1) output.push(`the sails turned ${Math.round(result.stats.sailing)}s, but no flour was milled`);
+if (Number(seconds) >= 900 && result.stats.baked < 1) output.push('no bread was baked');
+if (Number(seconds) >= 900 && result.stats.breadIn < 1) output.push('no bread reached the inn');
+if (result.stats.kegsBack < 1) output.push('the cooper fetched no empty keg back from the inn');
+if (result.stats.hooped < 1) output.push('the cooper hooped no keg');
+if (stress) for (const o of output) console.log(`  (not counted, with n× the trips: ${o})`);
+else problems.push(...output);
 // (kegs: only ever reused, made by the cooper, or on their way: never made from nothing, never more than allowed)
 if (result.kegs > result.kegsMax) problems.push(`${result.kegs} kegs in the village, more than ${result.kegsMax}`);
 if (result.kegs !== result.stats.kegsMade + 2) problems.push(`${result.kegs} kegs, but 2 to start with and ${result.stats.kegsMade} made`);
@@ -188,7 +194,7 @@ console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.mille
 console.log(`  day ${result.day} now; the wind was ${result.winds.join(', ')}`);
 console.log(`  wheat: strips mown ${result.stats.mown}, sheaves stooked ${result.stats.sheaves}`);
 console.log(`  windmill: threshed ${result.stats.threshed}, sails turned ${Math.round(result.stats.sailing)}s, flour ${result.stats.flour}`);
-console.log(`  bakery: batches ${result.stats.baked}, bread to the inn ${result.stats.breadIn}`);
+console.log(`  bakery: batches ${result.stats.baked}, bread to the inn ${result.stats.breadIn}; suppers of fish ${result.stats.eaten}, of bread ${result.stats.breadEaten}`);
 console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);

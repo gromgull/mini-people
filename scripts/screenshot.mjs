@@ -46,6 +46,7 @@ const shots = process.argv[2]
       ['act-drink', 'mode=stand&count=1&seed=1&select=0&focus&zoom=4&el=12&az=25&act=drink&actAt=0.1&t=4.6&paused&nogui'],
       ['act-eat-apple', 'mode=single&seed=1&act=eat&meal=apple&actAt=0.1&zoom=3&el=15&az=35&t=4.0&paused&nogui'],
       ['act-eat-fish', 'mode=stand&count=1&seed=4&select=0&focus&zoom=4&el=12&az=-25&act=eat&meal=fish&actAt=0.1&t=5.4&paused&nogui'],
+      ['act-eat-bread', 'mode=single&seed=1&who=2&act=eat&meal=bread&actAt=0.1&zoom=3&az=40&el=15&t=4.6&paused&nogui'],
       ['wander-dine', 'mode=wander&seed=5&count=30&t=40&paused&nogui'],
       ['act-haul', 'mode=single&seed=1&who=3&act=haul&actAt=0.1&zoom=2.5&az=60&el=15&t=3&paused&nogui'],
       ['act-banjo', 'mode=single&seed=1&who=3&act=banjo&actAt=0.1&zoom=3&az=20&el=12&t=2.5&paused&nogui'],

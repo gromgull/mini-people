@@ -23,19 +23,21 @@ import { crouchFor, lowerOnto, seatFit, sitTimes } from './seat';
  * eating cleanly without hand-tuning joint angles per body.
  */
 
-export type Course = 'apple' | 'fish' | 'drink' | 'rest';
+export type Course = 'apple' | 'fish' | 'bread' | 'drink' | 'rest';
+/** The courses that are something to eat (and the way they're eaten: the fish two-handed across the face, the others held up and bitten). */
+const isFood = (k: Course | undefined) => k === 'apple' || k === 'fish' || k === 'bread';
 export type DineAsk = 'dine' | 'eat' | 'drink';
 
-const DUR: Record<Course, number> = { apple: 6.9, fish: 7.7, drink: 5.6, rest: 3 };
+const DUR: Record<Course, number> = { apple: 6.9, fish: 7.7, bread: 7.2, drink: 5.6, rest: 3 };
 // eating: hand(s) out to the board, item up to the mouth, a few bites, back down
 const EAT = { reach: 0.3, grab: 0.9, up: 0.6, b0: 1.5 };
-const BITES = { apple: { n: 4, len: 1.0 }, fish: { n: 5, len: 0.9 } };
+const BITES = { apple: { n: 4, len: 1.0 }, fish: { n: 5, len: 0.9 }, bread: { n: 5, len: 0.95 } };
 // arms resting on the table (a rough FK guess for the springs; IK does the rest)
 const ARMS_TABLE: ArmAngles = { x: -0.55, z: 0.15, elbow: 1.45 };
 const ARMS_THIGHS: ArmAngles = { x: -0.12, z: 0.14, elbow: 1.0 };
 
-/** ?meal=apple|fish pins what "eat" serves (for screenshots). */
-const MEAL = ((m) => (m === 'apple' || m === 'fish' ? m : null))(typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('meal'));
+/** ?meal=apple|fish|bread pins what "eat" serves (for screenshots). */
+const MEAL = ((m) => (m === 'apple' || m === 'fish' || m === 'bread' ? m : null))(typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('meal'));
 
 const _a = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -60,6 +62,8 @@ export class Dine implements Chore {
   private board: THREE.Mesh;
   private apple: THREE.Mesh;
   private core: THREE.Mesh;
+  /** A loaf: bitten down to nothing. */
+  private loaf: THREE.Mesh;
   private fish = new THREE.Group();
   private fishFull: THREE.Mesh;
   private fishBones: THREE.Mesh;
@@ -96,7 +100,7 @@ export class Dine implements Chore {
   private tankOn = 0;
   private level = 1; // ale left
   private bites = 0;
-  private onBoard: 'apple' | 'core' | 'fish' | 'bones' | null = null;
+  private onBoard: 'apple' | 'core' | 'fish' | 'bones' | 'bread' | null = null;
   private pop = 0;
 
   constructor(private p: Person, private kit: PropKit) {
@@ -115,6 +119,7 @@ export class Dine implements Chore {
     const capB = caps.clone().translate(0, -0.058, 0);
     caps.translate(0, 0.058, 0);
     this.core = simpleMesh(mergeTwo(mergeTwo(coreG, caps), mergeTwo(capB, stalk.clone().translate(0, -0.01, 0))), kit);
+    this.loaf = simpleMesh(mergeTwo(withRow(new THREE.SphereGeometry(0.075, 9, 6).scale(1.25, 0.72, 1), ROWS.stockfish[0]), withRow(new THREE.BoxGeometry(0.12, 0.008, 0.014).translate(0, 0.052, 0), ROWS.stockfish[1])), kit);
     // a fish (head along +z, centred), and its skeleton
     const body = withRow(new THREE.SphereGeometry(1, 8, 6), ROWS.fish[0]).scale(0.032, 0.045, 0.1);
     const tail = withRow(new THREE.ConeGeometry(0.045, 0.06, 4).rotateX(Math.PI / 2).scale(0.3, 1, 1).translate(0, 0, -0.115), ROWS.fish[1]);
@@ -147,11 +152,11 @@ export class Dine implements Chore {
     this.g.tankH = h * s;
     this.g.aR = 0.075 * s;
 
-    for (const o of [this.table, this.farBench, this.nearBench, this.board, this.apple, this.core, this.fish, this.tankard]) {
+    for (const o of [this.table, this.farBench, this.nearBench, this.board, this.apple, this.core, this.loaf, this.fish, this.tankard]) {
       o.visible = false;
       p.root.add(o);
     }
-    for (const o of [this.board, this.apple, this.core, this.tankard]) o.scale.setScalar(s);
+    for (const o of [this.board, this.apple, this.core, this.loaf, this.tankard]) o.scale.setScalar(s);
   }
 
   /** What they sat down for (set before start). */
@@ -197,7 +202,7 @@ export class Dine implements Chore {
   }
 
   /** A plate set down in front of them: eat it next. */
-  serveMeal(kind: 'fish' | 'apple') {
+  serveMeal(kind: 'fish' | 'apple' | 'bread') {
     this.boardOn = 1;
     this.onBoard = kind;
     if (this.queue[0] !== kind) this.queue.unshift(kind);
@@ -389,7 +394,7 @@ export class Dine implements Chore {
     // what's on: next course, or time to go
     if (this.leaveAt === Infinity && t >= seatedAt) {
       if (this.cur && t - this.cur.t0 >= this.cur.dur) {
-        if (this.cur.kind === 'apple' || this.cur.kind === 'fish') this.ate++;
+        if (isFood(this.cur.kind)) this.ate++;
         this.cur = null;
       }
       if (!this.cur) {
@@ -433,7 +438,7 @@ export class Dine implements Chore {
     this.tau = t - c.t0;
     const u = this.tau;
     const at = (a: number) => this.prevTau < a && u >= a;
-    if (c.kind === 'apple' || c.kind === 'fish') {
+    if (c.kind === 'apple' || c.kind === 'fish' || c.kind === 'bread') {
       const B = BITES[c.kind];
       const bEnd = EAT.b0 + B.n * B.len;
       const reach = smooth((u - EAT.reach) / (EAT.grab - EAT.reach)) * (1 - smooth((u - bEnd - 0.6) / 0.5));
@@ -504,9 +509,9 @@ export class Dine implements Chore {
     const u = this.tau;
     const boardPos = F(this.boardAt);
     const tankPos = F(this.tankAt);
-    if (c && (c.kind === 'apple' || c.kind === 'fish') && this.leaveAt === Infinity && u < 0.35) {
+    if (c && isFood(c.kind) && this.leaveAt === Infinity && u < 0.35) {
       if (this.onBoard !== c.kind) {
-        this.onBoard = c.kind;
+        this.onBoard = c.kind as 'apple' | 'fish' | 'bread';
         this.boardOn = Math.max(this.boardOn, 1e-3);
       }
     }
@@ -521,13 +526,14 @@ export class Dine implements Chore {
     const tankScale = s * Math.min(fade, grow(this.tankOn));
 
     // the food: on the board, or on its way to and from the mouth
-    this.apple.visible = this.core.visible = this.fish.visible = false;
+    this.apple.visible = this.core.visible = this.loaf.visible = this.fish.visible = false;
     const fs = s * 1.15; // fish scale
     const bit = (n: number) => Math.min(fade, grow(n));
-    if (c && (c.kind === 'apple' || c.kind === 'fish')) {
+    if (c && (c.kind === 'apple' || c.kind === 'fish' || c.kind === 'bread')) {
       const B = BITES[c.kind];
       const bEnd = EAT.b0 + B.n * B.len;
       const isApple = c.kind === 'apple';
+      const held = c.kind !== 'fish'; // (an apple or a loaf: up in one hand and bitten)
       const reach = smooth((u - EAT.reach) / (EAT.grab - EAT.reach)) * (1 - smooth((u - bEnd - 0.6) / 0.5));
       const up = smooth((u - EAT.grab) / EAT.up) * (1 - smooth((u - bEnd) / 0.6));
       const bu = (u - EAT.b0) / B.len;
@@ -547,7 +553,7 @@ export class Dine implements Chore {
       const done = this.bites >= B.n;
       const pos = new THREE.Vector3();
       const q = new THREE.Quaternion();
-      if (isApple) {
+      if (held) {
         const aR = G.aR;
         const onB = _c.copy(boardPos).setY(boardPos.y + 0.014 * s + aR * 0.92);
         // held just below and in front of the mouth; a bite pushes it in
@@ -555,8 +561,8 @@ export class Dine implements Chore {
         const bite = _u.copy(mouth).addScaledVector(fwd, aR * 0.55);
         pos.lerpVectors(onB, hold, up).lerp(bite, into * up);
         pos.y += 0.06 * H * Math.sin(Math.PI * up);
-        const m = done ? this.core : this.apple;
-        m.visible = true;
+        const m = c.kind === 'bread' ? this.loaf : done ? this.core : this.apple;
+        m.visible = !(done && c.kind === 'bread'); // (a loaf's all gone)
         m.position.copy(pos);
         m.quaternion.setFromAxisAngle(_Y, 0.4 * up);
         m.scale.setScalar(s * bit(this.boardOn) * (done ? 1 : 1 - 0.12 * this.bites));
@@ -586,14 +592,14 @@ export class Dine implements Chore {
         fistR.lerp(_c.copy(pos).add(ends).setY(pos.y - d.handR * 0.7), reach);
         fistL.lerp(_c.copy(pos).sub(ends).setY(pos.y - d.handR * 0.7), reach);
       }
-      if (u >= bEnd + 0.6) this.onBoard = done ? (isApple ? 'core' : 'bones') : this.onBoard;
+      if (u >= bEnd + 0.6) this.onBoard = done ? (isApple ? 'core' : held ? null : 'bones') : this.onBoard;
       if (up > 0.5) out.focus = p.root.localToWorld(mouth.clone().addScaledVector(fwd, 3 * H).setY(mouth.y));
       else if (reach > 0.05) out.focus = p.root.localToWorld(pos.clone());
     } else if (this.onBoard && this.boardOn > 0) {
       // leftovers (or an uneaten something) stay on the board
       const left = this.onBoard;
-      if (left === 'core' || left === 'apple') {
-        const m = left === 'core' ? this.core : this.apple;
+      if (left === 'core' || left === 'apple' || left === 'bread') {
+        const m = left === 'core' ? this.core : left === 'bread' ? this.loaf : this.apple;
         m.visible = true;
         m.position.copy(boardPos).setY(boardPos.y + 0.014 * s + (left === 'core' ? 0.062 * s : G.aR * 0.92));
         m.scale.setScalar(s * fade);
@@ -648,13 +654,13 @@ export class Dine implements Chore {
   }
 
   hide() {
-    for (const o of [this.table, this.farBench, this.nearBench, this.board, this.apple, this.core, this.fish, this.tankard]) o.visible = false;
+    for (const o of [this.table, this.farBench, this.nearBench, this.board, this.apple, this.core, this.loaf, this.fish, this.tankard]) o.visible = false;
   }
 
   dispose() {
     this.hide();
     for (const m of this.built) disposeMesh(m);
-    for (const o of [this.board, this.apple, this.core, this.fish, this.tankard]) disposeMesh(o);
+    for (const o of [this.board, this.apple, this.core, this.loaf, this.fish, this.tankard]) disposeMesh(o);
     for (const o of [this.table, this.farBench, this.nearBench]) o.removeFromParent();
   }
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type BreadOven, type CiderMill, SHEAF_L, type Trough, type Stook, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
+import { setMeal, type Basket, type Bench, type BreadOven, type CiderMill, SHEAF_L, type Trough, type Stook, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -11,7 +11,7 @@ import { restY } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
 import type { Wind } from './wind';
 import { Field } from './field';
-import { GRAIN_MAX, type Windmill } from './windmill';
+import { GRAIN_MAX, GRAIN_PER_SACK, type Windmill } from './windmill';
 
 /**
  * The jobs. Each person runs a small routine of steps (walk somewhere, do
@@ -84,7 +84,7 @@ export const LOAVES = 4;
 export const OVEN_WOOD = 2;
 const BAKE_TIME = 25;
 /** The inn wants this much bread in. */
-export const INN_BREAD = 6;
+export const INN_BREAD = 8;
 
 /**
  * How much firewood from the yard someone other than the inn may take now
@@ -92,6 +92,13 @@ export const INN_BREAD = 6;
  * stack is low or the woodworkers are stocking it for the evening. Then the
  * oven; the cooper's staves only once the oven has wood for a firing.
  */
+/** Who's sat waiting for supper with nothing coming yet: whoever's waited longest. */
+export function waitingSeat(v: Village) {
+  let best: Seat | null = null;
+  for (const st of v.seats) if (st.state === 'seated' && st.plate.incoming === 0 && st.plate.count === 0 && (!best || (st.since ?? 0) < (best.since ?? 0))) best = st;
+  return best;
+}
+
 export function firewoodFor(v: Village, user: 'oven' | 'staves', want: number) {
   if (want <= 0) return 0;
   if (v.inn.count + v.inn.incoming < INN_LOW || v.hours >= SUPPER - 2) return 0;
@@ -201,7 +208,7 @@ export interface Village {
   /** Bookkeeping for the overlay and the tests. */
   stats: {
     felled: number; sawn: number; delivered: number; burned: number;
-    caught: number; dried: number; fishIn: number; eaten: number;
+    caught: number; dried: number; fishIn: number; eaten: number; breadEaten: number;
     picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
     /** The cooper: firewood shaved into staves, new kegs raised, empties brought back, hoops tightened. */
     shaved: number; kegsMade: number; kegsBack: number; hooped: number;
@@ -486,8 +493,11 @@ export abstract class Job {
       const l = this.carrying;
       const r = this.w.root;
       l.place = { at: 'ground', x: r.position.x + Math.sin(r.rotation.y) * 0.3, z: r.position.z + Math.cos(r.rotation.y) * 0.3, yaw: r.rotation.y + Math.PI / 2 };
+      // (theirs while it lies there: a lumberjack would take an unclaimed log on the ground for a loose one)
+      const claim = l.claimedBy;
+      l.claimedBy = this.w.i;
       this.carrying = null;
-      this.step = { kind: 'tripped', log: l };
+      this.step = { kind: 'tripped', log: l, claim };
       this.w.walker.stop();
     }
   }
@@ -525,6 +535,7 @@ export abstract class Job {
     if (l) {
       const pl = l.place as { x: number; z: number; yaw: number };
       this.lift(l, { pos: new THREE.Vector3(pl.x, LOG_R, pl.z), yaw: pl.yaw });
+      l.claimedBy = s.claim as number; // (as it was before it was dropped)
       this.step = { kind: 'lifting' }; // (and on with their own routine from there)
       return;
     }
@@ -672,11 +683,12 @@ export abstract class Job {
   }
 
   /** Sat down at a seat (supper or not): make the plate's spot fit them. */
-  protected seated(seat: Seat) {
+  protected seated(seat: Seat, v: Village) {
     const d = this.w.actor.choreOf('dine');
     const at = d.boardWorld();
     seat.plate.set(at, seat.table.yaw, seat.table.serveFrom(at));
     seat.state = 'seated';
+    seat.since = v.time;
   }
 
   private eveningStep(v: Village) {
@@ -687,7 +699,7 @@ export abstract class Job {
       case 'to supper': {
         if (!this.arrived) return;
         a.start('dine', { atTable: s.table as { top: number; edge: number; h: number } });
-        this.seated(seat!);
+        this.seated(seat!, v);
         this.step = { kind: 'waiting for supper' };
         return;
       }
@@ -1470,7 +1482,7 @@ export class Innkeeper extends Job {
 
   /** Someone sat down to supper who's not been served (and nobody's cooking for). */
   private seatWaiting(v: Village) {
-    return v.seats.find((st) => st.state === 'seated' && st.plate.incoming === 0 && st.plate.count === 0) ?? null;
+    return waitingSeat(v);
   }
 
   protected run(v: Village) {
@@ -1506,20 +1518,25 @@ export class Innkeeper extends Job {
       case 'to the hatch': {
         if (!this.arrived) return;
         const seat = s.seat as Seat;
-        const slot = v.larder.top(1)[0];
-        if (slot === undefined) {
-          // no fish after all
+        // fish if there is (but bread often enough when there's plenty), else bread
+        // (only bread nobody's spoken for: the baker may be taking a loaf round to someone)
+        const fish = v.larder.top(1)[0], loaf = v.innBread.available > 0 ? v.innBread.top(1)[0] : undefined;
+        const food = fish !== undefined && (loaf === undefined || v.innBread.count < 3 || Math.random() < 0.6) ? 'fish' : loaf !== undefined ? 'bread' : null;
+        if (!food) {
+          // nothing to cook after all
           this.unbook(seat.plate, 'incoming', 1);
           this.step = { kind: 'idle' };
           return;
         }
-        v.removeItem(v.larder.items[slot]!);
-        v.larder.items[slot] = null;
+        const from = food === 'fish' ? v.larder : v.innBread;
+        const slot = (food === 'fish' ? fish : loaf)!;
+        v.removeItem(from.items[slot]!);
+        from.items[slot] = null;
         // cook it: hands busy at the counter a while
         const c = v.hatch.counter;
         const side = new THREE.Vector3(Math.cos(v.hatch.stand.yaw), 0, -Math.sin(v.hatch.stand.yaw)).multiplyScalar(0.12);
         a.start('hold', { hold: { right: () => c.clone().sub(side), left: () => c.clone().add(side), lean: 0.2, bob: () => 0.02 * Math.sin(v.time * 9) } });
-        this.step = { kind: 'cooking', seat, until: v.time + 3 };
+        this.step = { kind: 'cooking', seat, food, until: v.time + (food === 'fish' ? 3 : 1.5) };
         return;
       }
       case 'cooking': {
@@ -1530,6 +1547,8 @@ export class Innkeeper extends Job {
         }
         if (a.busy) return;
         const meal = v.newItem('meal');
+        meal.food = s.food as 'fish' | 'bread';
+        setMeal(meal.mesh, meal.food);
         const pos = v.hatch.counter.clone().setY(v.hatch.counter.y + 0.02);
         const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), v.hatch.stand.yaw);
         meal.place = { at: 'ground', pos, quat };
@@ -1582,7 +1601,7 @@ export class Innkeeper extends Job {
     // supper: cook for whoever's sat down, one plate at a time
     if (v.phase !== 'work') {
       const seat = this.seatWaiting(v);
-      if (seat && v.larder.available > 0) {
+      if (seat && (v.larder.available > 0 || v.innBread.available > 0)) {
         this.book(seat.plate, 'incoming', 1);
         const at = v.hatch.stand;
         this.go(at.x, at.z, at.yaw);
@@ -2052,7 +2071,7 @@ export class Regular extends Job {
         if (v.phase !== 'work' && !this.ateToday) {
           // supper time: they're already sat at their place
           this.seat = v.regularSeat;
-          this.seated(this.seat);
+          this.seated(this.seat, v);
           this.step = { kind: 'waiting for supper' };
           return;
         }
@@ -2309,8 +2328,10 @@ export class Farmer extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (!this.canMow(v)) {
-          // no mowing to do: threshing, then
+        // the mill about to run out of grain, and sheaves waiting: that comes before mowing
+        const millHungry = v.windmill.grain + v.floor.count + v.floor.incoming < GRAIN_PER_SACK && (v.floor.available > 0 || v.stook.available > 0);
+        if (!this.canMow(v) || millHungry) {
+          // threshing
           const n = this.toThresh(v);
           if (n > 0) {
             this.book(v.floor, 'reserved', n);
@@ -2469,6 +2490,41 @@ export class Baker extends Job {
     return this.breadWanted(v) > 0 || this.canBake(v) || this.flourWanted(v) > 0 || this.woodWanted(v) > 0;
   }
 
+  /**
+   * Supper: but the day's bread to the inn first, if there's some on the
+   * shelf and the inn's short; and then, while anyone's sat waiting and
+   * there's bread in the basket, a loaf to them (the innkeeper can't be
+   * everywhere), before sitting down to their own. Fed, back to the green
+   * (and from there, between tunes, round with bread again: danceBreak).
+   */
+  protected eveningStarts(v: Village) {
+    if (v.phase === 'supper') {
+      const bread = this.ateToday ? 0 : this.breadWanted(v);
+      if (bread > 0) {
+        this.fetch(v.bakery.shelf, v.innBread, bread);
+        return true;
+      }
+      if (this.serveBread(v)) return true;
+      if (this.ateToday) {
+        this.toDance(v);
+        return true;
+      }
+    }
+    return super.eveningStarts(v);
+  }
+
+  /** A loaf from the inn's basket to whoever's waited longest for their supper (if anyone is, and there's bread). */
+  private serveBread(v: Village) {
+    const seat = waitingSeat(v);
+    if (!seat || v.innBread.available <= 0) return false;
+    this.fetch(v.innBread, seat.plate, 1);
+    return true;
+  }
+
+  protected danceBreak(v: Village) {
+    return this.serveBread(v);
+  }
+
   protected run(v: Village) {
     const s = this.step;
     const a = this.w.actor;
@@ -2555,7 +2611,10 @@ export class Baker extends Job {
         return;
       }
       case 'waiting for the oven': {
-        if (!this.arrived || !oven.hot) return;
+        if (!this.arrived) return;
+        s.since ??= v.time;
+        // (hot; or it's not quite, but it's been long enough: in it goes, it'll bake a bit slower)
+        if (!oven.hot && (oven.firing || v.time - (s.since as number) < 60)) return;
         a.start('peel', { at: oven.mouth, loaves: 'in' });
         this.step = { kind: 'loading the oven' };
         return;
