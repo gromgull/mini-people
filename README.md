@@ -289,7 +289,7 @@ So far it has one chain:
   at its owner's door till morning, eyes shut. Its googly eyes are on
   whatever it's minding (ahead on the move, the ground when sniffing, its
   owner, whoever it's greeting), or glancing about at people nearby and
-  now and then at you; it blinks, and its paws patter. (`?follow=10`
+  now and then at you; it blinks, and its paws patter. (`?follow=13`
   follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
