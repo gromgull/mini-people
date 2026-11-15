@@ -45,6 +45,7 @@ const shots = process.argv[2]
       ['act-banjo', 'mode=single&seed=1&who=3&act=banjo&actAt=0.1&zoom=3&az=20&el=12&t=2.5&paused&nogui'],
       ['act-banjo-seated', 'mode=single&seed=4&act=banjo&actAt=0.1&sitplay&zoom=3&az=30&el=12&t=3&paused&nogui'],
       ['act-bass', 'mode=single&seed=1&who=3&act=bass&actAt=0.1&zoom=2.2&az=-40&el=12&t=3&paused&nogui'],
+      ['dogs-walk', 'mode=single&seed=1&who=3&dogs=3&dogseed=2&dogspeed=0.6&zoom=2.6&az=20&el=12&t=3&paused&nogui'],
       ['dogs', 'mode=single&seed=1&who=3&dogs=5&dogseed=5&zoom=3&az=0&el=6&t=1&dogyaw=1.5708&paused&nogui'],
       ['act-pipe', 'mode=single&seed=1&who=3&act=pipe&actAt=0.1&zoom=2.6&az=-40&el=10&t=3.2&paused&nogui'],
       ['act-armful', 'mode=single&seed=1&who=3&act=armful&actAt=0.1&zoom=3&az=50&el=18&tx=0.6&tz=0.6&t=2.5&paused&nogui'],

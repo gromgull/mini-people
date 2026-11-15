@@ -8,6 +8,7 @@ import { Trees } from './trees';
 import { Pond } from './pond';
 import { Houses } from './houses';
 import { buildDog, type Quadruped, randomDog } from './quadruped';
+import { QuadAnimator, type QuadMotion } from './quadgait';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -74,6 +75,8 @@ selectRing.position.y = 0.004;
 
 // ?dogs=n: a row of dogs (seeds 1…n, or from ?dogseed), standing, to look at the quadruped rig
 const dogs: Quadruped[] = [];
+// ?dogspeed=v (m/s): they walk (or trot) round a circle; ?dogtread keeps them on the spot (a treadmill)
+const dogGait: { anim: QuadAnimator; m: QuadMotion; home: THREE.Vector3; a: number }[] = [];
 for (let k = 0; k < num('dogs', 0); k++) {
   const dog = buildDog(randomDog(num('dogseed', 1) + k), toon, outline, { skin: stage.skinMats });
   dog.root.position.set((k - (num('dogs', 0) - 1) / 2) * 0.6, 0, 1.2);
@@ -83,6 +86,21 @@ for (let k = 0; k < num('dogs', 0); k++) {
   dog.root.userData.shadow = c;
   scene.add(dog.root);
   dogs.push(dog);
+  dogGait.push({ anim: new QuadAnimator(dog), m: { phase: (k * 0.37) % 1, speed: num('dogspeed', 0) }, home: dog.root.position.clone(), a: 0 });
+}
+function stepDogs(dt: number) {
+  dogGait.forEach((g, k) => {
+    const dog = dogs[k];
+    if (g.m.speed > 0 && !q.has('dogtread')) {
+      // round a circle about where it stood
+      const R = 1.6;
+      g.a += (g.m.speed * dt) / R;
+      dog.root.position.set(g.home.x + R * Math.sin(g.a) - R * 0, 0, g.home.z + R * Math.cos(g.a) - R);
+      dog.root.rotation.y = g.a + Math.PI / 2;
+    }
+    g.anim.advance(g.m, dt);
+    g.anim.update(g.m, dt);
+  });
 }
 
 function slotTransform(i: number) {
@@ -343,6 +361,7 @@ function startTalk(i: number) {
 /** One simulation step: actions, locomotion, animation, effects. */
 function simulate(dt: number) {
   simTime += dt;
+  stepDogs(dt);
   if (settings.mode === 'stand' && settings.spin) spinAngle += dt * 0.8;
   if (scheduled && simTime >= scheduled.at) {
     if (scheduled.who < 0) people.forEach((_, i) => act(i, scheduled!.kind));
