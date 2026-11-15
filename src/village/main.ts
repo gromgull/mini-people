@@ -880,17 +880,54 @@ function simulate(dt: number) {
   smoke.update(dt, stage.toon.uniforms.uTint.value);
 }
 
-// the village's own default view target (?tx/?tz still win): move the camera along by however
-// far that is from where the stage already put it (it applied ?tx/?tz itself)
-{
-  const target = new THREE.Vector3(num('tx', -2), 0.5, num('tz', -1));
-  stage.camera.position.add(target.clone().sub(stage.controls.target));
+/**
+ * The view on load: the whole village in frame, at the standard angle. Every
+ * house, the districts (out to their edges), the windmill and the green are
+ * measured where they'd fall on the screen, treetops and sails included;
+ * the view is centred on all that and zoomed to fit it with a margin, for
+ * whatever shape the window is. (?tx/?tz and ?zoom still win.)
+ */
+function frameVillage() {
+  const cam = stage.camera;
+  stage.resize();
+  cam.updateMatrixWorld();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+  const pts: THREE.Vector3[] = [];
+  const round = (x: number, z: number, r: number, h: number) => {
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      for (const y of [0, h]) pts.push(new THREE.Vector3(x + Math.sin(a) * r, y, z + Math.cos(a) * r));
+    }
+  };
+  for (const b of houses.buildings) round(b.x, b.z, Math.hypot(b.half.x, b.half.z), 3);
+  round(L.forest.x, L.forest.z, L.forest.R + 0.5, 3.5);
+  round(L.orchard.x, L.orchard.z, L.orchard.R, 2);
+  round(L.pond.x, L.pond.z, L.pond.R, 0);
+  round(L.field.x, L.field.z, 3.6, 0.5);
+  round(L.windmill.x, L.windmill.z, 2, 4.5);
+  round(L.green.x, L.green.z, L.green.R, 1.5);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    const sx = p.dot(right), sy = p.dot(up);
+    x0 = Math.min(x0, sx);
+    x1 = Math.max(x1, sx);
+    y0 = Math.min(y0, sy);
+    y1 = Math.max(y1, sy);
+  }
+  // the middle of all that, back down onto the ground along the view
+  const mid = right.clone().multiplyScalar((x0 + x1) / 2).addScaledVector(up, (y0 + y1) / 2);
+  const back = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+  const target = q.has('tx') || q.has('tz') ? new THREE.Vector3(num('tx', 0), 0.5, num('tz', 0)) : mid.addScaledVector(back, (0.5 - mid.y) / back.y);
+  cam.position.add(target.clone().sub(stage.controls.target));
   stage.controls.target.copy(target);
+  if (!q.has('zoom')) {
+    const margin = 1.08;
+    cam.zoom = Math.min((cam.right - cam.left) / ((x1 - x0) * margin), (cam.top - cam.bottom) / ((y1 - y0) * margin));
+    cam.updateProjectionMatrix();
+  }
 }
-if (!q.has('zoom')) {
-  stage.camera.zoom = 0.62;
-  stage.camera.updateProjectionMatrix();
-}
+frameVillage();
 
 // ---------------------------------------------------------------- watching it
 
