@@ -95,6 +95,7 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'farmer', home: 6, name: 'farmer' }, // (in the cabin by the field)
   { role: 'baker', home: 7, name: 'baker' }, // (in the cabin by the bakery)
   { role: 'lumberjack', home: 2, name: 'lumberjack 2' }, // (lodges with the fisher: three users of firewood now)
+  { role: 'innkeeper', home: 3, name: 'innkeeper 2' }, // (lives in: one couldn't serve twelve at supper and still play)
 ];
 const ROLES = VILLAGERS.map((v) => v.role);
 /** Which building each person lives in (index into SITES). */
@@ -322,6 +323,8 @@ const tables = [
 // the wheat field (strips along its yaw) and the stook by it
 const field = new Field(stage, L.field.x, L.field.z, L.field.yaw, 6, 5, 4.8, L.seeds.orchard + 11);
 const stook = new Stook(stage, 'stook', L.stook.x, L.stook.z, L.stook.yaw);
+// with sheaves in it from yesterday's mowing (the mill only grinds in working hours: something to thresh first thing)
+stock(stook, num('sheaves', 4), 'sheaf');
 // the windmill, with its threshing floor and sack rack on the ground beside it (they don't turn with it)
 const windmill = new Windmill(stage, L.windmill.x, L.windmill.z, L.windmill.yaw);
 const nearMill = (x: number, z: number) => new THREE.Vector3(x, 0, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), L.windmill.yaw).add(new THREE.Vector3(L.windmill.x, 0, L.windmill.z));
@@ -330,7 +333,7 @@ const threshingFloor = new ThreshingFloor(stage, 'threshing floor', floorAt.x, f
 const sackRack = new SackRack(stage, 'sacks', sacksAt.x, sacksAt.z, L.windmill.yaw + Math.PI);
 // the wind, and two flags by the inn to show it
 const wind = new Wind(settings.seed, q.has('wind') ? num('wind', 0.5) : null);
-const flags = L.flags.map((f, k) => new Flag(stage, f.x, f.z, k ? [ROWS.shirt[1], ROWS.shirt[3]] : [ROWS.shirt[0], ROWS.shirt[6]]));
+const flags = L.flags.map((f, k) => new Flag(stage, f.x, f.z, k ? [ROWS.cloud[0], ROWS.cloud[0]] : [ROWS.shirt[0], ROWS.shirt[0]])); // (a red one and a white one)
 const seats = tables.flatMap((t) => t.seats);
 // the street-lamp by the tables, which the innkeeper lights at dusk
 const lamp = new StreetLamp(stage, L.lamp.x, L.lamp.z, L.lamp.yaw);
@@ -531,7 +534,7 @@ const village: Village = {
   cameHome: (i) => {
     litUntil[HOME[i]] = simTime + 1.5 * secPerHour(village.hours); // a lamp lit for an hour and a half
   },
-  everyoneFed: () => jobs.every((j, k) => k === INNKEEPER || j.asleep || j.ateToday),
+  everyoneFed: () => jobs.every((j, k) => ROLES[k] === 'innkeeper' || j.asleep || j.ateToday),
   lamp,
   greenSpot: (i) => greenSpot(i),
   bandPlaying: () => crowd.actors.some((a) => kindIs(a.kind, 'music')),
@@ -568,6 +571,8 @@ const jobs: Job[] = people.map((p, i) => {
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, cidermaker: CiderMaker, regular: Regular, cooper: Cooper, farmer: Farmer, baker: Baker }[ROLES[i]];
   return new J(w);
 });
+// (the second innkeeper serves; the first sees to the lamp)
+jobs.forEach((j, k) => ROLES[k] === 'innkeeper' && k !== INNKEEPER && ((j as Innkeeper).keepsLamp = false));
 
 // ---------------------------------------------------------------- the green
 
@@ -766,7 +771,8 @@ function simulate(dt: number) {
   wind.update(village.day, village.hours, simTime);
   field.update(Field.clock(village.day, village.hours));
   // the windmill: turned by the wind; a sack of flour now and then, if there's grain, and room on the rack
-  if (windmill.update(dt, wind.strength, wind.toward, sackRack.room > 0)) {
+  const turns = windmill.turns;
+  if (windmill.update(dt, wind.strength, wind.toward, sackRack.room > 0, village.phase === 'work')) {
     const slot = sackRack.free(1)[0];
     const sack = newItem('flour');
     const p = sackRack.slotWorld(slot);
@@ -776,6 +782,11 @@ function simulate(dt: number) {
     village.stats.flour++;
   }
   if (windmill.turning) village.stats.sailing += dt;
+  // a gentle creak from the windshaft each time the sails come round
+  if (windmill.turns !== turns) {
+    const w = crowd.whereAt(windmill.group, 3);
+    if (w && crowd.sound.live) crowd.sound.creak({ ...w, gain: w.gain * 0.45 });
+  }
   bakery.oven.update(dt);
   ovenSmoke.rate = bakery.oven.smoke;
   village.phase = phaseAt(village.hours);
@@ -942,8 +953,19 @@ window.addEventListener('keydown', (e) => {
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 });
 
-/** ?follow=i: keep person i in the middle of the view (one past the last villager: the dog). */
-let follow = q.has('follow') ? num('follow', 0) : -1;
+/**
+ * ?follow=…: keep someone in the middle of the view: a number (their place
+ * in VILLAGERS; one past the last is the dog), `dog`, or a role or a name
+ * (`farmer`, `woodworker 2`: the first with that name, else that role).
+ */
+let follow = (() => {
+  const f = q.get('follow');
+  if (f === null) return -1;
+  if (f === 'dog') return VILLAGERS.length;
+  if (/^\d+$/.test(f)) return Number(f);
+  const byName = VILLAGERS.findIndex((v) => v.name === f);
+  return byName >= 0 ? byName : VILLAGERS.findIndex((v) => v.role === f);
+})();
 function focusOn(i: number, k: number) {
   // (one past the villagers: the dog)
   const it = people[i] ? { root: people[i].root, h: people[i].dims.height } : i === people.length ? { root: dog.dog.root, h: dog.dog.height * 2 } : null;
@@ -980,6 +1002,7 @@ const hooks: AppHooks = {
     forest.orientShadows();
     orchard.orientShadows(stage);
     houses.updateShadows(stage.lightWorld, look.shadowLength);
+    windmill.updateShadow(stage.lightWorld, look.shadowLength);
   },
   extent: () => 14,
   beforeRender: (frame) => {

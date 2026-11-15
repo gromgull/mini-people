@@ -206,7 +206,7 @@ So far it has one chain:
   the mill's spout, then turns the crank once the hopper holds twelve
   apples; the apples go down one by one, the keg fills, and they carry it
   to the keg rack. No empty keg, no cider.
-- **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
+- **The innkeepers** (two, living in; the first sees to the street-lamp) also fetch kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
   to the table. Supper is dried fish or the baker's bread, one plate at a
   time to whoever's waited longest; bread when the fish runs out, and often
@@ -223,7 +223,10 @@ So far it has one chain:
 - **The windmill** is a post mill: the whole body turns on its post to face
   into the wind, and the sails turn as hard as it blows. While they turn it
   grinds the threshed grain into sacks of flour, set out on a rack by the
-  floor. On a calm day the sails stand still and nothing's ground.
+  floor, the windshaft creaking gently as the sails come round. On a calm
+  day the sails stand still and nothing's ground; and as no mill runs
+  unattended, the brake goes on at the end of the working day and they
+  start again in the morning.
 - **The baker** keeps the bakery in flour (sacks from the windmill's rack)
   and its oven in firewood, and bakes when there's room for the bread: puts
   wood in the clay oven and fires it (it smokes hard while it heats), kneads
@@ -246,7 +249,8 @@ So far it has one chain:
   so often, and wait when the tankard's empty.
 - **The wind:** every day has its own: about a quarter are calm, half
   breezy, a quarter windy, drifting through the day with gusts on top, from
-  a prevailing direction that wanders a little. The two flags by the inn
+  a prevailing direction that wanders a little. The two flags by the inn (a red
+  one and a white one)
   fly out downwind and ripple when it blows, and hang limp down the pole
   when it's calm. The panel shows the day and the wind (`?wind=0…1` holds it
   at one strength).
@@ -289,7 +293,7 @@ So far it has one chain:
   at its owner's door till morning, eyes shut. Its googly eyes are on
   whatever it's minding (ahead on the move, the ground when sniffing, its
   owner, whoever it's greeting), or glancing about at people nearby and
-  now and then at you; it blinks, and its paws patter. (`?follow=13`
+  now and then at you; it blinks, and its paws patter. (`?follow=dog`
   follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
@@ -310,8 +314,9 @@ So far it has one chain:
   after each draw. They
   stop, get up and go as soon as there's work. Everyone plays the same
   shared tune, so whoever's playing plays together.
-- **Stumps grow back:** a sapling appears after about a minute and becomes a
-  full tree over about two more.
+- **Stumps grow back:** a sapling appears after about a day and becomes a
+  full tree over about two more, so the lumberjacks work their way into
+  the forest.
 
 Everything is a real object with a place. Trees and logs are claimed so
 nobody goes for the same thing twice. The actions from the debug page work on
@@ -324,7 +329,7 @@ and the haul and the saw use the actual log.
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
 | `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
-| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n`, `?wind=s` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none), the wind held at s (0 still … 1 windy) |
+| `?follow=i` (or `dog`, a role, a name), `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n`, `?wind=s` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none), the wind held at s (0 still … 1 windy) |
 
 The panel at the bottom left (hidden at first: tick "who's doing what" in
 the menu, or `?panel=1`) shows who's doing what, the woodpile and the

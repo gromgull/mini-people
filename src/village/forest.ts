@@ -33,8 +33,12 @@ export interface Tree {
 }
 
 const VARIANTS = 4;
-const STUMP_TIME = 60; // seconds a stump stands before a sapling appears
-const GROW_TIME = 120; // seconds from sapling to full tree
+// (a day in the village is about 15 minutes of simulation: a felled tree's
+// place is a stump for about a day and a growing sapling for two, so the
+// lumberjacks work their way into the forest instead of felling the same
+// few trees at its edge every day)
+const STUMP_TIME = 900; // seconds a stump stands before a sapling appears
+const GROW_TIME = 1800; // seconds from sapling to full tree
 const SAPLING = 0.2; // a sapling's starting size
 
 const _m = new THREE.Matrix4();

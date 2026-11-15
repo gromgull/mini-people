@@ -467,7 +467,7 @@ export class Houses {
 }
 
 /** Andrew's monotone chain, counter-clockwise in (x, z). */
-function convexHull(p: THREE.Vector2[]) {
+export function convexHull(p: THREE.Vector2[]) {
   const s = p.slice().sort((a, b) => a.x - b.x || a.y - b.y);
   const cross = (o: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
   const lower: THREE.Vector2[] = [];

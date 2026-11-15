@@ -1398,6 +1398,9 @@ export class Fisher extends Job {
  * their hands (a bench outside the inn, a fiddle).
  */
 export class Innkeeper extends Job {
+  /** The one who sees to the street-lamp (there are two innkeepers; the other just serves). */
+  keepsLamp = true;
+
   constructor(w: Worker) {
     super(w, 'innkeeper');
   }
@@ -1456,7 +1459,7 @@ export class Innkeeper extends Job {
 
   /** Dusk, and the lamp not lit yet. */
   private lampWanted(v: Village) {
-    return v.phase === 'supper' && v.hours >= LAMP_AT && !v.lamp.lit;
+    return this.keepsLamp && v.phase === 'supper' && v.hours >= LAMP_AT && !v.lamp.lit;
   }
 
   /** Over to the lamp, to light it or put it out; then on to `then`. */

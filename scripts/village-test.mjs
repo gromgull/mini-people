@@ -17,7 +17,7 @@
 //   - trees being felled and claimed trees are claimed by a lumberjack
 //   - nothing dropped (after a trip) lies about for more than 45 s, and a
 //     dropped log stays claimed only by whoever's coming back for it
-//   - nobody stays in the same step for more than 90 s (waiting about,
+//   - nobody stays in the same step for more than 90 s while getting nowhere (waiting about,
 //     sitting on a bench, playing, smoking, waiting for supper, at the dance and sleeping don't
 //     count; nor does the regular)
 //   - over a whole day (900 s from 08:00): suppers served, the lamp lit,
@@ -45,6 +45,7 @@ const result = await page.evaluate(([secs, rng]) => {
   const m = window.__mini;
   const bad = [];
   const since = new Map(); // job index → [step, since]
+  const trails = new Map(); // job index → where they've been, the last half-minute
   const dogDid = new Set(); // what the dog got up to
   const lying = new Map(); // item → since when it's been on the ground
   const winds = new Set(); // how windy it got, in words
@@ -136,8 +137,16 @@ const result = await page.evaluate(([secs, rng]) => {
     winds.add(d.village.wind.words);
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
+      // (a long walk across the village isn't stuck: stuck is the same step for a minute and a half,
+      // and hardly anywhere in the last half-minute)
+      const w0 = d.walkers[i];
+      const trail = trails.get(i) ?? [];
+      trail.push([w0.x, w0.z]);
+      if (trail.length > 31) trail.shift();
+      trails.set(i, trail);
+      const moved = Math.hypot(w0.x - trail[0][0], w0.z - trail[0][1]);
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (!d.linger.has(j.doing) && j.role !== 'regular' && s - at > 90) {
+      else if (!d.linger.has(j.doing) && j.role !== 'regular' && s - at > 90 && moved < 1.5) {
         const w = d.walkers[i], g = w.goal, a = d.actors[i];
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s: at (${w.x.toFixed(2)}, ${w.z.toFixed(2)})${g ? ` heading for (${g.x.toFixed(2)}, ${g.z.toFixed(2)})${g.via ? ' via' : ''}${g.ignore ? ' ignoring one' : ''}` : ''}, speed ${d.motions[i].speed.toFixed(2)}, doing ${a.kind ?? 'nothing'}${Number.isFinite(j.trippedAt) ? `, tripped ${Math.round(m.time - j.trippedAt)}s ago` : ''}`);
         since.set(i, [j.doing, s]);
@@ -178,13 +187,14 @@ if (result.kegs > result.kegsMax) problems.push(`${result.kegs} kegs in the vill
 if (result.kegs !== result.stats.kegsMade + 2) problems.push(`${result.kegs} kegs, but 2 to start with and ${result.stats.kegsMade} made`);
 if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
-  if (result.day !== 2) problems.push(`it's day ${result.day} after a day and a night (should be 2)`);
+  if (result.day < 2) problems.push(`it's still day ${result.day} after a day and a night`);
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
   if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
   for (const s of ['with its owner', 'begging', 'asleep']) if (!result.dogDid.includes(s)) problems.push(`the dog was never ${s}`);
   if (result.stats.lamps < 1) problems.push('nobody lit the lamp');
   if (result.stats.evening < 6) problems.push(`only ${result.stats.evening} tunes and dances on the green`);
-  if (result.asleep > 0) problems.push(`${result.asleep} still asleep in the morning`);
+  // (up again, if it ended after they wake: a run ending in the small hours finds them abed, as it should)
+  if (result.asleep > 0 && result.hours >= 6.6 && result.hours < 16) problems.push(`${result.asleep} still asleep in the morning`);
 }
 problems.push(...errors);
 console.log(`${seconds}s simulated (seed ${seed}, rng ${rng}): felled ${result.stats.felled}, sawn ${result.stats.sawn}, logs about ${result.logs}, pile ${result.pile}, trees standing ${result.standing}/${result.trees}`);
