@@ -137,8 +137,13 @@ export class Crowd {
   private _sp = new THREE.Vector3();
   /** Stereo position + loudness from where the person is on screen; null = off-screen. */
   whereOf(p: Person): Where | null {
+    return this.whereAt(p.root, p.dims.height);
+  }
+
+  /** Where a sound from this thing (its root, and about how tall it is) sits in the mix, or null if it's off screen. */
+  whereAt(root: THREE.Object3D, height: number): Where | null {
     const camera = this.stage.camera;
-    this._sp.set(0, p.dims.height * 0.8, 0).applyMatrix4(p.root.matrixWorld).project(camera);
+    this._sp.set(0, height * 0.8, 0).applyMatrix4(root.matrixWorld).project(camera);
     if (Math.abs(this._sp.x) > 1.15 || Math.abs(this._sp.y) > 1.15) return null;
     // what's near the middle of the view is what you're listening to
     const centre = Math.min(1, Math.max(0.2, 1.15 - 0.85 * Math.hypot(this._sp.x, this._sp.y)));

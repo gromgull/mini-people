@@ -37,6 +37,7 @@ const RECIPES = {
   'meal': [7, `at(0.1, () => s.creak(C)); at(0.6, () => s.chore('scrape', C)); at(1.0, () => s.chore('scrape', C)); at(1.6, () => s.chore('crunch', C)); at(2.0, () => s.chore('munch', C)); at(2.9, () => s.chore('munch', C)); at(3.6, () => s.chore('gulp', C)); at(4.05, () => s.chore('gulp', C)); at(4.5, () => s.chore('gulp', C)); at(5.1, () => s.chore('clunk', C)); at(5.5, () => s.exclaim('ahh', V.mid, C)); at(6.3, () => s.exclaim('mmm', V.mid, C));`],
   'banjo': [6, `const e8 = 30 / 112; const G = 196; const hz = (st) => G * 2 ** (st / 12); const bum = [0, 7, 4, 7, 5, 4, 2, 0]; const chord = [[-5, 0, 4, 7], [-5, 2, 7, 11], [-3, 0, 5, 9], [-5, 2, 7, 11]]; /* G D C D, on four strings */ for (let b = 0; b < 4; b++) for (let q = 0; q < 2; q++) { const t0 = 0.1 + (b * 8 + q * 4) * e8; const m = bum[b * 2 + q]; at(t0, () => s.banjoNote([hz(m)], 'bum', C)); at(t0 + 2 * e8, () => s.banjoNote(chord[b].map(hz), 'brush', C)); at(t0 + 3 * e8, () => s.banjoNote([hz(12)], 'thumb', C)); }`],
   'bass': [5, `const e8 = 30 / 112; const G = 98; const hz = (st) => G * 2 ** (st / 12); [0, -5, 0, -5, 7, 2, 7, 2, 5, 0, 5, 0, 0, -5, 0, -5].forEach((st, k) => at(0.1 + k * 2 * e8, () => s.bassNote(hz(st), C)));`],
+  'woof': [3, `at(0.1, () => s.woof(1.1, C)); at(0.45, () => s.woof(1.1, C)); at(1.2, () => s.woof(0.75, C)); at(1.42, () => s.woof(0.75, C)); at(1.64, () => s.woof(0.75, C));`],
   'props': [1.6, `at(0.1, () => s.thunk(C, 1)); at(0.6, () => s.thunk(C, 0.8)); at(1.0, () => s.creak(C));`],
 };
 

@@ -21,6 +21,8 @@ import { type Obstacle, Walker } from './walk';
 import { Fisher, Innkeeper, type Job, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
+import { VillageDog } from './dog';
+import { buildDog, randomDog } from '../quadruped';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -302,6 +304,22 @@ const doorOf = (i: number) => {
 };
 const homes = people.map((_, i) => doorOf(i));
 const walkers = people.map((_, i) => new Walker(homes[i].x, homes[i].z, homes[i].yaw + Math.PI));
+
+// ---------------------------------------------------------------- the dog
+
+// one dog, the seed's own, belonging to one of the villagers (starting at their door)
+const DOG_OWNER = Math.floor(mulberry32(settings.seed * 4801 + 3)() * people.length);
+const dog = (() => {
+  const body = buildDog(randomDog(settings.seed), stage.toon, stage.outline, { skin: stage.skinMats });
+  const c = stage.makeCaster(body.dims.bodyLen * 0.9, body.height);
+  body.root.add(c.pivot);
+  body.root.userData.shadow = c;
+  stage.scene.add(body.root);
+  const h = homes[DOG_OWNER];
+  return new VillageDog(body, h.x + Math.cos(h.yaw) * 0.6, h.z - Math.sin(h.yaw) * 0.6, h.yaw);
+})();
+/** Everyone's walkers, the dog's too: so they keep out of each other's way. */
+const allWalkers = [...walkers, dog.walker];
 const houseObstacles: Obstacle[] = houses.buildings.map((b) => ({ kind: 'box', x: b.x, z: b.z, yaw: b.yaw, hx: b.half.x, hz: b.half.z }));
 const pileObstacle: Obstacle = { kind: 'box', x: pile.x, z: pile.z, yaw: pile.yaw, hx: LOG_L / 2 + 0.04, hz: 0.22 };
 const horseObstacle: Obstacle = (() => {
@@ -604,16 +622,30 @@ function simulate(dt: number) {
       // stopped for a word
       m.targetSpeed = 0;
       faceTalker(i, dt);
-    } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, walkers, WALK_SPEED * crowd.styleOf(p).speedK);
+    } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, allWalkers, WALK_SPEED * crowd.styleOf(p).speedK);
     crowd.advance(i, dt);
     if (!a.rootLocked) {
-      w.move(m.speed, dt, obs, walkers);
+      w.move(m.speed, dt, obs, allWalkers);
       const yaw = w.yaw + (pose?.spin ?? 0);
       const fwd = pose?.fwd ?? 0;
       p.root.position.set(w.x + Math.sin(yaw) * fwd, pose?.lift ?? 0, w.z + Math.cos(yaw) * fwd);
       p.root.rotation.y = yaw;
     }
     crowd.post(i, dt, simTime, pose);
+  });
+  dog.step({
+    time: simTime,
+    dt,
+    people: people.map((p, i) => ({ walker: walkers[i], root: p.root, height: p.dims.height, speed: crowd.motions[i].speed, doing: jobs[i].doing, asleep: jobs[i].asleep })),
+    owner: DOG_OWNER,
+    home: homes[DOG_OWNER],
+    green: L.green,
+    obstacles: obs,
+    walkers: allWalkers,
+    sound: () => {
+      const w = crowd.whereAt(dog.dog.root, dog.dog.height);
+      if (w && crowd.sound.live) crowd.sound.woof(dog.dog.genome.size, w);
+    },
   });
   crowd.endStep(dt);
   talk();
@@ -677,6 +709,7 @@ function updatePanel() {
   const standing = forest.trees.filter((t) => t.state === 'standing').length;
   panel.textContent = [
     ...rows,
+    `  🐕 dog        ${dog.doing} (${ROLES[DOG_OWNER]}${DOG_OWNER === 7 ? ' 2' : ''}'s)`,
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
@@ -716,14 +749,15 @@ window.addEventListener('keydown', (e) => {
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 });
 
-/** ?follow=i: keep person i in the middle of the view. */
+/** ?follow=i: keep person i in the middle of the view (one past the last villager: the dog). */
 let follow = q.has('follow') ? num('follow', 0) : -1;
 function focusOn(i: number, k: number) {
-  const p = people[i];
-  if (!p) return;
+  // (one past the villagers: the dog)
+  const it = people[i] ? { root: people[i].root, h: people[i].dims.height } : i === people.length ? { root: dog.dog.root, h: dog.dog.height * 2 } : null;
+  if (!it) return;
   const c = stage.controls;
   const off = stage.camera.position.clone().sub(c.target);
-  c.target.lerp(new THREE.Vector3(p.root.position.x, p.dims.height * 0.5, p.root.position.z), k);
+  c.target.lerp(new THREE.Vector3(it.root.position.x, it.h * 0.5, it.root.position.z), k);
   stage.camera.position.copy(c.target).add(off);
 }
 
@@ -742,6 +776,7 @@ function frame(start: number) {
   stage.controls.update();
   stage.updateLight(dt, settings.paused);
   crowd.orientShadows();
+  stage.orient(dog.dog.root.userData.shadow, dog.dog.root.rotation.y);
   forest.orientShadows();
   orchard.orientShadows(stage);
   houses.updateShadows(stage.lightWorld, look.shadowLength);
@@ -749,7 +784,7 @@ function frame(start: number) {
   stage.updateEnvironment(dt, 14);
   stage.render(start, people.length);
   if (frames % 6 === 0) updatePanel();
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village }), follow: (i: number) => (follow = i), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
+  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog }), follow: (i: number) => (follow = i), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
 }
 
 stage.resize();

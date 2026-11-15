@@ -15,7 +15,8 @@
 //   - over a whole day (900 s from 08:00): suppers served, the lamp lit,
 //     music and dancing on the green, everyone in bed, and everyone up
 //     again in the morning
-//   - positions are finite
+//   - positions are finite (the dog's too, and it stays about); over a
+//     whole day the dog is with its owner, begs at supper and sleeps
 //   - by the end, trees have been felled, logs sawn, firewood delivered, fish
 //     caught, and (given time to dry) dried fish brought to the larder; apples
 //     picked, (given time) cider made, and the regular served
@@ -38,6 +39,7 @@ const result = await page.evaluate((secs) => {
   const m = window.__mini;
   const bad = [];
   const since = new Map(); // job index → [step, since]
+  const dogDid = new Set(); // what the dog got up to
   for (let s = 1; s <= secs; s++) {
     m.step(1);
     const d = m.debug();
@@ -88,6 +90,11 @@ const result = await page.evaluate((secs) => {
       if (!Number.isFinite(w.x) || !Number.isFinite(w.z)) say(`person ${i} at NaN`);
       if (Math.hypot(w.x, w.z) > 40) say(`person ${i} wandered off to (${w.x.toFixed(1)}, ${w.z.toFixed(1)})`);
     });
+    // the dog
+    const dw = d.dog.walker;
+    if (!Number.isFinite(dw.x) || !Number.isFinite(dw.z)) say('the dog at NaN');
+    if (Math.hypot(dw.x, dw.z) > 40) say(`the dog wandered off to (${dw.x.toFixed(1)}, ${dw.z.toFixed(1)})`);
+    dogDid.add(d.dog.doing);
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
@@ -98,7 +105,7 @@ const result = await page.evaluate((secs) => {
     });
   }
   const d = m.debug();
-  return { bad, asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length };
+  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length };
 }, Number(seconds));
 
 problems.push(...result.bad);
@@ -114,6 +121,7 @@ if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
   if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
+  for (const s of ['with its owner', 'begging', 'asleep']) if (!result.dogDid.includes(s)) problems.push(`the dog was never ${s}`);
   if (result.stats.lamps < 1) problems.push('nobody lit the lamp');
   if (result.stats.evening < 6) problems.push(`only ${result.stats.evening} tunes and dances on the green`);
   if (result.asleep > 0) problems.push(`${result.asleep} still asleep in the morning`);

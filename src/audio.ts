@@ -321,6 +321,28 @@ export class Sound {
   }
 
   /**
+   * A dog's bark: a short voiced burst whose pitch drops, through a mouth
+   * resonance, with a breathy edge; smaller dogs higher and yappier
+   * (`size` ~0.7 small … 1.2 big).
+   */
+  woof(size: number, w: Where) {
+    if (!this.live || !this.allow('voices')) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005;
+    const o = this.out('voices', w);
+    const f0 = 520 / size;
+    const dur = 0.11 + 0.06 * size;
+    const src = this.tone('sawtooth', t, f0, f0 * 0.62, dur);
+    const mouth = this.filter('bandpass', 1300 / Math.sqrt(size), 1.6);
+    mouth.frequency.setValueAtTime(1500 / Math.sqrt(size), t);
+    mouth.frequency.exponentialRampToValueAtTime(800 / Math.sqrt(size), t + dur);
+    const body = this.filter('lowpass', 2600, 0.8);
+    src.connect(mouth).connect(body).connect(this.env(t, 0.55, 0.008, dur)).connect(o);
+    // the breath of it
+    this.noiseSrc(t, dur).connect(this.filter('bandpass', 1800, 1.2)).connect(this.env(t, 0.12, 0.004, dur * 0.8)).connect(o);
+  }
+
+  /**
    * Double bass, plucked: a round, woody low note (the fundamental with a
    * couple of harmonics so small speakers still carry it), a soft thump at
    * the start, a long-ish fade.

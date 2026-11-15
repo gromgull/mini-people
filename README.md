@@ -129,6 +129,7 @@ Handy for sharing a particular scene, e.g.
 | `fps` | animate on twos (e.g. 10) |
 | `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
 | `stats` | start with the fps / frame time / draw call overlay on |
+| `dogs=n` (`dogseed`, `dogyaw`, `dogspeed`, `dogtread`, `dogpose=sit\|lie\|sniff`, `dogwag`) | a row of dogs: which ones, which way they face, walking or trotting round (or on the spot), sitting, lying or sniffing, wagging |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `time` | time of day in hours, 0–24 (default 10; 18 ≈ sunset, 0 = midnight) |
@@ -228,6 +229,14 @@ So far it has one chain:
   sit down by however much their legs need for the real seat, reach for the
   real table top, and crouch to the real log, so a short woodworker saws
   standing tall and a tall one bends their knees.
+- **The dog:** every village has one (its look is the seed's), and it
+  belongs to one of the villagers. By day it follows them about, trotting
+  to catch up, and while they're at their work it finds things to do: it
+  sits looking up at them, lies down once they've been at it a while,
+  sniffs about, or goes to say hello to whoever's near with a wag and
+  sometimes a bark. At supper it sits begging by its owner's place at the
+  table; on the green it trots about among the dancers; at night it lies
+  at its owner's door till morning. (`?follow=8` follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
   on each other. Diners at a table talk in pairs while they wait for supper,
@@ -318,7 +327,7 @@ once.
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
 | `src/demo.ts` | the demo: modes, GUI, input |
-| `src/village/` | the village: `layout.ts` (where everything goes, from the seed), `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `main.ts` |
+| `src/village/` | the village: `layout.ts` (where everything goes, from the seed), `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `dog.ts` (the village dog and its owner), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
 | `src/smoke.ts` | chimney smoke |
@@ -326,6 +335,8 @@ once.
 | `src/banjo.ts` | playing the banjo (the shared tune's banjo part, bum-ditty), standing or seated |
 | `src/bass.ts` | playing the double bass (the shared tune's bass part), standing |
 | `src/pipe.ts` | smoking a pipe, standing or seated (the smoke is the crowd's) |
+| `src/quadruped.ts` | the four-legged rig: a dog's body (hips and chest, neck and head, ears, a three-part tail, four legs with paws, the hind ones with a hock) from a seeded genome |
+| `src/quadgait.ts` | four-legged gaits (a walk blending into a trot, paws planted, two-bone IK legs) and poses: sit, lie down, sniff, look at, wag, bark |
 
 Built with [three.js](https://threejs.org/), [lil-gui](https://lil-gui.georgealways.com/)
 and [Vite](https://vitejs.dev/).

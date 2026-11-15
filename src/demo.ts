@@ -86,7 +86,12 @@ for (let k = 0; k < num('dogs', 0); k++) {
   dog.root.userData.shadow = c;
   scene.add(dog.root);
   dogs.push(dog);
-  dogGait.push({ anim: new QuadAnimator(dog), m: { phase: (k * 0.37) % 1, speed: num('dogspeed', 0) }, home: dog.root.position.clone(), a: 0 });
+  const anim = new QuadAnimator(dog);
+  // ?dogpose=sit|lie|sniff: settle into it (and ?dogwag: wag)
+  const pose = q.get('dogpose');
+  if (pose === 'sit' || pose === 'lie' || pose === 'sniff') anim.setPose(pose);
+  anim.wag = num('dogwag', 0);
+  dogGait.push({ anim, m: { phase: (k * 0.37) % 1, speed: num('dogspeed', 0) }, home: dog.root.position.clone(), a: 0 });
 }
 function stepDogs(dt: number) {
   dogGait.forEach((g, k) => {
