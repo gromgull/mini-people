@@ -409,7 +409,7 @@ export class Sound {
    * Sounds of the outdoor chores: axe, falling tree, leaves, apples, and
    * fishing (cast, float, splashes, the reel's ratchet).
    */
-  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape', w: Where) {
+  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'shave' | 'clank', w: Where) {
     // the reel's ratchet ticks fast and quietly: not worth a rate-limit token
     if (!this.live || (kind !== 'tick' && !this.allow('tools'))) return;
     const t = this.ctx!.currentTime + 0.003;
@@ -497,6 +497,19 @@ export class Sound {
         this.noiseSrc(t, 0.03).connect(this.filter('bandpass', 1100, 2)).connect(this.env(t, 0.4, 0.001, 0.025)).connect(o);
         const f = rand(1150, 1300);
         [1, 2.7].forEach((k, i) => this.tone('triangle', t, f * k, f * k * 0.99, 0.15).connect(this.env(t, [0.08, 0.04][i], 0.001, 0.12)).connect(o));
+        break;
+      }
+      case 'shave':
+        // a draw-knife down a stave: a bright, papery curl of a hiss, falling as the shaving comes off
+        this.noiseSweep(t, o, rand(3200, 3800), rand(1700, 2100), 1.8, 0.5, 0.03, 0.4);
+        this.noiseSrc(t + 0.05, 0.3).connect(this.filter('bandpass', rand(900, 1100), 1.5)).connect(this.env(t + 0.05, 0.18, 0.05, 0.22)).connect(o);
+        break;
+      case 'clank': {
+        // the hoop driver struck: a hard knock on wood with a short iron ring (the hoop)
+        this.noiseSrc(t, 0.02).connect(this.filter('bandpass', 1800, 1.2)).connect(this.env(t, 0.5, 0.0008, 0.012)).connect(o);
+        this.tone('sine', t, 260, 140, 0.08).connect(this.env(t, 0.5, 0.001, 0.06)).connect(o);
+        const f = rand(1500, 1750);
+        [1, 2.4, 4.1].forEach((k, i) => this.tone('triangle', t, f * k, f * k * 0.995, 0.3).connect(this.env(t, [0.12, 0.06, 0.03][i], 0.0008, [0.2, 0.12, 0.06][i])).connect(o));
         break;
       }
       case 'scrape':

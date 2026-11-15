@@ -160,7 +160,8 @@ mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
 their order around the yard and gives each district its own direction,
 distance and turn. Each district keeps its own arrangement, so everything
 still works. The woodworker's cabin goes in the widest gap between
-districts, the drying rack on the way from the pond to the inn, and a layout
+districts, the cooperage between it and the yard, the drying rack on the
+way from the pond to the inn, and a layout
 where anything overlaps is thrown away and redrawn. Building looks, the
 forest, the orchard and the pond's shape vary with the seed too.
 
@@ -197,12 +198,19 @@ So far it has one chain:
   it down under the apple, step up, pick, and step down again. The ladder
   stays where it was left. With five apples they carry the basket to the
   cider mill and tip them into its hopper. Picked apples grow back.
-- **The miller** turns the mill's crank once the hopper holds twelve apples;
-  the apples go down one by one, and a keg of cider stands full under the
-  spout, which they carry to the keg rack.
+- **The miller** fetches an empty keg from the cooper's and stands it under
+  the mill's spout, then turns the crank once the hopper holds twelve
+  apples; the apples go down one by one, the keg fills, and they carry it
+  to the keg rack. No empty keg, no cider.
 - **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
   to the table.
+- **The cooper** (who lives with the woodworker) looks after the kegs. When
+  one runs dry at the inn they fetch it back to their block and drive its
+  hoops tight again. When there aren't enough empties to go round, they
+  take firewood from the yard (only while the inn's fire isn't running
+  low), sit astride the shaving horse and draw-knife it into staves, then
+  raise a new keg on the block and hammer its hoops on.
 - **The regular** has no job. They sit at the inn's table, sip cider every
   so often, and wait when the tankard's empty.
 - **The day:** the village keeps its own clock on simulation time (a day is
@@ -239,7 +247,7 @@ So far it has one chain:
   at its owner's door till morning, eyes shut. Its googly eyes are on
   whatever it's minding (ahead on the move, the ground when sniffing, its
   owner, whoever it's greeting), or glancing about at people nearby and
-  now and then at you; it blinks, and its paws patter. (`?follow=8`
+  now and then at you; it blinks, and its paws patter. (`?follow=9`
   follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
@@ -274,7 +282,7 @@ and the haul and the saw use the actual log.
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
 | `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
-| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, kegs at the inn |
+| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn |
 
 The panel at the bottom left (hidden at first: tick "who's doing what" in
 the menu, or `?panel=1`) shows who's doing what, the woodpile and the

@@ -12,13 +12,13 @@ import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
 import { buildPerson } from '../body';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, type Item, KegRack, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
+import { Basket, Bench, CiderMill, Crate, HoopBlock, type Item, KegRack, ShavingHorse, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
 import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
 import { type Obstacle, Walker } from './walk';
-import { Fisher, Innkeeper, type Job, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
+import { Cooper, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
 import { type AppHooks, runApp } from '../app';
@@ -70,7 +70,7 @@ stage.backdrop.build(settings.seed);
 // picker's and the miller's (past the mill), the other picker's (the far side of the orchard)
 const SITES: Site[] = L.sites;
 
-type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'miller' | 'regular';
+type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'miller' | 'regular' | 'cooper';
 /**
  * Who lives here: each one's job, which building is their home (index into
  * SITES), which picker's basket and ladder are theirs, and what they're
@@ -86,6 +86,7 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'miller', home: 4, name: 'miller' },
   { role: 'regular', home: 3, name: 'regular' },
   { role: 'picker', home: 5, name: 'picker 2', gear: 1 }, // (two pickers, to keep the mill busy)
+  { role: 'cooper', home: 1, name: 'cooper' }, // (lives with the woodworker)
 ];
 const ROLES = VILLAGERS.map((v) => v.role);
 /** Which building each person lives in (index into SITES). */
@@ -230,16 +231,39 @@ function stock(st: Store, n: number, kind: Item['kind'] = 'wood', dry = 0) {
 }
 stock(yard, num('wood', 0));
 stock(innStack, num('innwood', 3));
-stock(larder, num('fish', 2), 'fish', 1);
+stock(larder, num('fish', 3), 'fish', 1); // (one each for the first few suppers: nine mouths)
 stock(rack, num('rackfish', 0), 'fish', 0.6);
 stock(mill.hopper, num('apples', 0), 'apple');
 stock(innKegs, num('kegs', 1), 'keg', SERVINGS);
+// and one the inn's drunk dry, waiting for the cooper to fetch back
+stock(innKegs, num('emptykegs', 1), 'keg', 0);
 /** Fish dry on the rack over this many seconds. */
 const DRY_TIME = 120;
 
 /** The inn's kitchen fire burns a piece every so often (game hours: the slow evening burns no faster per hour). */
-const BURN_EVERY = 1.25;
+const BURN_EVERY = 1.5;
 let burnClock = 0;
+// the cooperage, between the woodworker's and the yard (its local +z toward the yard):
+// the shaving horse and the block side by side, firewood for staves and the empty kegs behind
+const cooperage = (() => {
+  const C = L.cooperage;
+  const at = (x: number, z: number) => new THREE.Vector3(x, 0, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), C.yaw).add(new THREE.Vector3(C.x, 0, C.z));
+  const h = at(-0.8, 0.15), b = at(0.75, 0.2), st = at(-0.7, -0.85), k = at(0.7, -0.85);
+  const shaving = new ShavingHorse(stage, h.x, h.z, C.yaw + Math.PI / 2, reference.sitFit());
+  const mid = at(-0.8 + 0.2, 0.15); // (the plank runs along local x from the seat)
+  return {
+    horse: shaving,
+    horseObstacle: { kind: 'box', x: mid.x, z: mid.z, yaw: shaving.yaw, hx: 0.12, hz: 0.45 } as Obstacle,
+    block: new HoopBlock(stage, 'block', b.x, b.z, C.yaw),
+    staves: new Stack(stage, 'staves', st.x, st.z, C.yaw, 1, 3),
+    empties: new KegRack(stage, 'cooper kegs', k.x, k.z, C.yaw + Math.PI / 2, 3),
+  };
+})();
+// where a keg stands under the cider mill's spout to fill
+const spout = (() => {
+  const sp = mill.spout();
+  return new Spot(stage, 'spout', sp.pos, mill.yaw, mill.frontSpot());
+})();
 // and a bench of their height to sit on between logs, looking over the yard
 const bench = new Bench(stage, L.bench.x, L.bench.z, L.bench.yaw, reference.sitFit());
 // the innkeeper's, out front of the inn left of the door; the fisher's, looking over the pond
@@ -368,10 +392,16 @@ const millObstacles: Obstacle[] = [
   ...orchard.trees.map((t): Obstacle => ({ kind: 'circle', x: t.x, z: t.z, r: 0.12 })),
 ];
 const lampObstacle: Obstacle = { kind: 'circle', x: lamp.x, z: lamp.z, r: 0.1 };
+const cooperObstacles: Obstacle[] = [
+  cooperage.horseObstacle,
+  { kind: 'circle', x: cooperage.block.x, z: cooperage.block.z, r: 0.17 },
+  { kind: 'box', x: cooperage.staves.x, z: cooperage.staves.z, yaw: cooperage.staves.yaw, hx: 0.18, hz: 0.2 },
+  { kind: 'box', x: cooperage.empties.x, z: cooperage.empties.z, yaw: cooperage.empties.yaw, hx: 0.17, hz: 0.25 },
+];
 const treeObstacles = new Map<number, Obstacle>();
 /** Everything solid right now. */
 function obstacles(): Obstacle[] {
-  const out = [...houseObstacles, lampObstacle, pileObstacle, horseObstacle, benchObstacle, innBenchObstacle, pondBenchObstacle, pondObstacle, rackObstacle, larderObstacle, ...stackObstacles, ...millObstacles];
+  const out = [...houseObstacles, lampObstacle, pileObstacle, horseObstacle, benchObstacle, innBenchObstacle, pondBenchObstacle, pondObstacle, rackObstacle, larderObstacle, ...stackObstacles, ...millObstacles, ...cooperObstacles];
   for (const t of forest.trees) {
     if (t.state === 'felling') continue;
     let o = treeObstacles.get(t.id);
@@ -407,6 +437,8 @@ const village: Village = {
   mill,
   millKegs,
   innKegs,
+  spout,
+  cooperage,
   dt: 0,
   hours: look.time,
   phase: phaseAt(look.time),
@@ -463,13 +495,13 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const pk = VILLAGERS[i].gear;
   const gear = pk !== undefined ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
   const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[i], pipe: PIPE[i], home: homes[i], gear };
-  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
+  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular, cooper: Cooper }[ROLES[i]];
   return new J(w);
 });
 
@@ -738,7 +770,7 @@ if (!q.has('zoom')) {
 
 // ---------------------------------------------------------------- watching it
 
-const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', miller: '⚙', regular: '🍻' };
+const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', miller: '⚙', regular: '🍻', cooper: '🛢' };
 const panel = document.createElement('div');
 panel.style.cssText = 'position:fixed;left:8px;bottom:30px;padding:6px 9px;background:#000a;color:#e8f4d8;font:12px/1.45 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;';
 document.body.appendChild(panel);
@@ -757,7 +789,8 @@ function updatePanel() {
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
     `fish: caught ${village.stats.caught} · rack ${rack.count}/${rack.slots.length} (${rack.items.filter((it) => it && it.dry >= 1).length} dry) · larder ${larder.count}/${larder.slots.length}${larder.incoming ? ` (+${larder.incoming} coming)` : ''} · suppers served ${village.stats.meals}`,
-    `cider: picked ${village.stats.picked} · baskets ${baskets.map((b) => b.count).join('+')} · hopper ${mill.hopper.count}/${mill.hopper.slots.length} · kegs made ${village.stats.kegs} · at the mill ${millKegs.count} · at the inn ${innKegs.count} (${innKegs.items.reduce((n, k) => n + (k ? k.dry : 0), 0)} tankards) · poured ${village.stats.poured} · sips ${village.stats.drunk}`,
+    `cider: picked ${village.stats.picked} · baskets ${baskets.map((b) => b.count).join('+')} · hopper ${mill.hopper.count}/${mill.hopper.slots.length} · kegs filled ${village.stats.kegs} · at the mill ${millKegs.count} · at the inn ${innKegs.count} (${innKegs.items.reduce((n, k) => n + (k ? k.dry : 0), 0)} tankards) · poured ${village.stats.poured} · sips ${village.stats.drunk}`,
+    `cooper: staves ${cooperage.staves.count} · shaved ${village.stats.shaved} · kegs made ${village.stats.kegsMade} · brought back ${village.stats.kegsBack} · hooped ${village.stats.hooped} · empties ready ${cooperage.empties.count} · under the spout ${spout.count ? (spout.items[0]!.dry > 0 ? 'full' : 'empty') : 'none'}`,
     `${String(Math.floor(village.hours)).padStart(2, '0')}:${String(Math.floor((village.hours % 1) * 60)).padStart(2, '0')} ${{ work: 'working', supper: 'supper at the inn', night: 'night' }[village.phase]} · meals ${village.stats.meals} · time ${clock(simTime)} · speed ×${settings.speed}${settings.paused ? ' (paused)' : ''}`,
   ].join('\n');
 }
@@ -828,7 +861,7 @@ const hooks: AppHooks = {
     if (frame % 6 === 0) updatePanel();
   },
   testHook: () => ({
-    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER }),
+    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX }),
     follow: (i: number) => (follow = i),
     step: (sec: number) => {
       simulateSteps(Math.round(sec * 30), 1 / 30);

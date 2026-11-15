@@ -3,6 +3,7 @@ import { ROWS } from '../palette';
 import type { Stage } from '../stage';
 import { type Part, bake } from '../trees';
 import { PIECE_L, PIECE_R } from '../firewood';
+import { KEG_L, KEG_R, kegParts } from '../keg';
 
 /**
  * The things the woodcutting chain moves around: logs, the woodpile they
@@ -410,8 +411,7 @@ export function setDry(mesh: THREE.Object3D, dried: boolean) {
 // ---------------------------------------------------------------- apples and cider
 
 export const APPLE_R = 0.065;
-export const KEG_R = 0.095;
-export const KEG_L = 0.26;
+export { KEG_L, KEG_R };
 
 /** An apple (item mesh). */
 export function makeApple(stage: Stage) {
@@ -421,14 +421,9 @@ export function makeApple(stage: Stage) {
   ]), stage);
 }
 
-/** A small cider keg lying along x: bulging staves, two iron hoops, a pale end with a bung. */
+/** A small cider keg lying along x (see keg.ts). */
 export function makeKeg(stage: Stage) {
-  const prof: [number, number][] = [[0.001, -KEG_L / 2], [KEG_R * 0.8, -KEG_L / 2], [KEG_R, 0], [KEG_R * 0.8, KEG_L / 2], [0.001, KEG_L / 2]];
-  const body = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 10).rotateZ(Math.PI / 2);
-  const parts: Part[] = [{ geo: body, row: ROWS.log[0] }];
-  for (const x of [-0.32, 0.32]) parts.push({ geo: new THREE.CylinderGeometry(KEG_R * 0.94, KEG_R * 0.94, 0.014, 10).rotateZ(Math.PI / 2).translate(x * KEG_L, 0, 0), row: ROWS.stone[2] });
-  parts.push({ geo: new THREE.CylinderGeometry(0.012, 0.012, 0.03, 5).translate(0, KEG_R, 0), row: ROWS.log[1] }); // bung
-  return outlined(bake(parts), stage);
+  return outlined(bake(kegParts()), stage);
 }
 
 /** A tankard of cider (item mesh), upright, its handle to its right (−x). */
@@ -734,5 +729,61 @@ export class StreetLamp {
     this.glass.material = on ? this.glassOn : this.glassOff;
     this.stage.lamp.color.setRGB(...((on ? [1.25, 0.86, 0.5] : [0, 0, 0]) as [number, number, number]));
     this.stage.lamp.range = 9;
+  }
+}
+
+// ---------------------------------------------------------------- the cooper's
+
+/**
+ * A shaving horse: a long plank to sit astride, on four splayed legs, with a
+ * sloping bridge rising in front where the stave lies, and a clamp head at
+ * its top end. Its local +z is the way the sitter faces; the seat is at the
+ * origin, built to a reference sitter's knee height (Actor.sitFit) like the
+ * benches.
+ */
+export class ShavingHorse {
+  readonly group = new THREE.Group();
+
+  constructor(stage: Stage, readonly x: number, readonly z: number, readonly yaw: number, readonly fit: { h: number; benchZ: number; depth: number }) {
+    const { h } = fit;
+    const t = 0.035;
+    const back = -0.22, front = 0.62;
+    const parts: Part[] = [{ geo: new THREE.BoxGeometry(0.15, t, front - back).translate(0, h - t / 2, (front + back) / 2), row: ROWS.log[2] }];
+    for (const lz of [back + 0.06, front - 0.08])
+      for (const s of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.035, h, 0.035).rotateZ(s * 0.18).translate(s * 0.09, h / 2 - 0.01, lz), row: ROWS.log[1] });
+    // the bridge: up from just ahead of the seat to the clamp
+    const b0 = new THREE.Vector3(0, h, 0.12), b1 = new THREE.Vector3(0, h + 0.2, 0.5);
+    const len = b0.distanceTo(b1);
+    const bridge = new THREE.BoxGeometry(0.11, 0.025, len).rotateX(-Math.atan2(b1.y - b0.y, b1.z - b0.z)).translate(0, (b0.y + b1.y) / 2, (b0.z + b1.z) / 2);
+    parts.push({ geo: bridge, row: ROWS.log[0] });
+    parts.push({ geo: new THREE.BoxGeometry(0.035, 0.2, 0.035).translate(0, h + 0.09, 0.5), row: ROWS.log[1] }); // its prop
+    parts.push({ geo: new THREE.BoxGeometry(0.16, 0.05, 0.06).translate(0, h + 0.26, 0.52), row: ROWS.log[1] }); // the clamp head
+    this.group.add(outlined(bake(parts), stage));
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  /** Where to stand (straddling the plank, facing along it) to sit down: `sitter` (Actor.sitFit) says how far ahead of the seat their feet go. */
+  sitSpot(sitter: { benchZ: number } = this.fit) {
+    const fwd = -sitter.benchZ;
+    return { x: this.x + Math.sin(this.yaw) * fwd, z: this.z + Math.cos(this.yaw) * fwd, yaw: this.yaw };
+  }
+}
+
+/** How high the cooper's block is. */
+export const BLOCK_H = 0.3;
+
+/**
+ * The cooper's block: a short round of trunk with a keg standing on end on
+ * it (a one-slot store) while its hoops are driven on.
+ */
+export class HoopBlock extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number) {
+    super(name, x, z, yaw);
+    // (a keg lies along its x: turned on end)
+    this.slots.push({ pos: new THREE.Vector3(0, BLOCK_H + KEG_L / 2, 0), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2) });
+    this.reach = 0.42;
+    this.place(stage, [{ geo: new THREE.CylinderGeometry(0.13, 0.15, BLOCK_H, 9).translate(0, BLOCK_H / 2, 0), row: ROWS.log[2] }]);
   }
 }

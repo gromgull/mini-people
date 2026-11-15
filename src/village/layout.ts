@@ -20,7 +20,8 @@ import type { Site } from '../houses';
  * distance and a little turn of its own, and the yard turns too. The
  * woodworker's cabin goes in the widest gap between districts, and the
  * drying rack on the way from the pond to the inn (the innkeeper fetches
- * dried fish from it, sometimes in the middle of supper). A layout
+ * dried fish from it, sometimes in the middle of supper), and the cooperage
+ * (the cooper lives with the woodworker) between their cabin and the yard. A layout
  * where anything overlaps (with a margin to walk through) is thrown away
  * and another drawn.
  */
@@ -53,6 +54,8 @@ export interface Layout {
   pondBench: Pose;
   rack: Pose;
   innKegs: Pose;
+  /** The cooperage: its shaving horse, block, staves and empty kegs are laid out round it (local +z toward the yard). */
+  cooperage: Pose;
   /** The inn's two tables (the first is the regular's). */
   tables: Pose[];
   /** The street-lamp by the tables (its arm and lantern out along its yaw). */
@@ -106,6 +109,7 @@ const TEMPLATE: Record<string, Piece> = {
   site4: P('orchard', 7.4, 9.6, 2.7, 2.3),
   site5: P('orchard', -8.6, 9.4, 1.9, 2.3),
   site1: P('yard', 7.6, -7.6, -0.5, 2.3), // the woodworker's: placed on its own, in the widest gap
+  cooperage: P('yard', 5.3, -4.4, Math.atan2(-5.3, 4.4), 1.5), // placed on its own, between the woodworker's and the yard
 };
 /** Each district's anchor: where it's carried from. */
 const ANCHOR: Record<Exclude<District, 'yard'>, { x: number; z: number }> = {
@@ -149,6 +153,7 @@ export function makeLayout(seed: number): Layout {
     pondBench: pose('pondBench'),
     rack: pose('rack'),
     innKegs: pose('innKegs'),
+    cooperage: pose('cooperage'),
     tables: [pose('table0'), pose('table1')],
     lamp: pose('lamp'),
     green: { ...round('green'), yaw: g('green').yaw },
@@ -174,7 +179,7 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
   });
   const out: Record<string, Piece> = {};
   for (const [k, t] of Object.entries(TEMPLATE)) {
-    if (k === 'site1' || k === 'rack') continue;
+    if (k === 'site1' || k === 'rack' || k === 'cooperage') continue;
     const m = move[t.d];
     let x = t.x, z = t.z, yaw = t.yaw;
     if (t.d !== 'yard') {
@@ -211,6 +216,21 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
     const x = pond.x + (inn.x - pond.x) * f + Math.cos(along) * side;
     const z = pond.z + (inn.z - pond.z) * f - Math.sin(along) * side;
     out.rack = { ...TEMPLATE.rack, x, z, yaw: along + rr(-0.3, 0.3) };
+    if (clear(out)) return placeCooperage(out, rr);
+  }
+  return null;
+}
+
+/** The cooperage: out from the woodworker's door toward the yard, a little to one side, facing the yard. */
+function placeCooperage(out: Record<string, Piece>, rr: (a: number, b: number) => number) {
+  const w = out.site1;
+  const d = Math.hypot(w.x, w.z);
+  const ix = -w.x / d, iz = -w.z / d; // in toward the yard
+  for (let k = 0; k < 16; k++) {
+    const f = rr(3.2, 4.4), side = rr(-2.2, 2.2);
+    const x = w.x + ix * f - iz * side;
+    const z = w.z + iz * f + ix * side;
+    out.cooperage = { ...TEMPLATE.cooperage, x, z, yaw: Math.atan2(-x, -z) };
     if (clear(out)) return out;
   }
   return null;
@@ -222,7 +242,7 @@ function clear(out: Record<string, Piece>) {
   for (let i = 0; i < all.length; i++)
     for (let j = i + 1; j < all.length; j++) {
       const [ka, a] = all[i], [kb, b] = all[j];
-      const loose = (k: string) => k === 'site1' || k === 'rack'; // (placed on their own: checked against everything)
+      const loose = (k: string) => k === 'site1' || k === 'rack' || k === 'cooperage'; // (placed on their own: checked against everything)
       const same = a.d === b.d && !loose(ka) && !loose(kb);
       if (same) continue;
       if (Math.hypot(a.x - b.x, a.z - b.z) < a.r + b.r + MARGIN) return false;

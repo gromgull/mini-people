@@ -13,13 +13,14 @@ import { DoubleBass } from './bass';
 import { Pipe } from './pipe';
 import { crouchFor, lowerOnto, seatFit, sitTimes, thighRest } from './seat';
 import { Fiddle } from './fiddle';
+import { Hoop, type HoopPlan, Shave } from './cooper';
 import { Armful, type ItemPose } from './armful';
 import { Hold, type HoldPlan } from './hold';
 import type { PineSpec } from './trees';
 import { BPM, PHRASE_SLOTS } from './tune';
 export { BPM };
 
-export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe'] as const;
+export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe', 'shave', 'hoop'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /**
@@ -31,6 +32,7 @@ export type ActionKind = (typeof ACTIONS)[number];
  *   meal      sat at a table (dine, eat, drink are the one chore)
  *   moving    they carry on walking while they do it
  *   staysPut  it takes a spot for a while (not for the parade's stream)
+ *   seated    done sat down (on a seat that's there, else a conjured one)
  */
 export interface KindInfo {
   dramatic?: true;
@@ -39,6 +41,7 @@ export interface KindInfo {
   meal?: true;
   moving?: true;
   staysPut?: true;
+  seated?: true;
 }
 export const KIND_INFO: Record<ActionKind, KindInfo> = {
   wave: { moving: true },
@@ -63,6 +66,8 @@ export const KIND_INFO: Record<ActionKind, KindInfo> = {
   hold: { working: true },
   bass: { music: true, staysPut: true },
   pipe: { staysPut: true },
+  shave: { working: true, staysPut: true, seated: true },
+  hoop: { working: true, staysPut: true },
 };
 /** Is this action (if any) of this sort? */
 export const kindIs = (k: ActionKind | null | undefined, trait: keyof KindInfo) => !!k && !!KIND_INFO[k][trait];
@@ -229,8 +234,10 @@ export class Actor {
   choreOf(kind: 'bass'): DoubleBass;
   choreOf(kind: 'pipe'): Pipe;
   choreOf(kind: 'fiddle'): Fiddle;
-  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine' | 'bass' | 'pipe' | 'fiddle'): Chore {
-    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine, bass: DoubleBass, pipe: Pipe, fiddle: Fiddle }[kind];
+  choreOf(kind: 'shave'): Shave;
+  choreOf(kind: 'hoop'): Hoop;
+  choreOf(kind: 'chop' | 'haul' | 'banjo' | 'armful' | 'fish' | 'pick' | 'hold' | 'dine' | 'bass' | 'pipe' | 'fiddle' | 'shave' | 'hoop'): Chore {
+    const C = { chop: Chop, haul: Haul, banjo: Banjo, armful: Armful, fish: Fish, pick: PickApple, hold: Hold, dine: Dine, bass: DoubleBass, pipe: Pipe, fiddle: Fiddle, shave: Shave, hoop: Hoop }[kind];
     return (this.chores[kind] ??= new C(this.p, this.kit));
   }
 
@@ -261,6 +268,10 @@ export class Actor {
       phrases?: number;
       /** Pipe: how long to smoke it (s). */
       smoke?: number;
+      /** Shaving: how many staves. */
+      staves?: number;
+      /** Hoops: the keg (a real one, else one's conjured), how many blows, a new one to raise. */
+      hoop?: HoopPlan;
       /** Sit down for it (on a conjured seat) and get up after. */
       seated?: boolean;
     } = {},
@@ -322,6 +333,18 @@ export class Actor {
       b.plan(this.beatTime, this.playLength(0.7, this.phrases));
       this.chore = b;
       b.start();
+    }
+    if (kind === 'shave') {
+      const sv = this.choreOf('shave');
+      sv.plan(opts.staves ?? 2);
+      this.chore = sv;
+      sv.start();
+    }
+    if (kind === 'hoop') {
+      const h = this.choreOf('hoop');
+      h.aim(opts.hoop ?? { blows: 10, raise: Math.random() < 0.5 });
+      this.chore = h;
+      h.start();
     }
     if (kind === 'pipe') {
       const pp = this.choreOf('pipe');

@@ -61,7 +61,7 @@ const result = await page.evaluate((secs) => {
       if (p.at === 'stack' && p.stack.items[p.slot] !== pc) say(`piece ${pc.id} says ${p.stack.name} slot ${p.slot}, slot has ${p.stack.items[p.slot]?.id}`);
       if (p.at === 'carried' && !d.jobs[p.by]?.armful.includes(pc)) say(`piece ${pc.id} says carried by ${p.by}, who doesn't have it`);
     }
-    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot]) {
+    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, v.spout, v.cooperage.block, v.cooperage.staves, v.cooperage.empties]) {
       st.items.forEach((pc, i) => {
         if (!pc) return;
         if (!v.items.includes(pc)) say(`${st.name} slot ${i} holds a piece that no longer exists`);
@@ -70,7 +70,7 @@ const result = await page.evaluate((secs) => {
       if (st.incoming < 0 || st.reserved < 0 || st.reserved > st.count) say(`${st.name} stack books off: incoming ${st.incoming}, reserved ${st.reserved}, count ${st.count}`);
     }
     // bookings: every store's booked room and spoken-for things are exactly what people hold against it
-    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, d.pile, ...v.seats.map((x) => x.plate)]) {
+    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, v.spout, v.cooperage.block, v.cooperage.staves, v.cooperage.empties, d.pile, ...v.seats.map((x) => x.plate)]) {
       for (const kind of ['incoming', 'reserved']) {
         const held = d.jobs.reduce((n, j) => n + j.bookings.filter((b) => b.store === st && b.kind === kind).reduce((m, b) => m + b.n, 0), 0);
         if (st[kind] !== held) say(`the ${st.name}'s ${kind} is ${st[kind]}, but people hold ${held}`);
@@ -109,7 +109,7 @@ const result = await page.evaluate((secs) => {
     });
   }
   const d = m.debug();
-  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length };
+  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax };
 }, Number(seconds));
 
 problems.push(...result.bad);
@@ -121,6 +121,11 @@ if (Number(seconds) >= 400 && result.stats.fishIn < 1) problems.push('no dried f
 if (result.stats.picked < 1) problems.push('no apples were picked');
 if (Number(seconds) >= 400 && result.stats.kegs < 1) problems.push('no cider was made');
 if (result.stats.poured < 1) problems.push('nobody was served cider');
+if (result.stats.kegsBack < 1) problems.push('the cooper fetched no empty keg back from the inn');
+if (result.stats.hooped < 1) problems.push('the cooper hooped no keg');
+// (kegs: only ever reused, made by the cooper, or on their way: never made from nothing, never more than allowed)
+if (result.kegs > result.kegsMax) problems.push(`${result.kegs} kegs in the village, more than ${result.kegsMax}`);
+if (result.kegs !== result.stats.kegsMade + 2) problems.push(`${result.kegs} kegs, but 2 to start with and ${result.stats.kegsMade} made`);
 if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
@@ -135,6 +140,7 @@ console.log(`${seconds}s simulated (seed ${seed}): felled ${result.stats.felled}
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
 console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
+console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);
 console.log(problems.length ? `✗ ${problems.length} problem(s):\n  ${problems.join('\n  ')}` : '✓ consistent throughout');
 await close();

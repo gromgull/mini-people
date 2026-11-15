@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type CiderMill, type Crate, type Item, type KegRack, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
+import { type Basket, type Bench, type CiderMill, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -20,6 +20,10 @@ import { type Obstacle, type Walker, wrap } from './walk';
  *     log to the pile on the shoulder.
  *   woodworker: if there's a log in the pile, carry it to the sawhorse, put
  *     it on, and saw it. Otherwise wait by the sawhorse.
+ *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
+ *     there aren't enough empties to go round, takes firewood from the yard
+ *     (if the inn can spare it), shaves it into staves and raises a new keg.
+ *     The miller fills only kegs the cooper has ready.
  *
  * Claims (on trees and logs) keep two people from going for the same thing.
  * If an action gets interrupted (someone falls over), whatever they were
@@ -47,6 +51,22 @@ export const MILL_BATCH = 12;
 export const SERVINGS = 8;
 /** The inn wants this many kegs on hand. */
 export const INN_KEGS = 2;
+/** Pieces of firewood a new keg's staves are shaved from. */
+export const STAVES = 2;
+/** The cooper keeps this many empty kegs ready (on the rack or on the block). */
+export const COOPER_EMPTIES = 2;
+/** No more kegs than this in the whole village (the cooper stops making them). */
+export const KEGS_MAX = 5;
+/** The cooper takes no firewood while the inn's stack (with what's on its way) is lower than this. */
+export const INN_LOW = 4;
+/** Hammer blows: hooping a new keg, tightening an old one's hoops. */
+const BLOWS_NEW = 12;
+const BLOWS_OLD = 5;
+
+export const isFullKeg = (it: Item) => it.kind === 'keg' && it.dry > 0;
+export const isEmptyKeg = (it: Item) => it.kind === 'keg' && it.dry <= 0;
+/** How many items in a store pass `ok`. */
+export const countIn = (st: Store, ok: (it: Item) => boolean) => st.items.reduce((n, it) => n + (it && ok(it) ? 1 : 0), 0);
 /**
  * The day: work from WAKE, supper at the inn from SUPPER (then music and a
  * dance on the green), everyone home by NIGHT (hours). The innkeeper lights
@@ -85,6 +105,10 @@ export interface Village {
   mill: CiderMill;
   millKegs: KegRack;
   innKegs: KegRack;
+  /** Where the keg stands under the mill's spout to be filled (one slot). */
+  spout: Spot;
+  /** The cooper's: the shaving horse, the block, firewood waiting to be staves, empty kegs ready for the mill. */
+  cooperage: { horse: ShavingHorse; horseObstacle: Obstacle; block: HoopBlock; staves: Stack; empties: KegRack };
   /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
   tankardSpot: Spot;
   /** A full tankard has just been set down at the regular's place. */
@@ -128,6 +152,8 @@ export interface Village {
     felled: number; sawn: number; delivered: number; burned: number;
     caught: number; dried: number; fishIn: number; eaten: number;
     picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
+    /** The cooper: firewood shaved into staves, new kegs raised, empties brought back, hoops tightened. */
+    shaved: number; kegsMade: number; kegsBack: number; hooped: number;
     meals: number; hungry: number; slept: number;
     /** Tunes struck up and dances begun on the green; times the lamp was lit. */
     evening: number; lamps: number;
@@ -228,6 +254,12 @@ export type StepKind =
   | 'to the table'
   | 'to the tree'
   | 'to the water'
+  | 'to the horse'
+  | 'onto the horse'
+  | 'shaving'
+  | 'off the horse'
+  | 'to the block'
+  | 'hooping'
   | 'to tree'
   | 'waiting for a refill'
   | 'waiting for supper';
@@ -446,6 +478,7 @@ export abstract class Job {
         if (to === v.inn) v.stats.delivered += this.armful.length;
         if (to === v.larder) v.stats.fishIn += this.armful.length;
         if (to === v.innKegs) v.stats.kegsIn += this.armful.length;
+        if (to === v.cooperage.block) v.stats.kegsBack += this.armful.length; // (the only thing fetched to the block: an empty from the inn)
         if (to === v.tankardSpot) {
           this.armful = [];
           this.step = { kind: 'idle' };
@@ -1224,13 +1257,14 @@ export class Innkeeper extends Job {
 
   /** Kegs at the mill nobody's come for, if the inn's short. */
   private kegsWanted(v: Village) {
-    const short = INN_KEGS - v.innKegs.count - v.innKegs.incoming;
+    // (the empties wait on the rack for the cooper: they take room, but no cider in them)
+    const short = INN_KEGS - countIn(v.innKegs, isFullKeg) - v.innKegs.incoming;
     return short > 0 ? Math.min(1, v.millKegs.available, v.innKegs.room) : 0;
   }
 
   /** Someone's tankard is empty, nobody's bringing one, and there's cider. */
   private refill(v: Village) {
-    return v.wantsRefill() && v.tankardSpot.incoming === 0 && v.tankardSpot.count === 0 && v.innKegs.available > 0;
+    return v.wantsRefill() && v.tankardSpot.incoming === 0 && v.tankardSpot.count === 0 && countIn(v.innKegs, isFullKeg) > 0;
   }
 
   protected hasWork(v: Village) {
@@ -1359,8 +1393,8 @@ export class Innkeeper extends Job {
       }
       case 'to the kegs': {
         if (!this.arrived) return;
-        // draw a tankard from the top keg: hands at its tap a moment
-        const slot = v.innKegs.top(1)[0];
+        // draw a tankard from the top keg with cider in it: hands at its tap a moment
+        const slot = v.innKegs.top(1, isFullKeg)[0];
         if (slot === undefined) {
           this.unbook(v.tankardSpot, 'incoming', 1);
           this.step = { kind: 'idle' };
@@ -1382,12 +1416,8 @@ export class Innkeeper extends Job {
         const slot = s.slot as number;
         const keg = v.innKegs.items[slot];
         if (keg) {
-          keg.dry -= 1;
-          if (keg.dry <= 0) {
-            // that's the keg empty
-            v.innKegs.items[slot] = null;
-            v.removeItem(keg);
-          }
+          // (the last of it: the keg stays on the rack, empty, till the cooper comes for it)
+          keg.dry = Math.max(0, keg.dry - 1);
         }
         const r = this.w.root;
         const mug = v.newItem('mug');
@@ -1731,8 +1761,18 @@ export class Miller extends Job {
     return v.mill.hopper.top(MILL_BATCH).length >= MILL_BATCH;
   }
 
+  /** Apples enough, an empty keg under the spout, and room for it full. */
+  private canMill(v: Village) {
+    return this.ready(v) && v.spout.top(1, isEmptyKeg).length > 0 && v.millKegs.room >= 1;
+  }
+
+  /** Nothing under the spout, and an empty ready at the cooper's. */
+  private kegWanted(v: Village) {
+    return v.spout.count + v.spout.incoming === 0 && v.cooperage.empties.available > 0;
+  }
+
   protected hasWork(v: Village) {
-    return this.ready(v) && v.millKegs.room >= 1;
+    return this.canMill(v) || this.kegWanted(v);
   }
 
   protected run(v: Village) {
@@ -1742,11 +1782,16 @@ export class Miller extends Job {
     switch (s.kind) {
       case 'idle': {
         if (v.time < this.waitUntil) return;
-        if (this.hasWork(v)) {
+        if (this.canMill(v)) {
           this.book(v.millKegs, 'incoming', 1);
           const at = mill.crankSpot();
           this.go(at.x, at.z, at.yaw, null);
           this.step = { kind: 'to the crank' };
+          return;
+        }
+        // an empty keg from the cooper's, to stand under the spout ready
+        if (this.kegWanted(v)) {
+          this.fetch(v.cooperage.empties, v.spout, 1);
           return;
         }
         if (this.leisure(v)) return;
@@ -1777,16 +1822,13 @@ export class Miller extends Job {
           a.events.push('crunch');
         }
         if (this.fed >= MILL_BATCH) {
-          // full: a keg of cider under the spout
-          const keg = v.newItem('keg');
-          keg.dry = SERVINGS;
-          const sp = mill.spout();
-          keg.place = { at: 'ground', pos: sp.pos, quat: sp.quat };
-          keg.tween = { pos: sp.pos.clone().setY(sp.pos.y + 0.25), quat: sp.quat.clone(), t0: v.time, dur: 0.5 };
+          // full: the keg under the spout is cider now
+          const keg = v.spout.items[0];
+          if (keg) keg.dry = SERVINGS;
           v.stats.kegs++;
           a.events.push('splash');
           a.choreOf('hold').release();
-          this.step = { kind: 'letting go', keg };
+          this.step = { kind: 'letting go' };
         }
         return;
       }
@@ -1794,14 +1836,20 @@ export class Miller extends Job {
         if (a.busy) return;
         const at = mill.frontSpot();
         this.go(at.x, at.z, at.yaw);
-        this.step = { kind: 'to the spout', keg: s.keg };
+        this.step = { kind: 'to the spout' };
         return;
       }
       case 'to the spout': {
         if (!this.arrived) return;
-        const keg = s.keg as Item;
-        const pl = keg.place as { pos: THREE.Vector3; quat: THREE.Quaternion };
-        this.gather([keg], [{ pos: pl.pos.clone(), quat: pl.quat.clone() }], v.millKegs);
+        const keg = v.spout.items[0];
+        if (!keg) {
+          // (nothing there after all: the room kept for it at the rack goes back)
+          this.unbook(v.millKegs, 'incoming', 1);
+          this.step = { kind: 'idle' };
+          return;
+        }
+        v.spout.items[0] = null;
+        this.gather([keg], [v.spout.slotWorld(0)], v.millKegs);
         return;
       }
     }
@@ -1869,6 +1917,203 @@ export class Regular extends Job {
           v.stats.drunk++;
           this.nextSip = v.time + 10 + Math.random() * 10;
         }
+      }
+    }
+  }
+}
+
+/**
+ * The cooper: kegs for the cider. In order:
+ *   - a keg on the block: tighten its hoops (or raise a new one there), then
+ *     rack it with the empties;
+ *   - an empty at the inn: fetch it back to the block;
+ *   - staves enough waiting: sit at the shaving horse and shave them, then
+ *     raise a new keg on the block;
+ *   - too few empties (and fewer kegs in the village than KEGS_MAX): fetch
+ *     firewood for staves from the yard, unless the inn's fire needs it.
+ * Otherwise a rest, or waiting by the block.
+ */
+export class Cooper extends Job {
+  /** Kegs on the block whose hoops are done (they go to the rack next). */
+  private done = new Set<Item>();
+
+  constructor(w: Worker) {
+    super(w, 'cooper');
+  }
+
+  /** The keg on the block, if there's one. */
+  private onBlock(v: Village) {
+    const c = v.cooperage;
+    const slot = c.block.top(1)[0];
+    return slot === undefined ? null : c.block.items[slot]!;
+  }
+
+  /** An empty at the inn nobody's come for, and the block free for it. */
+  private emptyAtInn(v: Village) {
+    return countIn(v.innKegs, isEmptyKeg) - v.innKegs.reserved > 0 && v.cooperage.block.room > 0;
+  }
+
+  /** Short of empties, and the village not yet at its kegs. */
+  private wantNew(v: Village) {
+    const c = v.cooperage;
+    const kegs = v.items.filter((it) => it.kind === 'keg').length + c.block.incoming;
+    const ready = c.empties.count + c.empties.incoming + c.block.count + c.block.incoming;
+    return kegs < KEGS_MAX && ready < COOPER_EMPTIES;
+  }
+
+  /** Staves to shave, the block free to raise the keg on, room on the rack after. */
+  private canShave(v: Village) {
+    const c = v.cooperage;
+    return c.staves.available >= STAVES && c.block.room > 0 && c.empties.room > 0 && this.wantNew(v);
+  }
+
+  /**
+   * Firewood to fetch for staves: none while the inn's fire is running low,
+   * or once the woodworker's stocking it up for the evening (the fire comes
+   * first), else as much as there is in the yard.
+   */
+  private stavesWanted(v: Village) {
+    const c = v.cooperage;
+    const short = STAVES - c.staves.count - c.staves.incoming;
+    const innLow = v.inn.count + v.inn.incoming < INN_LOW || v.hours >= SUPPER - 2;
+    if (short <= 0 || !this.wantNew(v) || innLow) return 0;
+    return Math.min(short, c.staves.room, v.yard.available);
+  }
+
+  /** The keg on the block wants doing: its hoops, or carrying to the rack. */
+  private blockWork(v: Village) {
+    const k = this.onBlock(v);
+    return !!k && (!this.done.has(k) || v.cooperage.empties.room > 0);
+  }
+
+  protected hasWork(v: Village) {
+    return this.blockWork(v) || this.emptyAtInn(v) || this.canShave(v) || this.stavesWanted(v) > 0;
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const c = v.cooperage;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        if (this.blockWork(v)) {
+          const at = c.block.workSpot();
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to the block', raise: false };
+          return;
+        }
+        if (this.emptyAtInn(v)) {
+          this.fetch(v.innKegs, c.block, 1, isEmptyKeg);
+          return;
+        }
+        if (this.canShave(v)) {
+          this.book(c.staves, 'reserved', STAVES);
+          this.book(c.block, 'incoming', 1); // (where the new keg will be raised)
+          const at = c.horse.sitSpot(this.w.actor.sitFit());
+          this.go(at.x, at.z, at.yaw, c.horseObstacle);
+          this.step = { kind: 'to the horse' };
+          return;
+        }
+        const n = this.stavesWanted(v);
+        if (n > 0) {
+          this.fetch(v.yard, c.staves, n);
+          return;
+        }
+        if (this.leisure(v)) return;
+        // otherwise wait by the block
+        const at = c.block.workSpot();
+        const w = this.w.walker;
+        if (Math.hypot(w.x - at.x, w.z - at.z) > 0.3 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw);
+        this.waitUntil = v.time + 1;
+        return;
+      }
+      case 'to the horse': {
+        if (!this.arrived) return;
+        a.sitDown({ seatH: c.horse.fit.h });
+        this.step = { kind: 'onto the horse', until: v.time + 4 };
+        return;
+      }
+      case 'onto the horse': {
+        // (sat down, or given up waiting: shave anyway)
+        if (!a.seated && v.time < (s.until as number)) return;
+        // the firewood comes off the stack and becomes the stave in the clamp
+        const slots = c.staves.top(STAVES);
+        for (const i of slots) {
+          v.removeItem(c.staves.items[i]!);
+          c.staves.items[i] = null;
+        }
+        this.unbook(c.staves, 'reserved', STAVES);
+        v.stats.shaved += slots.length;
+        a.start('shave', { staves: Math.max(1, slots.length) });
+        this.step = { kind: 'shaving' };
+        return;
+      }
+      case 'shaving': {
+        if (a.busy) return;
+        a.getUp();
+        this.step = { kind: 'off the horse' };
+        return;
+      }
+      case 'off the horse': {
+        if (a.onSeat) return;
+        const at = c.block.workSpot();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to the block', raise: true };
+        return;
+      }
+      case 'to the block': {
+        if (!this.arrived) return;
+        let keg = this.onBlock(v);
+        const raise = s.raise as boolean;
+        if (raise) {
+          // the new keg, gathered up from its staves on the block
+          this.unbook(c.block, 'incoming', 1);
+          const slot = c.block.free(1)[0];
+          if (slot === undefined) {
+            this.step = { kind: 'idle' };
+            return;
+          }
+          keg = v.newItem('keg');
+          keg.dry = 0;
+          keg.place = { at: 'stack', stack: c.block, slot };
+          c.block.items[slot] = keg;
+          const p = c.block.slotWorld(slot);
+          keg.mesh.position.copy(p.pos);
+          keg.mesh.quaternion.copy(p.quat);
+          v.stats.kegsMade++;
+        }
+        if (!keg) {
+          this.step = { kind: 'idle' };
+          return;
+        }
+        if (this.done.has(keg)) {
+          // hooped already: onto the rack with the others
+          if (c.empties.room <= 0) {
+            this.step = { kind: 'idle' };
+            this.waitUntil = v.time + 2;
+            return;
+          }
+          const slot = (keg.place as { slot: number }).slot;
+          c.block.items[slot] = null;
+          this.done.delete(keg);
+          this.book(c.empties, 'incoming', 1);
+          this.gather([keg], [c.block.slotWorld(slot)], c.empties);
+          return;
+        }
+        a.start('hoop', { hoop: { keg: keg.mesh, blows: raise ? BLOWS_NEW : BLOWS_OLD, raise } });
+        this.step = { kind: 'hooping', keg };
+        return;
+      }
+      case 'hooping': {
+        if (a.busy) return;
+        const keg = s.keg as Item;
+        if (this.onBlock(v) === keg) {
+          this.done.add(keg);
+          v.stats.hooped++;
+        }
+        this.step = { kind: 'idle' };
+        return;
       }
     }
   }

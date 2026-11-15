@@ -15,7 +15,7 @@ import { type Part, type PineSpec, bake, pineParts, wobble } from './trees';
 export type ActEvent =
   | 'oof' | 'hup' | 'grunt' | 'hey' | 'thunk' | 'creak' | 'log' | 'clap'
   | 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick'
-  | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'ahh' | 'mmm';
+  | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'ahh' | 'mmm' | 'shave' | 'clank';
 export type BurstKind = 'chips' | 'leaves' | 'splash' | 'crumbs';
 
 /** Plucked strings: their frequencies (Hz, low to high) and how (a brush rakes across them). */
