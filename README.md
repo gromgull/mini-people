@@ -293,10 +293,14 @@ and the haul and the saw use the actual log.
 
 The panel at the bottom left (hidden at first: tick "who's doing what" in
 the menu, or `?panel=1`) shows who's doing what, the woodpile and the
-tallies. `npm run test:village` runs the village headless for ten simulated
-minutes and checks that every log stays in exactly one consistent place,
-that only one tree is felled at a time, that nobody gets stuck, and that
-work gets done.
+tallies. `npm run test:village -- 900 <seed>` runs the village headless for
+a simulated day and checks that every log and item stays in exactly one
+consistent place, that every store's bookings add up, that nobody gets
+stuck or leaves things lying about, and that the day's work, suppers and
+evening happen. A run is repeatable: the same seed (and `rng=n`, a
+different day in the same village) gives the same day every time.
+`npm run sweep` runs many days at once (six villages × six days by
+default) and lists any that failed, each with the command that replays it.
 
 ## Running it
 

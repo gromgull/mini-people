@@ -2,7 +2,8 @@
 // browser: the dev server on a free port (so scripts can run side by side),
 // chromium with software GL, the page's errors collected, and optionally a
 // seeded Math.random in every page load (so paused scenes come out the same
-// every time).
+// every time). window.__reseed(n) in the page starts that sequence again from n
+// (for a run that must come out the same however many frames drew before it).
 //
 //   const h = await open({ viewport: { width: 640, height: 400 }, seeded: true });
 //   await h.page.goto(h.url('mode=single&paused'));        // debug.html
@@ -30,8 +31,8 @@ const freePort = () =>
   });
 
 /**
- * @param {{ viewport?: { width: number, height: number }, seeded?: boolean, args?: string[] }} [opts]
- *   viewport: the page's size; seeded: a seeded Math.random in every load; args: more chromium flags
+ * @param {{ viewport?: { width: number, height: number }, seeded?: boolean | number, args?: string[] }} [opts]
+ *   viewport: the page's size; seeded: a seeded Math.random in every load (true, or the seed); args: more chromium flags
  */
 export async function open({ viewport, seeded = false, args = [] } = {}) {
   const port = await freePort();
@@ -39,16 +40,17 @@ export async function open({ viewport, seeded = false, args = [] } = {}) {
   await server.listen();
   const browser = await chromium.launch({ args: [...GL_ARGS, ...args] });
   const page = await browser.newPage(viewport ? { viewport } : {});
-  if (seeded) {
-    await page.addInitScript(() => {
-      let a = 12345;
+  if (seeded !== false) {
+    await page.addInitScript((seed) => {
+      let a = seed;
+      window.__reseed = (n) => (a = n | 0);
       Math.random = () => {
         a = (a + 0x6d2b79f5) | 0;
         let t = Math.imul(a ^ (a >>> 15), 1 | a);
         t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
-    });
+    }, seeded === true ? 12345 : seeded);
   }
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

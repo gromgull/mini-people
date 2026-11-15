@@ -2,7 +2,12 @@
 // fixed steps and checks, every simulated second, that the world stays
 // consistent and work keeps getting done.
 //
-//   node scripts/village-test.mjs [seconds=600] [seed=1]
+//   node scripts/village-test.mjs [seconds=600] [seed=1] [rng=n] [more address arguments…]
+//
+// Runs are repeatable: Math.random is seeded (by rng=, else the village's
+// seed) and started afresh just before the simulated day, so the same
+// arguments give the same day every time. A different rng= is a different
+// day in the same village.
 //
 // Invariants:
 //   - every log and piece of firewood is in exactly one place, and the
@@ -10,6 +15,8 @@
 //     every store's booked room and spoken-for things are exactly what
 //     people hold against it, and nobody leaks a booking
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
+//   - nothing dropped (after a trip) lies about for more than 45 s, and a
+//     dropped log stays claimed only by whoever's coming back for it
 //   - nobody stays in the same step for more than 90 s (waiting about,
 //     sitting on a bench, playing, smoking, waiting for supper, at the dance and sleeping don't
 //     count; nor does the regular)
@@ -24,13 +31,17 @@
 import { open } from './harness.mjs';
 
 // (any further arguments are added to the address: e.g. trip=40 for forty times the trips)
-const [seconds = '600', seed = '1', ...extra] = process.argv.slice(2);
-const { page, errors, url, ready, close } = await open({ viewport: { width: 320, height: 240 } });
+const [seconds = '600', seed = '1', ...rest] = process.argv.slice(2);
+const rng = Number(rest.find((a) => a.startsWith('rng='))?.slice(4) ?? seed);
+const extra = rest.filter((a) => !a.startsWith('rng='));
+const { page, errors, url, ready, close } = await open({ viewport: { width: 320, height: 240 }, seeded: rng * 7919 + 1 });
 await page.goto(url(['paused&nogui', `seed=${seed}`, ...extra].join('&'), 'index.html'));
 await ready();
 
 const problems = [];
-const result = await page.evaluate((secs) => {
+const result = await page.evaluate(([secs, rng]) => {
+  // (the frames drawn so far drew randoms too, however many there were: start again)
+  window.__reseed(rng * 7919 + 1);
   const m = window.__mini;
   const bad = [];
   const since = new Map(); // job index → [step, since]
@@ -133,7 +144,7 @@ const result = await page.evaluate((secs) => {
   }
   const d = m.debug();
   return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax };
-}, Number(seconds));
+}, [Number(seconds), rng]);
 
 problems.push(...result.bad);
 if (result.stats.felled < 1) problems.push('no tree was felled');
@@ -159,7 +170,7 @@ if (Number(seconds) >= 900) {
   if (result.asleep > 0) problems.push(`${result.asleep} still asleep in the morning`);
 }
 problems.push(...errors);
-console.log(`${seconds}s simulated (seed ${seed}): felled ${result.stats.felled}, sawn ${result.stats.sawn}, logs about ${result.logs}, pile ${result.pile}, trees standing ${result.standing}/${result.trees}`);
+console.log(`${seconds}s simulated (seed ${seed}, rng ${rng}): felled ${result.stats.felled}, sawn ${result.stats.sawn}, logs about ${result.logs}, pile ${result.pile}, trees standing ${result.standing}/${result.trees}`);
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
 console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);

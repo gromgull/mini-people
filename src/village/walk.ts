@@ -1,10 +1,12 @@
+import { type Waypoint, planPath } from './path';
+
 /**
- * Getting somewhere: walk to a point, then turn to face a given way, steering
- * around obstacles (tree trunks, buildings, the woodpile, the sawhorse) and
- * each other. Steering is local: look a little way along the path to the
- * goal, and if an obstacle sits across it, bend toward the side that clears
- * it. That's enough for a clearing with a forest at the edge; a path planner
- * comes when there are walls to get stuck behind.
+ * Getting somewhere: walk to a point, then turn to face a given way, round
+ * obstacles (tree trunks, buildings, the woodpile, the sawhorse, tables) and
+ * each other. On setting off (and after a detour, or a stall) a route is
+ * planned round everything that's there (path.ts); along it, steering is
+ * local: look a little way ahead, and if an obstacle or a person sits
+ * across the way, bend toward the side that clears it.
  */
 
 export type Obstacle =
@@ -28,7 +30,7 @@ export interface Goal {
 
 const TURN_RATE = 3.2; // rad/s
 const TURN_FIRST = 0.5; // further off than this → turn on the spot before walking
-const BODY = 0.17; // how wide a person is, for clearing things
+export const BODY = 0.17; // how wide a person is, for clearing things
 const AHEAD = 1.3; // how far along the path to look for obstacles
 const ARRIVE = 0.06;
 const PERSONAL = 0.45;
@@ -36,7 +38,7 @@ const PERSONAL = 0.45;
 export const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Closest point on an obstacle's outline (or inside it) to (x, z), and the distance to its edge (negative = inside). */
-function nearest(o: Obstacle, x: number, z: number) {
+export function nearest(o: Obstacle, x: number, z: number) {
   if (o.kind === 'radial') {
     const dx = x - o.x, dz = z - o.z;
     const d = Math.hypot(dx, dz) || 1e-6;
@@ -85,6 +87,10 @@ export class Walker {
   private bestAt = 0;
   private clock = 0;
   private detours = 0;
+  /** The planned route (waypoints, the last one the goal or the via), what it leads to, and how often it's been planned afresh for this goal. */
+  private path: Waypoint[] | null = null;
+  private pathTo: Waypoint | null = null;
+  private replans = 0;
 
   constructor(public x: number, public z: number, public yaw: number) {}
 
@@ -93,11 +99,14 @@ export class Walker {
     this.arrived = false;
     this.best = Infinity;
     this.bestAt = this.clock;
+    this.path = this.pathTo = null;
+    this.replans = 0;
   }
 
   stop() {
     this.goal = null;
     this.arrived = false;
+    this.path = this.pathTo = null;
   }
 
   /** Decide heading and speed toward the goal (call before the gait advances). */
@@ -112,17 +121,35 @@ export class Walker {
       this.bestAt = this.clock;
     }
     const tx = g.via ? g.via.x : g.x, tz = g.via ? g.via.z : g.z;
-    let dx = tx - this.x;
-    let dz = tz - this.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < this.best - 0.03) {
-      this.best = dist;
+    // the route there: planned on setting off, and again once the target moves (the via's done, a detour)
+    if (!this.pathTo || this.pathTo.x !== tx || this.pathTo.z !== tz) {
+      this.path = planPath(this.x, this.z, tx, tz, obstacles, g.via ? null : (g.ignore ?? null), BODY + 0.03);
+      this.pathTo = { x: tx, z: tz };
+    }
+    const path = this.path;
+    while (path && path.length > 1 && Math.hypot(path[0].x - this.x, path[0].z - this.z) < 0.3) path.shift();
+    const aim = path && path.length > 1 ? path[0] : { x: tx, z: tz };
+    let dx = aim.x - this.x;
+    let dz = aim.z - this.z;
+    const dist = Math.hypot(tx - this.x, tz - this.z);
+    const aimD = Math.hypot(dx, dz);
+    // (progress is measured along the route: going round something isn't getting stuck)
+    let left = aimD;
+    if (path && path.length > 1) for (let k = 1; k < path.length; k++) left += Math.hypot(path[k].x - path[k - 1].x, path[k].z - path[k - 1].z);
+    if (left < this.best - 0.03) {
+      this.best = left;
       this.bestAt = this.clock;
     }
     // blocked just short of it (the spot is up against something): stop
     // trying to get closer, and settle where we are
     if (g.via && !g.detour && this.clock - this.bestAt > 2) g.via = null; // can't get to the approach point: just go in
-    else if (dist >= 0.7 && this.clock - this.bestAt > 3) {
+    else if (dist >= 0.7 && this.clock - this.bestAt > 3 && this.replans < 1) {
+      // stalled on the way: plan again from here (things move: a tree's grown, someone's sat down)
+      this.replans++;
+      this.pathTo = null;
+      this.best = Infinity;
+      this.bestAt = this.clock;
+    } else if (dist >= 0.7 && this.clock - this.bestAt > 3) {
       // stuck in a pocket on a long walk: step well off to one side (alternating), then try again
       this.detours++;
       const side = this.detours % 2 ? 1 : -1;
@@ -136,7 +163,7 @@ export class Walker {
       g.z = this.z;
       dx = dz = 0;
     }
-    if (!g.via && Math.hypot(dx, dz) < ARRIVE) {
+    if (!g.via && aim.x === tx && aim.z === tz && Math.hypot(dx, dz) < ARRIVE) {
       // there: slide the last few centimetres in and turn to face the work
       const k = Math.min(1, dt * 6);
       this.x += (g.x - this.x) * k;
@@ -152,12 +179,12 @@ export class Walker {
       if (Math.abs(err) < 0.03 && (dist < 0.015 || this.clock - this.bestAt > 1.5)) this.arrived = true;
       return 0;
     }
-    dx /= dist;
-    dz /= dist;
+    dx /= aimD;
+    dz /= aimD;
 
     // obstacles across the path: bend toward whichever side clears them
     let sx = 0, sz = 0;
-    const look = Math.min(AHEAD, dist);
+    const look = Math.min(AHEAD, aimD);
     // (the thing they're stepping up to is only ignored for the last bit)
     const ignoring = !g.via && dist < 0.8 ? g.ignore : null;
     for (const o of obstacles) {

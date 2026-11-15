@@ -17,7 +17,7 @@ import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
-import { type Obstacle, Walker } from './walk';
+import { nearest, type Obstacle, Walker } from './walk';
 import { Cooper, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
@@ -894,7 +894,7 @@ const hooks: AppHooks = {
     if (frame % 6 === 0) updatePanel();
   },
   testHook: () => ({
-    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX }),
+    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX, obstacles: obstacles(), nearest, dogOwner: DOG_OWNER }),
     follow: (i: number) => (follow = i),
     step: (sec: number) => {
       simulateSteps(Math.round(sec * 30), 1 / 30);

@@ -573,20 +573,27 @@ export abstract class Job {
   /** Head for supper or home, if it's time; returns whether they did. */
   protected eveningStarts(v: Village) {
     if (v.phase === 'supper' && !this.ateToday) {
-      const me = this.w.walker;
-      const free = v.seats.filter((s) => s.state === 'free');
-      if (free.length) {
-        const seat = free.reduce((b, s) => (s.table.world(s.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) < b.table.world(b.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) ? s : b));
-        seat.state = 'claimed';
-        seat.diner = this.w.i;
-        this.seat = seat;
-        const at = seat.table.sitFor(seat, this.w.actor);
-        this.w.walker.go({ x: at.x, z: at.z, yaw: at.yaw, ignore: seat.table.obstacle, via: at.via });
-        this.step = { kind: 'to supper', table: at.table };
-        return true;
-      }
+      if (this.claimSeat(v)) return true;
+      // the tables are full: out to the green with the music till a seat comes free
+      this.toDance(v);
+      return true;
     }
     this.goHome();
+    return true;
+  }
+
+  /** Take the nearest free seat at the inn's tables and head for it (false if they're all taken). */
+  protected claimSeat(v: Village) {
+    const me = this.w.walker;
+    const free = v.seats.filter((s) => s.state === 'free');
+    if (!free.length) return false;
+    const seat = free.reduce((b, s) => (s.table.world(s.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) < b.table.world(b.x, 0).distanceTo(new THREE.Vector3(me.x, 0, me.z)) ? s : b));
+    seat.state = 'claimed';
+    seat.diner = this.w.i;
+    this.seat = seat;
+    const at = seat.table.sitFor(seat, this.w.actor);
+    this.w.walker.go({ x: at.x, z: at.z, yaw: at.yaw, ignore: seat.table.obstacle, via: at.via });
+    this.step = { kind: 'to supper', table: at.table };
     return true;
   }
 
@@ -670,6 +677,8 @@ export abstract class Job {
           this.wasPlaying = true;
           return;
         }
+        // not had supper yet (the tables were full): a seat's come free (after the tune)
+        if (!this.ateToday && v.phase === 'supper' && this.claimSeat(v)) return;
         if (this.wasPlaying) {
           // a breather between tunes (hardly any once the whole village is out)
           this.wasPlaying = false;
