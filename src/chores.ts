@@ -49,6 +49,8 @@ export interface ChoreOut {
   readonly beatTime: number;
   /** Strings plucked this frame: the banjo's melody note, brush or drone; a double bass note. */
   pluck: Pluck | null;
+  /** A fiddle note that starts this frame: frequency (Hz) and length (s). */
+  note: { f: number; dur: number } | null;
   /** How far each arm is taken by a chat gesture (0…1): hand-work yields that much. */
   readonly gesturing: { L: number; R: number };
 }

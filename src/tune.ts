@@ -36,6 +36,8 @@ export interface Tune {
   parts: Slot[][];
 }
 
+/** The shared tempo for music and dancing (beats a minute). */
+export const BPM = 112;
 export const SECTION_BARS = 4;
 export const FORM_SLOTS = 4 * SECTION_BARS * 8; // A A B B, 8 eighths per bar
 export const PHRASE_SLOTS = SECTION_BARS * 8;
