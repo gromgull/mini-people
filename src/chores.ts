@@ -564,7 +564,7 @@ export class PickApple implements Chore {
     }
     if (t > done) this.apple.scale.setScalar(s * Math.max(1e-3, 1 - smooth((t - done) / 0.3)));
     // eyes on the apple until they're on their way
-    if (t < at('down') + 0.8) out.focus = this.apple.getWorldPosition(new THREE.Vector3());
+    out.focus = t < at('down') + 0.8 ? this.apple.getWorldPosition(new THREE.Vector3()) : null;
     return true;
   }
 
@@ -925,7 +925,7 @@ export class Fish implements Chore {
       this.ripple(this.end, 1.4);
     }
     // the eyes follow the float, then the fish (until they're walking off with it)
-    if (t < S.held + 0.8) out.focus = this.fish.visible ? this.fish.getWorldPosition(new THREE.Vector3()) : this.p.root.localToWorld(this.end.clone());
+    out.focus = t < S.held + 0.8 ? (this.fish.visible ? this.fish.getWorldPosition(new THREE.Vector3()) : this.p.root.localToWorld(this.end.clone())) : null;
     return true;
   }
 

@@ -1546,7 +1546,15 @@ export class Picker extends Job {
   private pickNext(v: Village, tree = -1) {
     const ap = this.apple ?? this.nextApple(v, tree);
     if (!ap) {
-      this.step = { kind: 'idle' };
+      // none left in reach: what's in the basket goes to the mill anyway (tipping it gives back the room booked)
+      if (this.basket.count > 0) {
+        const at = this.basket.workSpot();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to full basket' };
+      } else {
+        v.mill.hopper.incoming = Math.max(0, v.mill.hopper.incoming - BASKET);
+        this.step = { kind: 'idle' };
+      }
       return;
     }
     if (tree >= 0 && ap.tree !== tree) {

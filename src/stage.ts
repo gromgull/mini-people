@@ -108,6 +108,8 @@ export class Stage {
   private blitScene = new THREE.Scene();
   private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private horizonFar = 30;
+  /** Seconds the world has run (not wall time): the stars' twinkle. */
+  private skyClock = 0;
   /** What shades the scene: the sun, or the moon once the sun is down. */
   readonly lightWorld = new THREE.Vector3();
   private sunWorld = new THREE.Vector3();
@@ -206,6 +208,7 @@ export class Stage {
    */
   updateLight(dt: number, paused: boolean) {
     const look = this.look;
+    if (!paused) this.skyClock += dt;
     if (look.dayCycle && !paused) look.time = (look.time + (dt * 24) / (look.dayMinutes * 60)) % 24;
     const pos = sunAt(look.time);
     const az = THREE.MathUtils.degToRad(pos.az);
@@ -306,7 +309,7 @@ export class Stage {
     const wrap = Math.round(this.rt.width * 3);
     u.uStarWrap.value = wrap;
     u.uStarShift.value = (((Math.atan2(fwd.x, fwd.z) / (Math.PI * 2)) * wrap) % wrap + wrap) % wrap;
-    u.uTime.value = performance.now() / 1000;
+    u.uTime.value = this.skyClock; // (the stars twinkle in the world's time: still when paused)
     this.outline.visible = look.outline;
     this.skinMats.outline.visible = look.outline;
     this.cloudOutline.visible = look.outline;

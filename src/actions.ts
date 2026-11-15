@@ -643,6 +643,8 @@ export class Actor {
   // Each frame the seat is layered onto whatever pose the action asks for.
 
   private posture = { want: false, k: 0, conjured: false, autoUp: false, creaked: false };
+  /** Which hands the seat put on the thighs this frame (nothing else had them). */
+  private thighRest = { L: false, R: false };
 
   /** Sit down on a seat behind them: a real one, or (conjure) one that appears. */
   sitDown(opts: { conjure?: boolean; seatH?: number } = {}) {
@@ -713,8 +715,9 @@ export class Actor {
     P.spineX += 0.45 * moving - 0.04 * k;
     P.headX -= 0.2 * moving;
     for (const sd of ['L', 'R'] as const) {
-      // hands on the thighs unless the action has them busy
-      if (P.arms[sd].w < 0.01) Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
+      // hands on the thighs unless the action has them busy (a chat can still take them: see armFree)
+      this.thighRest[sd] = P.arms[sd].w < 0.01;
+      if (this.thighRest[sd]) Object.assign(P.arms[sd], { w: k, x: -0.12 - 0.3 * moving, z: 0.14, elbow: 1.0, stiff: 1 });
     }
     if (ps.conjured && this.bench) {
       this.bench.scale.copy(this.benchScale).multiplyScalar(Math.max(1e-3, smooth(Math.min(1, ps.k * 2.5))));
@@ -855,7 +858,8 @@ export class Actor {
   private armFree(P: ActionPose, sd: 'L' | 'R') {
     if (this.kind === null) return true;
     if (isDine(this.kind)) return (this.chore as Dine).handsIdle;
-    return P.arms[sd].w < 0.01;
+    // (only resting on the thighs, sat down: free to talk with)
+    return P.arms[sd].w < 0.01 || (this.onSeat && this.thighRest[sd]);
   }
 
   private applyChat(dt: number, pose: ActionPose | null, tempo: number): ActionPose | null {
@@ -924,7 +928,9 @@ export class Actor {
     this.events.length = 0;
     this.bursts.length = 0;
     this.puffs.length = 0;
-    this.focus = null;
+    // (a chore keeps its own focus up to date, some of them in post: the gaze reads it the frame after.
+    // The inline actions set theirs afresh each frame. A new action clears it: stop().)
+    if (!this.chore) this.focus = null;
     this.mouthOpen = false;
     this.depart = false;
     m.lockPhase = false;

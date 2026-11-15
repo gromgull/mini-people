@@ -15,14 +15,14 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 const base = `count=24&mode=stand&paused&nogui&t=1&look=camera&${extra}`;
-await page.goto(`http://localhost:5199/?${base}`);
+await page.goto(`http://localhost:5199/debug.html?${base}`);
 await page.waitForFunction(() => window.__mini?.ready);
 const genes = await page.evaluate(() => window.__mini.people.map((p) => ({ fem: +p.genome.fem.toFixed(2), bust: +p.genome.bust.toFixed(2), hair: p.genome.hairStyle, skirt: p.genome.skirt, beard: p.genome.beard })));
 const list = idx.length ? idx.map(Number) : genes.map((g, i) => i).filter((i) => genes[i].fem > 0.5).slice(0, 10);
 const files = [];
 for (const i of list) {
   console.log(i, JSON.stringify(genes[i]));
-  await page.goto(`http://localhost:5199/?${base}&select=${i}&focus&zoom=${process.env.Z||5}&az=0&el=8`);
+  await page.goto(`http://localhost:5199/debug.html?${base}&select=${i}&focus&zoom=${process.env.Z||5}&az=0&el=8`);
   await page.waitForFunction(() => window.__mini?.ready);
   const f = `screenshots/frames/${name}-${i}.png`;
   await page.screenshot({ path: f });

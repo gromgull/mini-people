@@ -163,11 +163,14 @@ export class QuadAnimator {
     this.legs = [this.legs[0], this.legs[2], this.legs[1], this.legs[3]];
   }
 
-  /** The gait for this speed: a walk blending into a trot. */
-  private gait(speed: number): Gait {
+  /** How far into a trot this speed calls for (0 walk … 1 trot). */
+  private trotFor(speed: number) {
     const sp = dogSpeeds(this.dog);
-    const k = smooth((speed - sp.walk * 1.1) / (sp.trot * 0.9 - sp.walk * 1.1));
-    this.trot += (k - this.trot) * 0.1;
+    return smooth((speed - sp.walk * 1.1) / (sp.trot * 0.9 - sp.walk * 1.1));
+  }
+
+  /** The gait, as far into a trot as it is now (`trot` eases toward the speed's in update). */
+  private gait(_speed: number): Gait {
     const t = this.trot;
     const mix = (a: number, b: number) => a + (b - a) * t;
     return { off: WALK.off.map((o, i) => mix(o, TROT.off[i])) as Gait['off'], duty: mix(WALK.duty, TROT.duty), stride: mix(WALK.stride, TROT.stride), lift: mix(WALK.lift, TROT.lift) };
@@ -189,6 +192,8 @@ export class QuadAnimator {
   update(m: QuadMotion, dt: number) {
     this.t += dt;
     this.events.length = 0;
+    // into a trot (or out of it) over a few strides, not all at once
+    this.trot += (this.trotFor(m.speed) - this.trot) * Math.min(1, dt * 3);
     const dog = this.dog;
     const J = dog.joints;
     const d = dog.dims;

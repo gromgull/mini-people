@@ -10,7 +10,7 @@ const pg = await b.newPage();
 for (const i of idx.map(Number)) {
   const ws = [];
   for (let t = 3; t < 4.2; t += 0.1) {
-    await pg.goto(`http://localhost:5196/?seed=${seed}&count=24&paused&nogui&t=${t.toFixed(2)}`);
+    await pg.goto(`http://localhost:5196/debug.html?seed=${seed}&count=24&paused&nogui&t=${t.toFixed(2)}`);
     await pg.waitForFunction(() => window.__mini?.ready);
     ws.push(await pg.evaluate((i) => {
       const p = window.__mini.people[i];

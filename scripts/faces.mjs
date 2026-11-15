@@ -16,7 +16,7 @@ const errors = [];
 pg.on('pageerror', (e) => errors.push(String(e)));
 const files = [];
 for (const i of ids.split(',').map(Number)) {
-  await pg.goto(`http://localhost:5193/?seed=${seed}&count=24&mode=stand&paused&nogui&t=1&look=camera&select=${i}&focus&zoom=11&az=${process.env.AZ||25}&el=6&fy=0.86`);
+  await pg.goto(`http://localhost:5193/debug.html?seed=${seed}&count=24&mode=stand&paused&nogui&t=1&look=camera&select=${i}&focus&zoom=11&az=${process.env.AZ||25}&el=6&fy=0.86`);
   await pg.waitForFunction(() => window.__mini?.ready);
   for (let style = 0; style < COLS; style++) {
     await pg.evaluate(([i, style, gene]) => {

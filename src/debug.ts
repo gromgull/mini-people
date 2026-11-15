@@ -333,7 +333,9 @@ function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
         const r = Math.random();
         const kind = band < 2 && r < 0.3 ? (r < 0.12 ? 'fiddle' : r < 0.22 ? 'banjo' : 'bass') : 'dance';
         if (kind !== 'dance') band++;
-        setTimeout(() => !actors[j].busy && actors[j].start(kind, { seated: kind !== 'dance' && kind !== 'bass' && settings.musicSeated }), (kind === 'dance' ? 300 : 800) + Math.random() * 1500);
+        // (that person: still here when it's time? the crowd may have been rebuilt in the meantime)
+        const who = actors[j];
+        setTimeout(() => actors.includes(who) && !who.busy && who.start(kind, { seated: kind !== 'dance' && kind !== 'bass' && settings.musicSeated }), (kind === 'dance' ? 300 : 800) + Math.random() * 1500);
       }
     });
   }

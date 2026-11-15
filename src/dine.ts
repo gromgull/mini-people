@@ -430,7 +430,6 @@ export class Dine implements Chore {
 
     // arms: hands on the thighs while getting in and out; on the table once in
     for (const sd of ['L', 'R'] as const) setArm(P, sd, mixArm(ARMS_THIGHS, ARMS_TABLE, sc), k, 1);
-    out.focus = null;
 
     const c = this.cur;
     if (!c || lt >= 0) return true;
@@ -483,6 +482,8 @@ export class Dine implements Chore {
     const p = this.p;
     const J = p.joints;
     const d = p.dims;
+    // (where the eyes go is worked out below, with the food and the tankard placed; nowhere in particular otherwise)
+    out.focus = null;
     const G = this.g;
     const H = d.height;
     const s = G.s;

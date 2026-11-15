@@ -8,7 +8,7 @@ await server.listen();
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 400, height: 300 } });
 for (const t of T.split(',')) {
-  await page.goto(`http://localhost:5196/?count=24&seed=1&act=fall&actAll&actAt=0.5&t=${t}&paused&nogui`);
+  await page.goto(`http://localhost:5196/debug.html?count=24&seed=1&act=fall&actAll&actAt=0.5&t=${t}&paused&nogui`);
   await page.waitForFunction(() => window.__mini?.ready);
   const r = await page.evaluate(() => {
     const { offsets, actors, motions, baseTransform } = window.__mini.debug();

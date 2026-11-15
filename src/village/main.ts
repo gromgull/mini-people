@@ -403,6 +403,8 @@ const village: Village = {
       seat.plate.items[0] = null;
       removeItem(meal);
     }
+    // (whoever it was for gave up and went home before it came: it's cleared away, the seat stays as it is)
+    if (seat.state !== 'seated' || seat.diner < 0) return;
     crowd.actors[seat.diner]?.choreOf('dine').serveMeal('fish');
     seat.state = 'served';
     village.stats.meals++;
@@ -692,8 +694,13 @@ function simulate(dt: number) {
   smoke.update(dt, stage.toon.uniforms.uTint.value);
 }
 
-stage.controls.target.set(num('tx', -2), 0.5, num('tz', -1));
-stage.camera.position.add(new THREE.Vector3(num('tx', -2), 0, num('tz', -1)));
+// the village's own default view target (?tx/?tz still win): move the camera along by however
+// far that is from where the stage already put it (it applied ?tx/?tz itself)
+{
+  const target = new THREE.Vector3(num('tx', -2), 0.5, num('tz', -1));
+  stage.camera.position.add(target.clone().sub(stage.controls.target));
+  stage.controls.target.copy(target);
+}
 if (!q.has('zoom')) {
   stage.camera.zoom = 0.62;
   stage.camera.updateProjectionMatrix();

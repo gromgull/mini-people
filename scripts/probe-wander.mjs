@@ -9,7 +9,7 @@ const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-un
 const pg = await b.newPage();
 let bad = 0, samples = 0;
 for (let t = 2; t <= 60; t += 2) {
-  await pg.goto(`http://localhost:5194/?mode=wander&count=${count}&seed=${seed}&t=${t}&paused&nogui`);
+  await pg.goto(`http://localhost:5194/debug.html?mode=wander&count=${count}&seed=${seed}&t=${t}&paused&nogui`);
   await pg.waitForFunction(() => window.__mini?.ready);
   const r = await pg.evaluate(() => {
     const P = window.__mini.people.map((p) => p.root.position);
