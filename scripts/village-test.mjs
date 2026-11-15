@@ -158,6 +158,8 @@ if (Number(seconds) >= 400 && result.stats.fishIn < 1) problems.push('no dried f
 if (result.stats.picked < 1) problems.push('no apples were picked');
 if (Number(seconds) >= 400 && result.stats.kegs < 1) problems.push('no cider was made');
 if (result.stats.poured < 1) problems.push('nobody was served cider');
+if (Number(seconds) >= 900 && result.stats.mown < 1) problems.push('no wheat was mown');
+if (Number(seconds) >= 900 && result.stats.sheaves < 2) problems.push('no sheaves were stood in the stook');
 if (result.stats.kegsBack < 1) problems.push('the cooper fetched no empty keg back from the inn');
 if (result.stats.hooped < 1) problems.push('the cooper hooped no keg');
 // (kegs: only ever reused, made by the cooper, or on their way: never made from nothing, never more than allowed)
@@ -179,6 +181,7 @@ console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.st
 console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
 console.log(`  day ${result.day} now; the wind was ${result.winds.join(', ')}`);
+console.log(`  wheat: strips mown ${result.stats.mown}, sheaves stooked ${result.stats.sheaves}`);
 console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);

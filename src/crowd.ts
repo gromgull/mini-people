@@ -63,7 +63,8 @@ export class Crowd {
     const leaves = new Sparks(scene, 48, ['#4e9a3a', '#5aa642', '#78b84a'], 2.5);
     const splash = new Sparks(scene, 64, ['#dff2ff', '#9ccfe8', '#ffffff'], 9);
     const crumbs = new Sparks(scene, 24, ['#f4ecc8', '#e8dca0'], 9);
-    this.bursts = { chips: [chips, 6, 0.7], leaves: [leaves, 8, 0.45], splash: [splash, 9, 0.55], crumbs: [crumbs, 3, 0.3] } as const;
+    const chaff = new Sparks(scene, 64, ['#e8c860', '#d4a83c', '#f2dc8a'], 2.2);
+    this.bursts = { chips: [chips, 6, 0.7], leaves: [leaves, 8, 0.45], splash: [splash, 9, 0.55], crumbs: [crumbs, 3, 0.3], chaff: [chaff, 2, 0.4] } as const;
 
     const actors = () => this.actors;
     this.gazeWorld = {

@@ -210,7 +210,7 @@ export type ItemPlace =
 
 export interface Item {
   id: number;
-  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal';
+  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal' | 'sheaf';
   place: ItemPlace;
   mesh: THREE.Object3D;
   /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
@@ -415,7 +415,7 @@ export const APPLE_R = 0.065;
 
 /** How high an item's middle sits lying on the ground (dropped). */
 export function restY(kind: Item['kind']) {
-  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0 }[kind];
+  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0, sheaf: SHEAF_R }[kind];
 }
 export { KEG_L, KEG_R };
 
@@ -875,5 +875,37 @@ export class Flag {
       pos.needsUpdate = true;
       g.computeVertexNormals();
     }
+  }
+}
+
+// ---------------------------------------------------------------- wheat
+
+/** A sheaf: a bundle of straw this thick (radius) and long, lying along x, the ears at +x. */
+export const SHEAF_R = 0.065;
+export const SHEAF_L = 0.46;
+
+/** A sheaf of wheat (item mesh): straw bound round the middle, the ears flared at one end. */
+export function makeSheaf(stage: Stage) {
+  return outlined(bake([
+    { geo: new THREE.CylinderGeometry(SHEAF_R * 0.8, SHEAF_R * 0.65, SHEAF_L * 0.7, 7).rotateZ(Math.PI / 2).translate(-SHEAF_L * 0.15, 0, 0), row: ROWS.food[2] },
+    { geo: new THREE.CylinderGeometry(SHEAF_R * 1.25, SHEAF_R * 0.8, SHEAF_L * 0.3, 7).rotateZ(Math.PI / 2).translate(SHEAF_L * 0.35, 0, 0), row: ROWS.stockfish[0] },
+    { geo: new THREE.CylinderGeometry(SHEAF_R * 0.85, SHEAF_R * 0.85, 0.03, 7).rotateZ(Math.PI / 2).translate(-0.02, 0, 0), row: ROWS.bark[0] },
+  ]), stage);
+}
+
+/** A stook: sheaves stood up on end in a ring, ears up, leaning in on each other to dry in the field. */
+export class Stook extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number, n = 8) {
+    super(name, x, z, yaw);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const r = i < 6 ? 0.14 : 0.04;
+      // on end (its x up), then leant in toward the middle
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+      q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(a), 0, -Math.sin(a)), -0.22 * (i < 6 ? 1 : 0.2)));
+      this.slots.push({ pos: new THREE.Vector3(Math.sin(a) * r, SHEAF_L / 2 - 0.02, Math.cos(a) * r), quat: q });
+    }
+    this.reach = 0.55;
+    this.place(stage, []);
   }
 }

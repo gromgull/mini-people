@@ -153,7 +153,8 @@ Handy for sharing a particular scene, e.g.
 The layout comes from the seed (`?seed=n`), along with the villagers.
 Without one you get a village of your own: a random seed, put in the address
 so a reload or a shared link keeps it. A woodyard sits in the middle, with
-four districts around it: the forest with the lumberjack's cabin; the pond
+five districts around it: the forest with the lumberjack's cabin; the wheat
+field with its stook and the farmer's cabin; the pond
 with the fisher's cabin and bench; the inn with its three tables, kegs, flags,
 street-lamp and the green where they dance; and the orchard with the cider
 mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
@@ -207,6 +208,13 @@ So far it has one chain:
 - **The innkeeper** also fetches kegs to the inn, cooks supper, and serves: when the
   regular's tankard is empty they draw a fresh one from a keg and bring it
   to the table.
+- **The farmer** mows the wheat. The field is in strips, each on its own
+  clock: sown, growing green, ripe and gold, then mown to stubble, resting,
+  and sown again, about a day and a half round, so some days there's a lot
+  to cut and some days little. For a ripe strip they walk down it with the
+  scythe, a swing and a step at a time, the wheat falling to stubble behind
+  the blade; at the far end they bind it into sheaves and stand them in the
+  stook at the field's edge to dry.
 - **The cooper** (who lives with the woodworker) looks after the kegs. When
   one runs dry at the inn they fetch it back to their block and drive its
   hoops tight again. When there aren't enough empties to go round, they

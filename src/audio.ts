@@ -409,7 +409,7 @@ export class Sound {
    * Sounds of the outdoor chores: axe, falling tree, leaves, apples, and
    * fishing (cast, float, splashes, the reel's ratchet).
    */
-  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'shave' | 'clank', w: Where) {
+  chore(kind: 'chop' | 'crack' | 'whump' | 'rustle' | 'snap' | 'crunch' | 'whoosh' | 'plop' | 'splash' | 'tick' | 'munch' | 'gulp' | 'clunk' | 'scrape' | 'shave' | 'clank' | 'swish', w: Where) {
     // the reel's ratchet ticks fast and quietly: not worth a rate-limit token
     if (!this.live || (kind !== 'tick' && !this.allow('tools'))) return;
     const t = this.ctx!.currentTime + 0.003;
@@ -503,6 +503,11 @@ export class Sound {
         // a draw-knife down a stave: a bright, papery curl of a hiss, falling as the shaving comes off
         this.noiseSweep(t, o, rand(3200, 3800), rand(1700, 2100), 1.8, 0.5, 0.03, 0.4);
         this.noiseSrc(t + 0.05, 0.3).connect(this.filter('bandpass', rand(900, 1100), 1.5)).connect(this.env(t + 0.05, 0.18, 0.05, 0.22)).connect(o);
+        break;
+      case 'swish':
+        // a scythe through standing wheat: a long, dry, falling hiss with a crisp edge
+        this.noiseSweep(t, o, rand(2600, 3000), rand(900, 1200), 1.2, 0.55, 0.06, 0.42);
+        this.noiseSrc(t + 0.08, 0.25).connect(this.filter('highpass', 5200, 0.7)).connect(this.env(t + 0.08, 0.12, 0.03, 0.18)).connect(o);
         break;
       case 'clank': {
         // the hoop driver struck: a hard knock on wood with a short iron ring (the hoop)

@@ -5,12 +5,13 @@ import type { Site } from '../houses';
  * Where everything in the village goes, from its seed.
  *
  * The village is a woodyard in the middle (woodpile, sawhorse, the yard's
- * stack, the woodworker's bench) with four districts around it, each a
+ * stack, the woodworker's bench) with five districts around it, each a
  * little arrangement that works together:
  *   forest  – the pines, the lumberjack's cabin
  *   pond    – the pond, the fisher's cabin, the fisher's bench
  *   inn     – the inn (facing the yard), its three tables, its kegs, the
  *             street-lamp, two flags, and the green in front where they dance of an evening
+ *   field   – the wheat field, the stook its sheaves stand in, the farmer's cabin
  *   orchard – the apple trees, the cider mill and its kegs, the pickers'
  *             baskets and ladders, the picker's and cider maker's cabin and the other picker's
  *
@@ -38,10 +39,13 @@ export interface Round {
 }
 
 export interface Layout {
-  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker's and cider maker's cabin, the other picker's. */
+  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker's and cider maker's cabin, the other picker's, the farmer's. */
   sites: Site[];
   forest: Round;
   orchard: Round;
+  /** The wheat field (its middle; strips run along its yaw) and the stook beside it. */
+  field: Pose;
+  stook: Pose;
   pond: Round;
   mill: Pose;
   millKegs: Pose;
@@ -70,7 +74,7 @@ export interface Layout {
   seeds: { houses: number; forest: number; orchard: number; pond: number };
 }
 
-type District = 'yard' | 'forest' | 'pond' | 'inn' | 'orchard';
+type District = 'yard' | 'forest' | 'pond' | 'inn' | 'orchard' | 'field';
 
 /** One placed thing: its district, where it is, and how much room it needs (for the overlap check). */
 interface Piece {
@@ -115,6 +119,9 @@ const TEMPLATE: Record<string, Piece> = {
   ladder1: P('orchard', 0.2, 8.7, -0.3, 0.3),
   site4: P('orchard', 7.4, 9.6, 2.7, 2.3),
   site5: P('orchard', -8.6, 9.4, 1.9, 2.3),
+  field: P('field', 0, 14, 0, 3.6),
+  stook: P('field', 3.5, 11.6, 0, 0.5),
+  site6: P('field', -4.8, 12.4, 0.6, 2.3),
   site1: P('yard', 7.6, -7.6, -0.5, 2.3), // the woodworker's: placed on its own, in the widest gap
   cooperage: P('yard', 4.6, -4.9, Math.atan2(-4.6, 4.9), 1.3), // placed on its own, beside the woodworker's on the yard side
 };
@@ -124,8 +131,9 @@ const ANCHOR: Record<Exclude<District, 'yard'>, { x: number; z: number }> = {
   pond: { x: 10, z: 2 },
   inn: { x: 1, z: -14 },
   orchard: { x: 0, z: 7.5 },
+  field: { x: 0, z: 13.5 },
 };
-const KINDS: Record<string, Site['kind']> = { site0: 'cabin', site1: 'cabin', site2: 'cabin', site3: 'inn', site4: 'cabin', site5: 'cabin' };
+const KINDS: Record<string, Site['kind']> = { site0: 'cabin', site1: 'cabin', site2: 'cabin', site3: 'inn', site4: 'cabin', site5: 'cabin', site6: 'cabin' };
 
 /** Turn (x, z) about the origin by a (the same sense as THREE's applyAxisAngle about +y, so a yaw just adds a). */
 const turn = (x: number, z: number, a: number) => ({ x: x * Math.cos(a) + z * Math.sin(a), z: -x * Math.sin(a) + z * Math.cos(a) });
@@ -147,9 +155,11 @@ export function makeLayout(seed: number): Layout {
   const pose = (k: string): Pose => ({ x: g(k).x, z: g(k).z, yaw: g(k).yaw });
   const round = (k: string): Round => ({ x: g(k).x, z: g(k).z, R: g(k).R! });
   return {
-    sites: [0, 1, 2, 3, 4, 5].map((i) => ({ kind: KINDS[`site${i}`], ...pose(`site${i}`) })),
+    sites: [0, 1, 2, 3, 4, 5, 6].map((i) => ({ kind: KINDS[`site${i}`], ...pose(`site${i}`) })),
     forest: round('forest'),
     orchard: round('orchard'),
+    field: pose('field'),
+    stook: pose('stook'),
     pond: round('pond'),
     mill: pose('mill'),
     millKegs: pose('millKegs'),
@@ -173,8 +183,8 @@ export function makeLayout(seed: number): Layout {
 }
 
 function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> | null {
-  // the districts in a shuffled order round the yard, a quarter turn apart give or take
-  const order: Exclude<District, 'yard'>[] = ['forest', 'pond', 'inn', 'orchard'];
+  // the districts in a shuffled order round the yard, a fifth of a turn apart give or take
+  const order: Exclude<District, 'yard'>[] = ['forest', 'pond', 'inn', 'orchard', 'field'];
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(rr(0, i + 1));
     [order[i], order[j]] = [order[j], order[i]];
@@ -185,8 +195,8 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
   } as never;
   order.forEach((d, k) => {
     const a = ANCHOR[d];
-    const want = start + (k * Math.PI) / 2 + rr(-0.3, 0.3);
-    move[d] = { turn: wrap(want - Math.atan2(a.x, a.z)), out: rr(0.92, 1.25), spin: rr(-0.3, 0.3) };
+    const want = start + (k * Math.PI * 2) / order.length + rr(-0.25, 0.25);
+    move[d] = { turn: wrap(want - Math.atan2(a.x, a.z)), out: rr(1.1, 1.4), spin: rr(-0.3, 0.3) };
   });
   const out: Record<string, Piece> = {};
   for (const [k, t] of Object.entries(TEMPLATE)) {

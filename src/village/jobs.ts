@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type CiderMill, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
+import { type Basket, type Bench, type CiderMill, SHEAF_L, type Stook, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -10,6 +10,7 @@ import { PIECE_L, PIECE_R } from '../firewood';
 import { restY } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
 import type { Wind } from './wind';
+import { Field } from './field';
 
 /**
  * The jobs. Each person runs a small routine of steps (walk somewhere, do
@@ -24,6 +25,9 @@ import type { Wind } from './wind';
  *     is free, claim it, carry the log over, put it on, and saw it. Between
  *     logs, take firewood to the inn. Otherwise wait by the sawhorse (or,
  *     while the other one's at it, by the yard's stack).
+ *   farmer: when a strip of the wheat field is ripe, mows it with the
+ *     scythe (a swing, a step, a swing…), binds what's cut into sheaves at
+ *     the end, and stands them in the stook at the field's edge.
  *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
  *     there aren't enough empties to go round, takes firewood from the yard
  *     (if the inn can spare it), shaves it into staves and raises a new keg.
@@ -57,6 +61,9 @@ export const MILL_BATCH = 12;
 export const SERVINGS = 8;
 /** The inn wants this many kegs on hand. */
 export const INN_KEGS = 2;
+/** Sheaves a strip of wheat binds into; how far the farmer steps between swings (m). */
+export const SHEAVES = 2;
+const MOW_STEP = 0.45;
 /** Pieces of firewood a new keg's staves are shaved from. */
 export const STAVES = 2;
 /** The cooper keeps this many empty kegs ready (on the rack or on the block). */
@@ -113,6 +120,9 @@ export interface Village {
   innKegs: KegRack;
   /** Where the keg stands under the mill's spout to be filled (one slot). */
   spout: Spot;
+  /** The wheat field, and the stook its sheaves stand in. */
+  field: Field;
+  stook: Stook;
   /** The cooper's: the shaving horse, the block, firewood waiting to be staves, empty kegs ready for the mill. */
   cooperage: { horse: ShavingHorse; horseObstacle: Obstacle; block: HoopBlock; staves: Stack; empties: KegRack };
   /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
@@ -163,6 +173,8 @@ export interface Village {
     picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
     /** The cooper: firewood shaved into staves, new kegs raised, empties brought back, hoops tightened. */
     shaved: number; kegsMade: number; kegsBack: number; hooped: number;
+    /** Strips of wheat mown, sheaves stood in the stook. */
+    mown: number; sheaves: number;
     /** Trips (falls while walking), and things picked up again after one. */
     trips: number; pickedUp: number;
     meals: number; hungry: number; slept: number;
@@ -265,6 +277,9 @@ export type StepKind =
   | 'to the table'
   | 'to the tree'
   | 'to the water'
+  | 'to the strip'
+  | 'mowing'
+  | 'binding'
   | 'tripped'
   | 'picking up'
   | 'to the horse'
@@ -547,6 +562,7 @@ export abstract class Job {
         if (to === v.inn) v.stats.delivered += this.armful.length;
         if (to === v.larder) v.stats.fishIn += this.armful.length;
         if (to === v.innKegs) v.stats.kegsIn += this.armful.length;
+        if (to === v.stook) v.stats.sheaves += this.armful.length;
         if (to === v.cooperage.block) v.stats.kegsBack += this.armful.length; // (the only thing fetched to the block: an empty from the inn)
         if (to === v.tankardSpot) {
           this.armful = [];
@@ -2195,6 +2211,124 @@ export class Cooper extends Job {
           v.stats.hooped++;
         }
         this.step = { kind: 'idle' };
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * The farmer: while there's a ripe strip of wheat and room in the stook for
+ * what it'll make, claims the strip, walks to its end and mows down it: a
+ * swing of the scythe, a step on, another swing, the wheat falling to
+ * stubble behind the blade. At the far end, binds what's cut into sheaves
+ * and stands them in the stook.
+ */
+export class Farmer extends Job {
+  constructor(w: Worker) {
+    super(w, 'farmer');
+  }
+
+  private ripe(v: Village) {
+    return v.field.strips.filter((s) => s.state === 'ripe' && s.claimedBy < 0);
+  }
+
+  protected hasWork(v: Village) {
+    return this.ripe(v).length > 0 && v.stook.room >= SHEAVES;
+  }
+
+  /** Where they stand to mow: `along` (0 … 1) down strip i, back from the blade's reach. */
+  private mowSpot(v: Village, i: number, along: number) {
+    const f = v.field;
+    const back = 0.55 / f.len; // (the blade sweeps the wheat ahead of them)
+    return f.along(i, Math.max(-back, along - back));
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const f = v.field;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        if (this.hasWork(v)) {
+          // the nearest ripe strip
+          const me = this.w.walker;
+          const strip = this.ripe(v).reduce((b, x) => {
+            const pb = f.along(b.id, 0), px = f.along(x.id, 0);
+            return Math.hypot(px.x - me.x, px.z - me.z) < Math.hypot(pb.x - me.x, pb.z - me.z) ? x : b;
+          });
+          strip.claimedBy = this.w.i;
+          this.book(v.stook, 'incoming', SHEAVES);
+          const at = this.mowSpot(v, strip.id, 0);
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to the strip', strip: strip.id };
+          return;
+        }
+        if (this.leisure(v)) return;
+        // otherwise wait by the stook
+        const at = v.stook.workSpot();
+        const w = this.w.walker;
+        if (Math.hypot(w.x - at.x, w.z - at.z) > 0.4 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw);
+        this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to the strip': {
+        if (!this.arrived) return;
+        const swings = Math.ceil(f.len / MOW_STEP);
+        a.start('scythe', { swings });
+        this.step = { kind: 'mowing', strip: s.strip, done: 0, swings };
+        return;
+      }
+      case 'mowing': {
+        const i = s.strip as number;
+        const sweeps = a.kind === 'scythe' ? a.choreOf('scythe').sweeps : (s.swings as number);
+        // each sweep mows a step's worth ahead of them; then a step on
+        if (sweeps > (s.done as number)) {
+          const done = sweeps;
+          f.cut(i, (done * MOW_STEP) / f.len);
+          const at = this.mowSpot(v, i, (done * MOW_STEP) / f.len);
+          if (done < (s.swings as number)) this.go(at.x, at.z, at.yaw);
+          this.step = { ...s, done };
+          return;
+        }
+        if (a.busy) return;
+        // at the far end: bind it into sheaves (a while bent over, hands at the bundle)
+        f.cut(i, 1);
+        const r = this.w.root;
+        const ahead = (d: number, h: number) => r.position.clone().add(new THREE.Vector3(Math.sin(r.rotation.y) * d, h, Math.cos(r.rotation.y) * d));
+        const at = ahead(0.4, 0.22);
+        a.start('hold', { hold: { right: () => at.clone().add(new THREE.Vector3(0, 0.03, 0)), left: () => at.clone(), lean: 0.55, bob: () => 0.05 } });
+        this.step = { kind: 'binding', strip: i, until: v.time + 2.2 };
+        return;
+      }
+      case 'binding': {
+        if (v.time < (s.until as number)) return;
+        if (a.kind === 'hold') {
+          a.choreOf('hold').release();
+          return;
+        }
+        if (a.busy) return;
+        f.finish(s.strip as number, Field.clock(v.day, v.hours));
+        v.stats.mown++;
+        // the sheaves, lying at their feet side by side
+        const r = this.w.root;
+        const yaw = r.rotation.y;
+        const sheaves: Item[] = [];
+        const poses: ItemPose[] = [];
+        for (let k = 0; k < SHEAVES; k++) {
+          const it = v.newItem('sheaf');
+          const side = (k - (SHEAVES - 1) / 2) * 0.16;
+          const pos = r.position.clone().add(new THREE.Vector3(Math.sin(yaw) * 0.35 + Math.cos(yaw) * side, SHEAF_L * 0.15, Math.cos(yaw) * 0.35 - Math.sin(yaw) * side));
+          const quat = new THREE.Quaternion().setFromAxisAngle(_up, yaw + Math.PI / 2);
+          it.mesh.position.copy(pos);
+          it.mesh.quaternion.copy(quat);
+          it.place = { at: 'ground', pos, quat };
+          sheaves.push(it);
+          poses.push({ pos: pos.clone(), quat: quat.clone() });
+        }
+        // (room in the stook was booked when the strip was claimed)
+        this.gather(sheaves, poses, v.stook);
         return;
       }
     }
