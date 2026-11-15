@@ -29,7 +29,8 @@ const TURN_RATE = 3.2; // rad/s
 const TURN_FIRST = 0.6; // further off than this → turn on the spot before walking
 const PERSONAL = 0.55;
 const MIN_GAP = 0.36; // hard minimum distance a walker keeps from anyone // neighbours closer than this push us away
-const ACTIONS: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall', 'talk', 'talk', 'talk', 'saw', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'pick', 'fish', 'dine', 'eat', 'drink', 'banjo'];
+/** What the wanderers get up to (weighted: some twice). */
+const WANDER_POOL: ActionKind[] = ['wave', 'jump', 'hammer', 'carry', 'carry', 'sit', 'sit', 'fall', 'talk', 'talk', 'talk', 'saw', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'pick', 'fish', 'dine', 'eat', 'drink', 'banjo'];
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -130,7 +131,7 @@ export class Wander {
       const r = this.rnd();
       if (r < 0.6) this.pickTarget(s, all, R);
       else {
-        act = ACTIONS[Math.floor(this.rnd() * ACTIONS.length)];
+        act = WANDER_POOL[Math.floor(this.rnd() * WANDER_POOL.length)];
         if (act === 'carry') this.pickTarget(s, all, R); // take the box somewhere
         else s.until = time + 1 + this.rnd() * 2;
         return { speed: 0, act };
@@ -145,7 +146,7 @@ export class Wander {
       // linger a bit; often follow up with an action
       s.until = time + 0.5 + this.rnd() * 4;
       if (!b.busy && this.rnd() < 0.45) {
-        act = ACTIONS[Math.floor(this.rnd() * ACTIONS.length)];
+        act = WANDER_POOL[Math.floor(this.rnd() * WANDER_POOL.length)];
         if (act === 'carry') act = 'wave'; // (would just put it straight down)
       }
       return { speed: 0, act };

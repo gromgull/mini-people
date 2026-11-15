@@ -4,7 +4,7 @@ import type { Genome, MouthShape } from './genome';
 import { type GaitParams, type Motion, advance } from './gait';
 import { Animator } from './animate';
 import { styleFor } from './persona';
-import { type ActionPose, Actor, BPM } from './actions';
+import { type ActionPose, Actor, BPM, kindIs } from './actions';
 import { Smoke } from './smoke';
 import { Sparks } from './fx';
 import { Sound, type Voice, type Where, defaultAudio } from './audio';
@@ -71,7 +71,7 @@ export class Crowd {
       people: [],
       busy: (i) => {
         const k = actors()[i]?.kind;
-        return k === 'fall' || k === 'jump' || k === 'hammer' || k === 'saw' || k === 'chop' || k === 'fish';
+        return kindIs(k, 'dramatic');
       },
       focus: (i) => actors()[i]?.focus ?? null,
       camera: new THREE.Vector3(),
@@ -256,7 +256,7 @@ export class Crowd {
     const to = a.talkingTo;
     if (a.beat && to >= 0) md.talkUntil = now + 0.45;
     const k = a.kind;
-    const working = k === 'saw' || k === 'chop' || k === 'hammer' || k === 'hold' || k === 'armful' || k === 'carry' || k === 'fish' || k === 'pick' || k === 'haul';
+    const working = kindIs(k, 'working');
     // (busy at their own work, nobody else's drama makes them gape)
     if (working) gasp = false;
     const speaking = this.sound.live ? this.sound.speaking(i) : now < md.talkUntil;
@@ -269,7 +269,7 @@ export class Crowd {
     if (to >= 0) want = (i * 7 + to * 3) % 4 === 0 ? 'smirk' : 'smile';
     else if (k === 'haul') want = 'frown'; // (a log on the shoulder is heavy)
     else if (working) want = 'line';
-    else if (k === 'dine' || k === 'eat' || k === 'drink') {
+    else if (kindIs(k, 'meal')) {
       // at table: fed, or with something in the tankard, is content; waiting isn't
       const d = a.choreOf('dine');
       want = d.ate > 0 || !d.needsRefill ? 'smile' : 'line';

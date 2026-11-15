@@ -4,7 +4,7 @@ import { Stage, lookFromQuery, num, q } from '../stage';
 import { Crowd, type CrowdSettings } from '../crowd';
 import { WALK_SPEED, defaultGait, newMotion } from '../gait';
 import { Animator } from '../animate';
-import { Actor } from '../actions';
+import { Actor, kindIs } from '../actions';
 import { Gaze } from '../gaze';
 import GUI from 'lil-gui';
 import { PARTS_LAYER } from '../skin';
@@ -438,13 +438,13 @@ const village: Village = {
   everyoneFed: () => jobs.every((j, k) => k === INNKEEPER || j.asleep || j.ateToday),
   lamp,
   greenSpot: (i) => greenSpot(i),
-  bandPlaying: () => crowd.actors.some((a) => a.kind === 'fiddle' || a.kind === 'banjo' || a.kind === 'bass'),
+  bandPlaying: () => crowd.actors.some((a) => kindIs(a.kind, 'music')),
   chatOnGreen: (i) => chatAround(i, Infinity, WAITING_ON_GREEN),
   chatNear: (i, near) => chatAround(i, near, STOOD_ABOUT),
   sight: (i) => sight(i),
   chat: (i, j, seconds) => {
     // (only with someone who's there for it: not asleep, not walking off somewhere)
-    if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
+    if ([i, j].some((k) => jobs[k].asleep || (!kindIs(crowd.actors[k].kind, 'meal') && crowd.motions[k].speed > 0.1))) return;
     chat(i, j, seconds);
   },
   tankardSpot,
@@ -458,7 +458,7 @@ const village: Village = {
   },
   wantsRefill: () => {
     const a = crowd.actors[REGULAR];
-    return a.kind === 'dine' && a.choreOf('dine').needsRefill;
+    return kindIs(a.kind, 'meal') && a.choreOf('dine').needsRefill;
   },
   items,
   newItem,
@@ -524,7 +524,7 @@ function chat(i: number, j: number, seconds: number) {
 /** Free to strike up a chat at the table: sat, between mouthfuls, not already talking. */
 function idleAtTable(i: number) {
   const a = crowd.actors[i];
-  return a.kind === 'dine' && a.choreOf('dine').handsIdle && a.talkingTo < 0 && simTime >= chattedUntil[i];
+  return kindIs(a.kind, 'meal') && a.choreOf('dine').handsIdle && a.talkingTo < 0 && simTime >= chattedUntil[i];
 }
 
 /** Up for a word: about with empty hands, not busy at anything, not just stopped talking. */

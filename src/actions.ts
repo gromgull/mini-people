@@ -18,10 +18,55 @@ import { Hold, type HoldPlan } from './hold';
 import type { PineSpec } from './trees';
 import { FORM_SLOTS, PHRASE_SLOTS, degToHz, joinBand, leaveBand, tune } from './tune';
 
-const isDine = (k: string): k is DineAsk => k === 'dine' || k === 'eat' || k === 'drink';
-
 export const ACTIONS = ['wave', 'hammer', 'jump', 'fall', 'carry', 'sit', 'talk', 'saw', 'fiddle', 'dance', 'chop', 'pick', 'fish', 'dine', 'eat', 'drink', 'haul', 'banjo', 'armful', 'hold', 'bass', 'pipe'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
+
+/**
+ * What the rest of the program needs to know about each kind of action,
+ * in one place:
+ *   dramatic  others nearby stop and stare (and gasp)
+ *   working   a straight face, and no gaping at anyone else's drama
+ *   music     an instrument, in the band
+ *   meal      sat at a table (dine, eat, drink are the one chore)
+ *   moving    they carry on walking while they do it
+ *   staysPut  it takes a spot for a while (not for the parade's stream)
+ */
+export interface KindInfo {
+  dramatic?: true;
+  working?: true;
+  music?: true;
+  meal?: true;
+  moving?: true;
+  staysPut?: true;
+}
+export const KIND_INFO: Record<ActionKind, KindInfo> = {
+  wave: { moving: true },
+  hammer: { dramatic: true, working: true, staysPut: true },
+  jump: { dramatic: true, moving: true },
+  fall: { dramatic: true },
+  carry: { working: true },
+  sit: {},
+  talk: {},
+  saw: { dramatic: true, working: true, staysPut: true },
+  fiddle: { music: true, staysPut: true },
+  dance: { staysPut: true },
+  chop: { dramatic: true, working: true, staysPut: true },
+  pick: { working: true, staysPut: true },
+  fish: { dramatic: true, working: true, staysPut: true },
+  dine: { meal: true, staysPut: true },
+  eat: { meal: true, staysPut: true },
+  drink: { meal: true, staysPut: true },
+  haul: { working: true },
+  banjo: { music: true, staysPut: true },
+  armful: { working: true },
+  hold: { working: true },
+  bass: { music: true, staysPut: true },
+  pipe: { staysPut: true },
+};
+/** Is this action (if any) of this sort? */
+export const kindIs = (k: ActionKind | null | undefined, trait: keyof KindInfo) => !!k && !!KIND_INFO[k][trait];
+
+const isDine = (k: ActionKind): k is DineAsk => kindIs(k, 'meal');
 export type { ActionPose, ArmOverride, PropKit } from './actionkit';
 
 const JUMP_G = 14;
@@ -248,7 +293,7 @@ export class Actor {
     this.t = 0;
     this.side = opts.side ?? (Math.random() < 0.7 ? 'R' : 'L');
     this.push.copy(opts.push ?? new THREE.Vector3());
-    this.holdSpeed = kind !== 'wave' && kind !== 'jump';
+    this.holdSpeed = !kindIs(kind, 'moving');
     this.stopNow = kind === 'fall';
     this.sawLog = opts.sawLog ?? null;
     this.phrases = opts.phrases;

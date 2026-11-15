@@ -15,7 +15,7 @@ import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
 import { PERSONA_KEYS, PRESETS, derivePersona } from './persona';
-import { ACTIONS, type ActionKind, Actor, BPM } from './actions';
+import { ACTIONS, type ActionKind, Actor, BPM, kindIs } from './actions';
 import type { Where } from './audio';
 import { Wander, type WanderState, scatter, wanderRadius } from './wander';
 import { Gaze, LOOK_MODES, type LookMode } from './gaze';
@@ -318,11 +318,11 @@ const AUTO_POOL: ActionKind[] = ['wave', 'wave', 'jump', 'jump', 'hammer', 'fall
 
 function act(i: number, kind: ActionKind, push?: THREE.Vector3) {
   // hammering mid-parade would leave people standing in the stream
-  if ((kind === 'hammer' || kind === 'saw' || kind === 'fiddle' || kind === 'dance' || kind === 'chop' || kind === 'pick' || kind === 'fish' || kind === 'dine' || kind === 'eat' || kind === 'drink' || kind === 'banjo' || kind === 'bass' || kind === 'pipe') && settings.mode === 'parade') kind = 'wave';
+  if (kindIs(kind, 'staysPut') && settings.mode === 'parade') kind = 'wave';
   const a = actors[i];
   if (!a) return;
   if (kind === 'talk') return startTalk(i);
-  const music = kind === 'fiddle' || kind === 'banjo' || kind === 'bass';
+  const music = kindIs(kind, 'music');
   a.start(kind, { push, seated: music && kind !== 'bass' && settings.musicSeated });
   if (music && settings.mode === 'wander') {
     // music! some idle folk nearby get up and dance, and now and then
