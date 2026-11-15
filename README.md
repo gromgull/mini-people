@@ -237,11 +237,11 @@ So far it has one chain:
   thinly from the cabins.
 - **Spare time:** with nothing to do, people now and then sit on a free
   bench (their own first, if they have one), play their instrument or
-  smoke a pipe. The woodworker and the pickers play the banjo, the
-  lumberjack and the innkeeper the fiddle, and the miller the double bass
-  (standing only). The lumberjack, the fisher and the miller smoke a pipe,
-  standing or seated, with a wisp off the bowl and a breath of smoke after
-  each draw. They
+  smoke a pipe. Who plays what is the seed's deal, not the job's: always
+  one double bass (played standing), one or two fiddles and one or two
+  banjos, among any of the villagers. Some of them (about a third) smoke a
+  pipe, standing or seated, with a wisp off the bowl and a breath of smoke
+  after each draw. They
   stop, get up and go as soon as there's work. Everyone plays the same
   shared tune, so whoever's playing plays together.
 - **Stumps grow back:** a sapling appears after about a minute and becomes a

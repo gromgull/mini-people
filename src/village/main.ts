@@ -97,10 +97,28 @@ stage.scene.add(pond.group);
 type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'miller' | 'regular';
 // (two pickers, to keep the mill busy)
 const ROLES: Role[] = ['lumberjack', 'woodworker', 'fisher', 'innkeeper', 'picker', 'miller', 'regular', 'picker'];
-/** What each plays in their spare time. */
-const INSTRUMENT: Record<Role, 'fiddle' | 'banjo' | 'bass' | null> = { lumberjack: 'fiddle', woodworker: 'banjo', fisher: null, innkeeper: 'fiddle', picker: 'banjo', miller: 'bass', regular: null };
-/** Who smokes a pipe. */
-const PIPE: Record<Role, boolean> = { lumberjack: true, woodworker: false, fisher: true, innkeeper: false, picker: false, miller: true, regular: false };
+type Instrument = 'fiddle' | 'banjo' | 'bass';
+/**
+ * Who plays what in their spare time, and who smokes a pipe: the seed's
+ * deal, not the job's. Always a band: one double bass (never two), one or
+ * two fiddles, one or two banjos; the rest dance. (Their own random stream,
+ * so the village and its people look the same as before for a seed.)
+ */
+const { INSTRUMENT, PIPE } = (() => {
+  const r = mulberry32(settings.seed * 6007 + 29);
+  const band: Instrument[] = ['bass', 'fiddle', 'banjo'];
+  if (r() < 0.5) band.push('fiddle');
+  if (r() < 0.5) band.push('banjo');
+  const who = ROLES.map((_, i) => i);
+  for (let i = who.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [who[i], who[j]] = [who[j], who[i]];
+  }
+  const INSTRUMENT: (Instrument | null)[] = ROLES.map(() => null);
+  band.forEach((inst, k) => (INSTRUMENT[who[k]] = inst));
+  const PIPE = ROLES.map(() => r() < 0.4);
+  return { INSTRUMENT, PIPE };
+})();
 const people = ROLES.map((_, i) => crowd.spawn(randomGenome(settings.seed * 100003 + 17 + i * 5), i));
 const r = mulberry32(settings.seed * 31 + 7);
 crowd.people = people;
@@ -404,7 +422,7 @@ const pickers = ROLES.map((r, k) => (r === 'picker' ? k : -1)).filter((k) => k >
 const jobs: Job[] = people.map((p, i) => {
   const pk = pickers.indexOf(i);
   const gear = pk >= 0 ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
-  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[ROLES[i]], pipe: PIPE[ROLES[i]], home: homes[i], gear };
+  const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[i], pipe: PIPE[i], home: homes[i], gear };
   const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular }[ROLES[i]];
   return new J(w);
 });
@@ -418,16 +436,18 @@ const jobs: Job[] = people.map((p, i) => {
  */
 function greenSpot(i: number) {
   const G = L.green;
-  const band = ROLES.map((r, k) => (INSTRUMENT[r] ? k : -1)).filter((k) => k >= 0);
+  const band = ROLES.map((_, k) => (INSTRUMENT[k] ? k : -1)).filter((k) => k >= 0);
   const k = band.indexOf(i);
   let a: number, r: number;
   if (k >= 0) {
     a = G.yaw + (k - (band.length - 1) / 2) * 0.5;
     r = G.R * 0.9;
   } else {
-    const j = ROLES.map((r2, k2) => (INSTRUMENT[r2] ? -1 : k2)).filter((k2) => k2 >= 0).indexOf(i);
-    a = G.yaw + Math.PI + (j - 0.5) * 1.4;
-    r = 0.45 + 0.25 * (j % 2);
+    // (however many there are, spread round the middle)
+    const dancers = ROLES.map((_, k2) => (INSTRUMENT[k2] ? -1 : k2)).filter((k2) => k2 >= 0);
+    const j = dancers.indexOf(i);
+    a = G.yaw + Math.PI + (j * Math.PI * 2) / dancers.length;
+    r = dancers.length > 1 ? 0.6 + 0.15 * (j % 2) : 0;
   }
   const x = G.x + Math.sin(a) * r, z = G.z + Math.cos(a) * r;
   // the band faces the middle; dancers face the band
