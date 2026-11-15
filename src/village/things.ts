@@ -210,7 +210,7 @@ export type ItemPlace =
 
 export interface Item {
   id: number;
-  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal' | 'sheaf' | 'flour';
+  kind: 'wood' | 'fish' | 'apple' | 'keg' | 'mug' | 'meal' | 'sheaf' | 'flour' | 'bread';
   place: ItemPlace;
   mesh: THREE.Object3D;
   /** Fish: how dry, 0 fresh … 1 stockfish. Keg: servings of cider left. */
@@ -415,7 +415,7 @@ export const APPLE_R = 0.065;
 
 /** How high an item's middle sits lying on the ground (dropped). */
 export function restY(kind: Item['kind']) {
-  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0, sheaf: SHEAF_R, flour: 0 }[kind];
+  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0, sheaf: SHEAF_R, flour: 0, bread: 0.035 }[kind];
 }
 export { KEG_L, KEG_R };
 
@@ -942,5 +942,135 @@ export class SackRack extends Store {
     }
     this.reach = 0.55;
     this.place(stage, [{ geo: new THREE.BoxGeometry((n / 2) * 0.24, 0.06, 0.5).translate(0, 0.03, 0), row: ROWS.timber[1] }]);
+  }
+}
+
+// ---------------------------------------------------------------- the bakery
+
+/** A loaf (item mesh): a round, domed, crusty brown. */
+export function makeLoaf(stage: Stage) {
+  return outlined(bake([
+    { geo: new THREE.SphereGeometry(0.06, 9, 6).scale(1.3, 0.72, 1).translate(0, 0.005, 0), row: ROWS.stockfish[0] },
+    { geo: new THREE.BoxGeometry(0.1, 0.006, 0.012).translate(0, 0.047, 0), row: ROWS.stockfish[1] }, // the slash on top
+  ]), stage);
+}
+
+/** How long the oven takes to come up to heat once it's fired (s), and to cool from hot. */
+const OVEN_FIRE = 25;
+const OVEN_COOL = 140;
+
+/**
+ * An outdoor clay oven: a stone plinth with a dome of clay on it, an
+ * arched mouth at the front (local +z) and a little chimney at the back.
+ * Fired, it heats up over OVEN_FIRE seconds, smoking hard; hot, the mouth
+ * glows; left, it cools off slowly.
+ */
+export class BreadOven {
+  readonly group = new THREE.Group();
+  /** 0 cold … 1 hot enough to bake. */
+  heat = 0;
+  firing = false;
+  private glow: THREE.Mesh;
+  private glowOn = new THREE.MeshBasicMaterial({ color: '#ffb04a' });
+  private glowOff = new THREE.MeshBasicMaterial({ color: '#2a201a' });
+
+  constructor(stage: Stage, readonly x: number, readonly z: number, readonly yaw: number) {
+    const parts: Part[] = [
+      { geo: new THREE.BoxGeometry(1.05, 0.6, 1.0).translate(0, 0.3, 0), row: ROWS.stone[1] },
+      { geo: new THREE.BoxGeometry(1.1, 0.05, 1.05).translate(0, 0.625, 0), row: ROWS.stone[2] },
+      { geo: new THREE.SphereGeometry(0.48, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.8, 1.05).translate(0, 0.65, -0.02), row: ROWS.shore[0] },
+      // the arch round the mouth, and the chimney
+      { geo: new THREE.BoxGeometry(0.36, 0.3, 0.08).translate(0, 0.79, 0.47), row: ROWS.stone[0] },
+      { geo: new THREE.CylinderGeometry(0.06, 0.07, 0.28, 6).translate(0, 1.12, -0.28), row: ROWS.stone[0] },
+    ];
+    this.group.add(outlined(bake(parts), stage));
+    this.glow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.02).translate(0, 0.76, 0.515), this.glowOff);
+    this.glow.raycast = () => {};
+    this.group.add(this.glow);
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  private local(x: number, y: number, z: number) {
+    return new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw).add(new THREE.Vector3(this.x, 0, this.z));
+  }
+
+  /** The middle of its mouth (world). */
+  get mouth() {
+    return this.local(0, 0.74, 0.5);
+  }
+
+  /** The top of its chimney (world), for the smoke. */
+  get chimney() {
+    return this.local(0, 1.28, -0.28);
+  }
+
+  /** Where to stand to work the peel, or to put wood in: in front of the mouth, facing it. */
+  stand(back = 1.25) {
+    const p = this.local(0, 0, 0.5 + back);
+    return { x: p.x, z: p.z, yaw: this.yaw + Math.PI };
+  }
+
+  /** Light the fire in it (wood's been put in). */
+  fire() {
+    this.firing = true;
+  }
+
+  get hot() {
+    return this.heat >= 1;
+  }
+
+  update(dt: number) {
+    if (this.firing) {
+      this.heat = Math.min(1, this.heat + dt / OVEN_FIRE);
+      if (this.heat >= 1) this.firing = false; // (burnt down to embers: raked out, and it's hot)
+    } else this.heat = Math.max(0, this.heat - dt / OVEN_COOL);
+    this.glow.material = this.heat > 0.5 || this.firing ? this.glowOn : this.glowOff;
+  }
+
+  /** How hard its chimney should smoke. */
+  get smoke() {
+    return this.firing ? 1.4 : this.heat > 0.3 ? 0.25 : 0;
+  }
+}
+
+/** The kneading trough: a sturdy little table with a wooden trough on it. */
+export class Trough {
+  readonly group = new THREE.Group();
+  constructor(stage: Stage, readonly x: number, readonly z: number, readonly yaw: number) {
+    const H = 0.58;
+    const parts: Part[] = [{ geo: new THREE.BoxGeometry(0.7, 0.05, 0.42).translate(0, H, 0), row: ROWS.wood[0] }];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.05, H, 0.05).translate(sx * 0.3, H / 2, sz * 0.17), row: ROWS.wood[1] });
+    for (const sz of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.62, 0.08, 0.03).translate(0, H + 0.06, sz * 0.16), row: ROWS.wood[1] });
+    for (const sx of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.03, 0.08, 0.32).translate(sx * 0.3, H + 0.06, 0), row: ROWS.wood[1] });
+    this.group.add(outlined(bake(parts), stage));
+    this.group.position.set(x, 0, z);
+    this.group.rotation.y = yaw;
+    stage.scene.add(this.group);
+  }
+
+  /** The dough's place in the trough (world). */
+  get top() {
+    return new THREE.Vector3(0, 0.62, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw).add(new THREE.Vector3(this.x, 0, this.z));
+  }
+
+  /** Stand here, facing it, to knead. */
+  get stand() {
+    const d = 0.5;
+    return { x: this.x + Math.sin(this.yaw) * d, z: this.z + Math.cos(this.yaw) * d, yaw: this.yaw + Math.PI };
+  }
+}
+
+/** A bench by the oven that the loaves cool on, two rows of three. */
+export class BreadShelf extends Store {
+  constructor(stage: Stage, name: string, x: number, z: number, yaw: number) {
+    super(name, x, z, yaw);
+    const H = 0.42;
+    for (let i = 0; i < 6; i++) this.slots.push({ pos: new THREE.Vector3((Math.floor(i / 2) - 1) * 0.17, H + 0.035, (i % 2 - 0.5) * 0.14), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), i * 0.5) });
+    const parts: Part[] = [{ geo: new THREE.BoxGeometry(0.6, 0.04, 0.34).translate(0, H, 0), row: ROWS.wood[2] }];
+    for (const sx of [-1, 1]) parts.push({ geo: new THREE.BoxGeometry(0.04, H, 0.3).translate(sx * 0.26, H / 2, 0), row: ROWS.wood[1] });
+    this.reach = 0.5;
+    this.place(stage, parts);
   }
 }

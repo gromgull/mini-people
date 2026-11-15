@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor } from '../actions';
 import type { Forest, Tree } from './forest';
-import { type Basket, type Bench, type CiderMill, SHEAF_L, type Stook, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
+import { type Basket, type Bench, type BreadOven, type CiderMill, SHEAF_L, type Trough, type Stook, type Crate, type HoopBlock, type Item, type KegRack, type ShavingHorse, LADDER_H, LOG_L, LOG_R, type Log, type Rack, type Sawhorse, type Spot, type Stack, StepLadder, type Store, type StreetLamp, type Woodpile } from './things';
 import type { Apple, Orchard } from './orchard';
 import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
@@ -32,6 +32,9 @@ import { GRAIN_MAX, type Windmill } from './windmill';
  *     threshes: carries sheaves from the stook to the threshing floor by
  *     the windmill and beats the grain out with the flail; the windmill
  *     grinds it when the wind turns its sails.
+ *   baker: brings flour from the windmill and firewood for the oven; fires
+ *     the oven, kneads while it heats, bakes a batch of loaves with the
+ *     peel, and carries bread to the inn.
  *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
  *     there aren't enough empties to go round, takes firewood from the yard
  *     (if the inn can spare it), shaves it into staves and raises a new keg.
@@ -74,8 +77,27 @@ export const STAVES = 2;
 export const COOPER_EMPTIES = 2;
 /** No more kegs than this in the whole village (the cooper stops making them). */
 export const KEGS_MAX = 5;
-/** The cooper takes no firewood while the inn's stack (with what's on its way) is lower than this. */
+/** The oven and the cooper take no firewood while the inn's stack (with what's on its way) is lower than this. */
 export const INN_LOW = 4;
+/** A batch of bread: loaves, firewood to heat the oven for it, how long it bakes (s). */
+export const LOAVES = 4;
+export const OVEN_WOOD = 2;
+const BAKE_TIME = 25;
+/** The inn wants this much bread in. */
+export const INN_BREAD = 6;
+
+/**
+ * How much firewood from the yard someone other than the inn may take now
+ * (up to `want`). The inn's fire comes first: nobody takes any while its
+ * stack is low or the woodworkers are stocking it for the evening. Then the
+ * oven; the cooper's staves only once the oven has wood for a firing.
+ */
+export function firewoodFor(v: Village, user: 'oven' | 'staves', want: number) {
+  if (want <= 0) return 0;
+  if (v.inn.count + v.inn.incoming < INN_LOW || v.hours >= SUPPER - 2) return 0;
+  if (user === 'staves' && v.bakery.wood.count + v.bakery.wood.incoming < OVEN_WOOD) return 0;
+  return Math.min(want, v.yard.available);
+}
 /** Hammer blows: hooping a new keg, tightening an old one's hoops. */
 const BLOWS_NEW = 12;
 const BLOWS_OLD = 5;
@@ -130,6 +152,9 @@ export interface Village {
   windmill: Windmill;
   floor: Store;
   sacks: Store;
+  /** The bakery: the oven, the trough, the shelf the loaves cool on, flour and firewood; the inn's bread basket. */
+  bakery: { oven: BreadOven; trough: Trough; shelf: Store; flour: Store; wood: Store };
+  innBread: Store;
   /** The cooper's: the shaving horse, the block, firewood waiting to be staves, empty kegs ready for the mill. */
   cooperage: { horse: ShavingHorse; horseObstacle: Obstacle; block: HoopBlock; staves: Stack; empties: KegRack };
   /** The inn's table: where the regular's tankard stands (a one-slot store), where they sit. */
@@ -184,6 +209,8 @@ export interface Village {
     mown: number; sheaves: number;
     /** Sheaves threshed, sacks of flour milled, seconds the sails turned. */
     threshed: number; flour: number; sailing: number;
+    /** Batches baked, loaves taken to the inn. */
+    baked: number; breadIn: number;
     /** Trips (falls while walking), and things picked up again after one. */
     trips: number; pickedUp: number;
     meals: number; hungry: number; slept: number;
@@ -290,6 +317,14 @@ export type StepKind =
   | 'mowing'
   | 'binding'
   | 'to the floor'
+  | 'to the oven'
+  | 'stoking'
+  | 'to the trough'
+  | 'kneading'
+  | 'waiting for the oven'
+  | 'loading the oven'
+  | 'baking'
+  | 'taking out the bread'
   | 'threshing'
   | 'tripped'
   | 'picking up'
@@ -574,6 +609,7 @@ export abstract class Job {
         if (to === v.larder) v.stats.fishIn += this.armful.length;
         if (to === v.innKegs) v.stats.kegsIn += this.armful.length;
         if (to === v.stook) v.stats.sheaves += this.armful.length;
+        if (to === v.innBread) v.stats.breadIn += this.armful.length;
         if (to === v.cooperage.block) v.stats.kegsBack += this.armful.length; // (the only thing fetched to the block: an empty from the inn)
         if (to === v.tankardSpot) {
           this.armful = [];
@@ -2076,17 +2112,12 @@ export class Cooper extends Job {
     return c.staves.available >= STAVES && c.block.room > 0 && c.empties.room > 0 && this.wantNew(v);
   }
 
-  /**
-   * Firewood to fetch for staves: none while the inn's fire is running low,
-   * or once the woodworker's stocking it up for the evening (the fire comes
-   * first), else as much as there is in the yard.
-   */
+  /** Firewood to fetch for staves (as much as can be spared: see firewoodFor). */
   private stavesWanted(v: Village) {
     const c = v.cooperage;
     const short = STAVES - c.staves.count - c.staves.incoming;
-    const innLow = v.inn.count + v.inn.incoming < INN_LOW || v.hours >= SUPPER - 2;
-    if (short <= 0 || !this.wantNew(v) || innLow) return 0;
-    return Math.min(short, c.staves.room, v.yard.available);
+    if (short <= 0 || !this.wantNew(v)) return 0;
+    return firewoodFor(v, 'staves', Math.min(short, c.staves.room));
   }
 
   /** The keg on the block wants doing: its hoops, or carrying to the rack. */
@@ -2392,6 +2423,169 @@ export class Farmer extends Job {
         }
         // (room in the stook was booked when the strip was claimed)
         this.gather(sheaves, poses, v.stook);
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * The baker: keeps the bakery in flour (sacks from the windmill's rack) and
+ * the oven in firewood (from the yard, when the inn can spare it), and
+ * bakes when there's room for the bread: puts wood in the oven and fires
+ * it, kneads at the trough while it heats, slides the loaves in with the
+ * peel, and takes them out baked onto the shelf to cool. Carries bread to
+ * the inn's basket whenever it's short.
+ */
+export class Baker extends Job {
+  constructor(w: Worker) {
+    super(w, 'baker');
+  }
+
+  /** Bread for the inn: how many it's short, if there's any on the shelf. */
+  private breadWanted(v: Village) {
+    const short = INN_BREAD - v.innBread.count - v.innBread.incoming;
+    return short > 0 ? Math.min(short, v.bakery.shelf.available, ARMFUL) : 0;
+  }
+
+  /** Flour, firewood, room on the shelf, and not more bread about than the inn can use. */
+  private canBake(v: Village) {
+    const b = v.bakery;
+    const about = b.shelf.count + b.shelf.incoming + v.innBread.count + v.innBread.incoming;
+    return b.flour.available >= 1 && b.wood.available >= OVEN_WOOD && b.shelf.room >= LOAVES && about < INN_BREAD + LOAVES;
+  }
+
+  private flourWanted(v: Village) {
+    const f = v.bakery.flour;
+    return f.count + f.incoming < f.slots.length && v.sacks.available > 0 ? 1 : 0;
+  }
+
+  private woodWanted(v: Village) {
+    const w = v.bakery.wood;
+    return firewoodFor(v, 'oven', Math.min(w.room, OVEN_WOOD * 2 - w.count - w.incoming));
+  }
+
+  protected hasWork(v: Village) {
+    return this.breadWanted(v) > 0 || this.canBake(v) || this.flourWanted(v) > 0 || this.woodWanted(v) > 0;
+  }
+
+  protected run(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const b = v.bakery;
+    const oven = b.oven;
+    switch (s.kind) {
+      case 'idle': {
+        if (v.time < this.waitUntil) return;
+        const bread = this.breadWanted(v);
+        if (bread > 0) {
+          this.fetch(b.shelf, v.innBread, bread);
+          return;
+        }
+        if (this.canBake(v)) {
+          this.book(b.flour, 'reserved', 1);
+          this.book(b.wood, 'reserved', OVEN_WOOD);
+          this.book(b.shelf, 'incoming', LOAVES);
+          const at = oven.stand(0.75);
+          this.go(at.x, at.z, at.yaw);
+          this.step = { kind: 'to the oven' };
+          return;
+        }
+        if (this.flourWanted(v) > 0) {
+          this.fetch(v.sacks, b.flour, 1);
+          return;
+        }
+        const wood = this.woodWanted(v);
+        if (wood > 0) {
+          this.fetch(v.yard, b.wood, wood);
+          return;
+        }
+        if (this.leisure(v)) return;
+        const at = oven.stand(1.6);
+        const w = this.w.walker;
+        if (Math.hypot(w.x - at.x, w.z - at.z) > 0.4 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw);
+        this.waitUntil = v.time + 2;
+        return;
+      }
+      case 'to the oven': {
+        if (!this.arrived) return;
+        // the wood in at the mouth, and lit
+        const m = oven.mouth;
+        a.start('hold', { hold: { right: () => m.clone().add(new THREE.Vector3(0, -0.03, 0)), left: () => m.clone().add(new THREE.Vector3(0, 0.02, 0)), lean: 0.35 } });
+        this.step = { kind: 'stoking', until: v.time + 1.6 };
+        return;
+      }
+      case 'stoking': {
+        if (v.time < (s.until as number)) return;
+        if (a.kind === 'hold') {
+          a.choreOf('hold').release();
+          return;
+        }
+        if (a.busy) return;
+        const slots = b.wood.top(OVEN_WOOD);
+        for (const k of slots) {
+          v.removeItem(b.wood.items[k]!);
+          b.wood.items[k] = null;
+        }
+        this.unbook(b.wood, 'reserved', OVEN_WOOD);
+        oven.fire();
+        const at = b.trough.stand;
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'to the trough' };
+        return;
+      }
+      case 'to the trough': {
+        if (!this.arrived) return;
+        a.start('knead', { at: b.trough.top });
+        this.step = { kind: 'kneading' };
+        return;
+      }
+      case 'kneading': {
+        if (a.busy) return;
+        // a sack of flour's gone into that
+        const slot = b.flour.top(1)[0];
+        if (slot !== undefined) {
+          v.removeItem(b.flour.items[slot]!);
+          b.flour.items[slot] = null;
+        }
+        this.unbook(b.flour, 'reserved', 1);
+        const at = oven.stand();
+        this.go(at.x, at.z, at.yaw);
+        this.step = { kind: 'waiting for the oven' };
+        return;
+      }
+      case 'waiting for the oven': {
+        if (!this.arrived || !oven.hot) return;
+        a.start('peel', { at: oven.mouth, loaves: 'in' });
+        this.step = { kind: 'loading the oven' };
+        return;
+      }
+      case 'loading the oven': {
+        if (a.busy) return;
+        this.step = { kind: 'baking', until: v.time + BAKE_TIME };
+        return;
+      }
+      case 'baking': {
+        if (v.time < (s.until as number)) return;
+        a.start('peel', { at: oven.mouth, loaves: 'out' });
+        this.step = { kind: 'taking out the bread' };
+        return;
+      }
+      case 'taking out the bread': {
+        if (a.busy) return;
+        // the loaves out onto the shelf to cool (room was kept for them)
+        const slots = b.shelf.free(LOAVES);
+        const from = oven.mouth;
+        for (const k of slots) {
+          const loaf = v.newItem('bread');
+          const p = b.shelf.slotWorld(k);
+          loaf.place = { at: 'stack', stack: b.shelf, slot: k };
+          loaf.tween = { pos: from.clone(), quat: p.quat.clone(), t0: v.time, dur: 0.5 };
+          b.shelf.items[k] = loaf;
+        }
+        this.unbook(b.shelf, 'incoming', LOAVES);
+        v.stats.baked++;
+        this.step = { kind: 'idle' };
         return;
       }
     }

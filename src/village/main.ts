@@ -12,7 +12,7 @@ import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
 import { buildPerson } from '../body';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, Flag, HoopBlock, type Item, KegRack, ShavingHorse, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeFlour, makeMeal, makeMug, makeSheaf, SackRack, setDry, Stook, ThreshingFloor } from './things';
+import { Basket, Bench, CiderMill, Crate, Flag, HoopBlock, type Item, KegRack, ShavingHorse, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, BreadOven, BreadShelf, makeFlour, makeLoaf, makeMeal, makeMug, makeSheaf, SackRack, setDry, Stook, ThreshingFloor, Trough } from './things';
 import { Wind } from './wind';
 import { Field } from './field';
 import { Windmill } from './windmill';
@@ -22,7 +22,7 @@ import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
 import { nearest, type Obstacle, Walker } from './walk';
-import { Cooper, Farmer, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, CiderMaker, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
+import { Baker, Cooper, Farmer, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, CiderMaker, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
 import { type AppHooks, runApp } from '../app';
@@ -74,7 +74,7 @@ stage.backdrop.build(settings.seed);
 // picker's and the cider maker's (past the cider mill), the other picker's (the far side of the orchard)
 const SITES: Site[] = L.sites;
 
-type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'cidermaker' | 'regular' | 'cooper' | 'farmer';
+type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'cidermaker' | 'regular' | 'cooper' | 'farmer' | 'baker';
 /**
  * Who lives here: each one's job, which building is their home (index into
  * SITES), which picker's basket and ladder are theirs, and what they're
@@ -92,7 +92,8 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'picker', home: 5, name: 'picker 2', gear: 1 }, // (two pickers, to keep the mill busy)
   { role: 'cooper', home: 1, name: 'cooper' }, // (lives with the woodworker)
   { role: 'woodworker', home: 0, name: 'woodworker 2' },
-  { role: 'farmer', home: 6, name: 'farmer' }, // (in the cabin by the field) // (lodges with the lumberjack: one woodworker couldn't saw all the logs)
+  { role: 'farmer', home: 6, name: 'farmer' }, // (in the cabin by the field)
+  { role: 'baker', home: 7, name: 'baker' }, // (in the cabin by the bakery) // (lodges with the lumberjack: one woodworker couldn't saw all the logs)
 ];
 const ROLES = VILLAGERS.map((v) => v.role);
 /** Which building each person lives in (index into SITES). */
@@ -113,6 +114,7 @@ for (const b of houses.buildings) {
   const c = smoke.add(b.chimney, b.kind === 'inn' ? 1.8 : 0.45, b.kind === 'inn' ? 1.15 : 0.8);
   if (b.kind === 'inn') innChimney = c;
 }
+// (the bakery's oven gets its chimney once it's built: see below)
 const forest = new Forest(stage, L.forest.x, L.forest.z, L.forest.R, 26, L.seeds.forest);
 stage.scene.add(forest.group);
 // the orchard, and the cider mill between it and the yard
@@ -187,11 +189,31 @@ const larder = (() => {
   const at = new THREE.Vector3(0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
   return new Crate(stage, 'larder', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw, 8);
 })();
+// the inn's bread basket, on the other side of the hatch from the larder
+const innBread = (() => {
+  const b = houses.buildings.find((h) => h.kind === 'inn')!;
+  const at = new THREE.Vector3(-0.55, 0, -0.3).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
+  return new Crate(stage, 'bread basket', b.pickup!.x + at.x, b.pickup!.z + at.z, b.yaw, 6);
+})();
+// the bakery: the oven (its mouth toward the bakery's +z), the trough and the shelf either side in front, the flour and the firewood behind
+const bakery = (() => {
+  const B = L.bakery;
+  const at = (x: number, z: number) => new THREE.Vector3(x, 0, z).applyAxisAngle(new THREE.Vector3(0, 1, 0), B.yaw).add(new THREE.Vector3(B.x, 0, B.z));
+  const tr = at(-1.15, 0.75), sh = at(1.15, 0.75), fl = at(-1.1, -0.45), wd = at(1.1, -0.45);
+  return {
+    oven: new BreadOven(stage, B.x, B.z, B.yaw),
+    trough: new Trough(stage, tr.x, tr.z, B.yaw),
+    shelf: new BreadShelf(stage, 'bread shelf', sh.x, sh.z, B.yaw),
+    flour: new SackRack(stage, 'flour bin', fl.x, fl.z, B.yaw + Math.PI / 2, 2),
+    wood: new Stack(stage, 'oven wood', wd.x, wd.z, B.yaw + Math.PI / 2, 1, 4),
+  };
+})();
+const ovenSmoke = smoke.add(bakery.oven.chimney, 0, 1.1);
 
 const items: Item[] = [];
 let nextItemId = 0;
 function newItem(kind: Item['kind']): Item {
-  const mesh = { wood: () => makePiece(crowd.kit), fish: () => makeFish(stage), apple: () => makeApple(stage), keg: () => makeKeg(stage), mug: () => makeMug(stage), meal: () => makeMeal(stage), sheaf: () => makeSheaf(stage), flour: () => makeFlour(stage) }[kind]();
+  const mesh = { wood: () => makePiece(crowd.kit), fish: () => makeFish(stage), apple: () => makeApple(stage), keg: () => makeKeg(stage), mug: () => makeMug(stage), meal: () => makeMeal(stage), sheaf: () => makeSheaf(stage), flour: () => makeFlour(stage), bread: () => makeLoaf(stage) }[kind]();
   stage.scene.add(mesh);
   const it: Item = { id: nextItemId++, kind, place: { at: 'horse' }, mesh, dry: 0 };
   items.push(it);
@@ -238,6 +260,9 @@ function stock(st: Store, n: number, kind: Item['kind'] = 'wood', dry = 0) {
 stock(yard, num('wood', 0));
 stock(innStack, num('innwood', 3));
 stock(larder, num('fish', 3), 'fish', 1); // (one each for the first few suppers: nine mouths)
+// the bakery starts with flour for two batches and wood for one firing (so there's bread whatever the wind)
+stock(bakery.flour, num('flour', 2), 'flour');
+stock(bakery.wood, num('ovenwood', 2));
 stock(rack, num('rackfish', 0), 'fish', 0.6);
 stock(mill.hopper, num('apples', 0), 'apple');
 stock(innKegs, num('kegs', 1), 'keg', SERVINGS);
@@ -415,6 +440,9 @@ const cooperObstacles: Obstacle[] = [
   { kind: 'circle', x: cooperage.block.x, z: cooperage.block.z, r: 0.17 },
   { kind: 'circle', x: stook.x, z: stook.z, r: 0.22 },
   { kind: 'circle', x: windmill.x, z: windmill.z, r: 0.85 },
+  { kind: 'box', x: bakery.oven.x, z: bakery.oven.z, yaw: bakery.oven.yaw, hx: 0.55, hz: 0.52 },
+  { kind: 'box', x: bakery.trough.x, z: bakery.trough.z, yaw: bakery.trough.yaw, hx: 0.36, hz: 0.22 },
+  ...[bakery.shelf, bakery.flour, bakery.wood, innBread].map((st): Obstacle => ({ kind: 'box', x: st.x, z: st.z, yaw: st.yaw, hx: 0.3, hz: 0.2 })),
   { kind: 'box', x: threshingFloor.x, z: threshingFloor.z, yaw: threshingFloor.yaw, hx: 0.5, hz: 0.48 },
   { kind: 'box', x: sackRack.x, z: sackRack.z, yaw: sackRack.yaw, hx: 0.38, hz: 0.27 },
   { kind: 'box', x: cooperage.staves.x, z: cooperage.staves.z, yaw: cooperage.staves.yaw, hx: 0.18, hz: 0.2 },
@@ -466,6 +494,8 @@ const village: Village = {
   windmill,
   floor: threshingFloor,
   sacks: sackRack,
+  bakery,
+  innBread,
   dt: 0,
   hours: look.time,
   phase: phaseAt(look.time),
@@ -524,13 +554,13 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, mown: 0, sheaves: 0, threshed: 0, flour: 0, sailing: 0, trips: 0, pickedUp: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, mown: 0, sheaves: 0, threshed: 0, flour: 0, sailing: 0, baked: 0, breadIn: 0, trips: 0, pickedUp: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const pk = VILLAGERS[i].gear;
   const gear = pk !== undefined ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
   const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[i], pipe: PIPE[i], home: homes[i], gear };
-  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, cidermaker: CiderMaker, regular: Regular, cooper: Cooper, farmer: Farmer }[ROLES[i]];
+  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, cidermaker: CiderMaker, regular: Regular, cooper: Cooper, farmer: Farmer, baker: Baker }[ROLES[i]];
   return new J(w);
 });
 
@@ -741,6 +771,8 @@ function simulate(dt: number) {
     village.stats.flour++;
   }
   if (windmill.turning) village.stats.sailing += dt;
+  bakery.oven.update(dt);
+  ovenSmoke.rate = bakery.oven.smoke;
   village.phase = phaseAt(village.hours);
   crowd.beginStep(simTime, null, -1);
   const obs = obstacles();
@@ -846,7 +878,7 @@ if (!q.has('zoom')) {
 
 // ---------------------------------------------------------------- watching it
 
-const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', cidermaker: '⚙', regular: '🍻', cooper: '🛢', farmer: '🌾' };
+const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', cidermaker: '⚙', regular: '🍻', cooper: '🛢', farmer: '🌾', baker: '🍞' };
 const panel = document.createElement('div');
 panel.style.cssText = 'position:fixed;left:8px;bottom:30px;padding:6px 9px;background:#000a;color:#e8f4d8;font:12px/1.45 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;';
 document.body.appendChild(panel);
@@ -855,7 +887,7 @@ const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60))
 function updatePanel() {
   panel.style.display = settings.panel ? '' : 'none';
   if (!settings.panel) return;
-  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${VILLAGERS[i].name.padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : j.armful.length ? ` (${{ wood: 'an armful of firewood', fish: 'an armful of fish', apple: 'apples', keg: 'a keg', mug: 'a tankard of cider', meal: 'a plate of supper', sheaf: 'sheaves', flour: 'a sack of flour' }[j.armful[0].kind]})` : ''}`);
+  const rows = jobs.map((j, i) => `${i === follow ? '▸' : ' '} ${ROLE_ICON[ROLES[i]]} ${VILLAGERS[i].name.padEnd(11)} ${j.doing}${j.carrying ? ' (carrying a log)' : j.armful.length ? ` (${{ wood: 'an armful of firewood', fish: 'an armful of fish', apple: 'apples', keg: 'a keg', mug: 'a tankard of cider', meal: 'a plate of supper', sheaf: 'sheaves', flour: 'a sack of flour', bread: 'bread' }[j.armful[0].kind]})` : ''}`);
   const loose = logs.filter((l) => l.place.at === 'ground').length;
   const standing = forest.trees.filter((t) => t.state === 'standing').length;
   panel.textContent = [
@@ -863,6 +895,7 @@ function updatePanel() {
     `  🐕 dog        ${dog.doing} (${VILLAGERS[DOG_OWNER].name}'s)`,
     `day ${village.day} · the wind: ${wind.words} (${wind.strength.toFixed(2)})`,
     `wheat: ${(['ripe', 'cut', 'growing', 'stubble'] as const).map((k) => `${k} ${field.strips.filter((s) => s.state === k).length}`).join(' · ')} · strips mown ${village.stats.mown} · stook ${stook.count}/${stook.slots.length}`,
+    `bakery: oven ${bakery.oven.firing ? 'firing' : bakery.oven.hot ? 'hot' : bakery.oven.heat > 0.2 ? 'cooling' : 'cold'} · flour ${bakery.flour.count} · wood ${bakery.wood.count} · batches baked ${village.stats.baked} · on the shelf ${bakery.shelf.count} · at the inn ${innBread.count} (taken ${village.stats.breadIn})`,
     `windmill: sails ${windmill.turning ? 'turning' : windmill.spin > 0.05 ? 'slowing' : 'still'} · grain ${windmill.grain} · on the floor ${threshingFloor.count} · threshed ${village.stats.threshed} · flour milled ${village.stats.flour}, on the rack ${sackRack.count}/${sackRack.slots.length}`,
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
@@ -918,7 +951,7 @@ function focusOn(i: number, k: number) {
 
 let flagTime = 0;
 /** Every store (and the woodpile), for the test's book-keeping checks: anything new that holds things goes here. */
-const allStores = () => [yard, innStack, rack, larder, ...baskets, mill.hopper, millKegs, innKegs, tankardSpot, spout, cooperage.block, cooperage.staves, cooperage.empties, stook, threshingFloor, sackRack, ...seats.map((s) => s.plate)];
+const allStores = () => [yard, innStack, rack, larder, ...baskets, mill.hopper, millKegs, innKegs, tankardSpot, spout, cooperage.block, cooperage.staves, cooperage.empties, stook, threshingFloor, sackRack, bakery.shelf, bakery.flour, bakery.wood, innBread, ...seats.map((s) => s.plate)];
 const hooks: AppHooks = {
   paused: () => settings.paused,
   simulate: (dt) => {

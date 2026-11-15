@@ -22,8 +22,10 @@ import type { Site } from '../houses';
  * distance and a little turn of its own, and the yard turns too. The
  * woodworker's cabin goes in the widest gap between districts, and the
  * drying rack on the way from the pond to the inn (the innkeeper fetches
- * dried fish from it, sometimes in the middle of supper), and the cooperage
- * (the cooper lives with the woodworker) between their cabin and the yard. A layout
+ * dried fish from it, sometimes in the middle of supper), the cooperage
+ * (the cooper lives with the woodworker) beside their cabin, and the bakery
+ * (its oven, trough, shelf, flour and firewood) and the baker's cabin on the
+ * way from the windmill to the inn. A layout
  * where anything overlaps (with a margin to walk through) is thrown away
  * and another drawn.
  */
@@ -40,7 +42,7 @@ export interface Round {
 }
 
 export interface Layout {
-  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker's and cider maker's cabin, the other picker's, the farmer's. */
+  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker's and cider maker's cabin, the other picker's, the farmer's, the baker's. */
   sites: Site[];
   forest: Round;
   orchard: Round;
@@ -61,6 +63,8 @@ export interface Layout {
   pondBench: Pose;
   rack: Pose;
   innKegs: Pose;
+  /** The bakery: its oven (facing +z), with the trough, the shelf, the flour bin and the oven's firewood laid out round it. */
+  bakery: Pose;
   /** The cooperage: its shaving horse, block, staves and empty kegs are laid out round it (local +z toward the yard). */
   cooperage: Pose;
   /** The inn's three tables (the first is the regular's). */
@@ -127,6 +131,8 @@ const TEMPLATE: Record<string, Piece> = {
   windmill: P('field', 5.6, 16.4, 0, 2.6),
   site6: P('field', -4.8, 12.4, 0.6, 2.3),
   site1: P('yard', 7.6, -7.6, -0.5, 2.3), // the woodworker's: placed on its own, in the widest gap
+  bakery: P('yard', 3.2, -0.5, 0, 1.4), // placed on its own, between the windmill and the inn
+  site7: P('yard', 7.9, -0.5, 0, 2.3), // the baker's, beside the bakery
   cooperage: P('yard', 4.6, -4.9, Math.atan2(-4.6, 4.9), 1.3), // placed on its own, beside the woodworker's on the yard side
 };
 /** Each district's anchor: where it's carried from. */
@@ -137,7 +143,7 @@ const ANCHOR: Record<Exclude<District, 'yard'>, { x: number; z: number }> = {
   orchard: { x: 0, z: 7.5 },
   field: { x: 0, z: 13.5 },
 };
-const KINDS: Record<string, Site['kind']> = { site0: 'cabin', site1: 'cabin', site2: 'cabin', site3: 'inn', site4: 'cabin', site5: 'cabin', site6: 'cabin' };
+const KINDS: Record<string, Site['kind']> = { site0: 'cabin', site1: 'cabin', site2: 'cabin', site3: 'inn', site4: 'cabin', site5: 'cabin', site6: 'cabin', site7: 'cabin' };
 
 /** Turn (x, z) about the origin by a (the same sense as THREE's applyAxisAngle about +y, so a yaw just adds a). */
 const turn = (x: number, z: number, a: number) => ({ x: x * Math.cos(a) + z * Math.sin(a), z: -x * Math.sin(a) + z * Math.cos(a) });
@@ -159,7 +165,7 @@ export function makeLayout(seed: number): Layout {
   const pose = (k: string): Pose => ({ x: g(k).x, z: g(k).z, yaw: g(k).yaw });
   const round = (k: string): Round => ({ x: g(k).x, z: g(k).z, R: g(k).R! });
   return {
-    sites: [0, 1, 2, 3, 4, 5, 6].map((i) => ({ kind: KINDS[`site${i}`], ...pose(`site${i}`) })),
+    sites: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ kind: KINDS[`site${i}`], ...pose(`site${i}`) })),
     forest: round('forest'),
     orchard: round('orchard'),
     field: pose('field'),
@@ -178,6 +184,7 @@ export function makeLayout(seed: number): Layout {
     rack: pose('rack'),
     innKegs: pose('innKegs'),
     cooperage: pose('cooperage'),
+    bakery: pose('bakery'),
     tables: [pose('table0'), pose('table1'), pose('table2')],
     flags: [pose('flag0'), pose('flag1')],
     lamp: pose('lamp'),
@@ -205,7 +212,7 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
   });
   const out: Record<string, Piece> = {};
   for (const [k, t] of Object.entries(TEMPLATE)) {
-    if (k === 'site1' || k === 'rack' || k === 'cooperage') continue;
+    if (k === 'site1' || k === 'rack' || k === 'cooperage' || k === 'bakery' || k === 'site7') continue;
     const m = move[t.d];
     let x = t.x, z = t.z, yaw = t.yaw;
     if (t.d !== 'yard') {
@@ -242,7 +249,33 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
     const x = pond.x + (inn.x - pond.x) * f + Math.cos(along) * side;
     const z = pond.z + (inn.z - pond.z) * f - Math.sin(along) * side;
     out.rack = { ...TEMPLATE.rack, x, z, yaw: along + rr(-0.3, 0.3) };
-    if (clear(out)) return placeCooperage(out, rr);
+    if (clear(out) && placeCooperage(out, rr)) return placeBakery(out, rr);
+  }
+  return null;
+}
+
+/** The bakery: on the way from the windmill to the inn (a little to one side), the baker's cabin beside it, the oven's mouth facing away from the cabin. */
+function placeBakery(out: Record<string, Piece>, rr: (a: number, b: number) => number) {
+  const m = out.windmill, inn = out.site3;
+  const along = Math.atan2(inn.x - m.x, inn.z - m.z);
+  const gap = TEMPLATE.bakery.r + TEMPLATE.site7.r + MARGIN + 0.1;
+  for (let k = 0; k < 40; k++) {
+    const f = rr(0.2, 0.8), side = rr(-3.5, 3.5);
+    const x = m.x + (inn.x - m.x) * f + Math.cos(along) * side;
+    const z = m.z + (inn.z - m.z) * f - Math.sin(along) * side;
+    const turn = along + (rr(0, 1) < 0.5 ? Math.PI / 2 : -Math.PI / 2) + rr(-0.4, 0.4); // the cabin to one side of the way
+    out.bakery = { ...TEMPLATE.bakery, x, z, yaw: turn + Math.PI };
+    out.site7 = { ...TEMPLATE.site7, x: x + Math.sin(turn) * gap, z: z + Math.cos(turn) * gap, yaw: turn + Math.PI + rr(-0.3, 0.3) };
+    if (clear(out)) return out;
+  }
+  // (nothing on the way fits: anywhere round the inn, then)
+  for (let k = 0; k < 40; k++) {
+    const a = rr(-Math.PI, Math.PI), d = rr(6, 10);
+    const x = inn.x + Math.sin(a) * d, z = inn.z + Math.cos(a) * d;
+    const turn = rr(-Math.PI, Math.PI);
+    out.bakery = { ...TEMPLATE.bakery, x, z, yaw: turn + Math.PI };
+    out.site7 = { ...TEMPLATE.site7, x: x + Math.sin(turn) * gap, z: z + Math.cos(turn) * gap, yaw: turn + Math.PI + rr(-0.3, 0.3) };
+    if (clear(out)) return out;
   }
   return null;
 }
@@ -267,7 +300,7 @@ function clear(out: Record<string, Piece>) {
   for (let i = 0; i < all.length; i++)
     for (let j = i + 1; j < all.length; j++) {
       const [ka, a] = all[i], [kb, b] = all[j];
-      const loose = (k: string) => k === 'site1' || k === 'rack' || k === 'cooperage'; // (placed on their own: checked against everything)
+      const loose = (k: string) => k === 'site1' || k === 'rack' || k === 'cooperage' || k === 'bakery' || k === 'site7'; // (placed on their own: checked against everything)
       const same = a.d === b.d && !loose(ka) && !loose(kb);
       if (same) continue;
       if (Math.hypot(a.x - b.x, a.z - b.z) < a.r + b.r + MARGIN) return false;

@@ -161,8 +161,9 @@ mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
 their order around the yard and gives each district its own direction,
 distance and turn. Each district keeps its own arrangement, so everything
 still works. The woodworker's cabin goes in the widest gap between
-districts, the cooperage between it and the yard, the drying rack on the
-way from the pond to the inn, and a layout
+districts, the cooperage beside it, the bakery and the baker's cabin on the
+way from the windmill to the inn, the drying rack on the way from the pond
+to the inn, and a layout
 where anything overlaps is thrown away and redrawn. Building looks, the
 forest, the orchard and the pond's shape vary with the seed too.
 
@@ -221,6 +222,15 @@ So far it has one chain:
   into the wind, and the sails turn as hard as it blows. While they turn it
   grinds the threshed grain into sacks of flour, set out on a rack by the
   floor. On a calm day the sails stand still and nothing's ground.
+- **The baker** keeps the bakery in flour (sacks from the windmill's rack)
+  and its oven in firewood, and bakes when there's room for the bread: puts
+  wood in the clay oven and fires it (it smokes hard while it heats), kneads
+  dough at the trough meanwhile, slides the loaves in with the long peel
+  once it's hot, and takes them out baked onto the shelf to cool. Then
+  carries bread to the inn's basket by the kitchen hatch.
+- **Firewood** has three users now. The inn's fire comes first: nobody else
+  takes any while its stack is low, or once the woodworkers are stocking it
+  for the evening. Then the baker's oven, then the cooper's staves.
 - **The cooper** (who lives with the woodworker) looks after the kegs. When
   one runs dry at the inn they fetch it back to their block and drive its
   hoops tight again. When there aren't enough empties to go round, they
