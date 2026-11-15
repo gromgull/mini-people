@@ -394,7 +394,9 @@ const village: Village = {
   lamp,
   greenSpot: (i) => greenSpot(i),
   bandPlaying: () => crowd.actors.some((a) => a.kind === 'fiddle' || a.kind === 'banjo' || a.kind === 'bass'),
-  chatOnGreen: (i) => chatOnGreen(i),
+  chatOnGreen: (i) => chatAround(i, Infinity, ON_GREEN),
+  chatNear: (i, near) => chatAround(i, near, STOOD_ABOUT),
+  sight: (i) => sight(i),
   chat: (i, j, seconds) => {
     // (only with someone who's there for it: not asleep, not walking off somewhere)
     if ([i, j].some((k) => jobs[k].asleep || (crowd.actors[k].kind !== 'dine' && crowd.motions[k].speed > 0.1))) return;
@@ -514,25 +516,57 @@ function talk() {
   }
 }
 
+const ON_GREEN = new Set(['at the dance']);
+/** Steps where someone's stood (or sat) about with nothing on, and would stop for a word. */
+const STOOD_ABOUT = new Set(['at the dance', 'looking about', 'sitting']);
+
 /**
- * On the green with no music: a chat with someone else there who's free
- * (stood about or smoking, not already talking, not just done talking),
- * the nearest of them.
+ * A chat with someone who's free for one: in one of these steps, stood about
+ * (or smoking), not already talking, not just done talking, within `near`
+ * metres; the nearest of them.
  */
-function chatOnGreen(i: number) {
+function chatAround(i: number, near: number, steps: Set<string>) {
   const free = (k: number) => {
     const a = crowd.actors[k];
-    return jobs[k].doing === 'at the dance' && (a.kind === null || a.kind === 'pipe') && a.talkingTo < 0 && simTime >= chattedUntil[k];
+    return steps.has(jobs[k].doing) && (a.kind === null || a.kind === 'pipe') && a.talkingTo < 0 && simTime >= chattedUntil[k];
   };
   if (!free(i)) return;
   const me = walkers[i];
-  let best = -1, bestD = Infinity;
+  let best = -1, bestD = near;
   for (let k = 0; k < people.length; k++) {
     if (k === i || !free(k)) continue;
     const d = Math.hypot(walkers[k].x - me.x, walkers[k].z - me.z);
     if (d < bestD) [best, bestD] = [k, d];
   }
   if (best >= 0) chat(i, best, 3 + Math.random() * 4);
+}
+
+// ---------------------------------------------------------------- the sights
+
+/**
+ * Places to stroll to and stand looking at of an idle moment: the pond's
+ * shore, the orchard's and the forest's edges, the mill, the woodyard, the
+ * drying rack, the green. (Where they stand: how far out from its middle.)
+ */
+const SIGHTS = [
+  { x: L.pond.x, z: L.pond.z, r: pond.maxR + 0.7 },
+  { x: L.orchard.x, z: L.orchard.z, r: L.orchard.R + 0.7 },
+  { x: L.forest.x, z: L.forest.z, r: L.forest.R + 0.9 },
+  { x: L.mill.x, z: L.mill.z, r: 1.6 },
+  { x: L.horse.x, z: L.horse.z, r: 1.8 },
+  { x: L.rack.x, z: L.rack.z, r: 1.4 },
+  { x: L.green.x, z: L.green.z, r: L.green.R * 0.6 },
+];
+
+/** One of the sights to go and look at (not the one they're at): on the near side of it, facing it. */
+function sight(i: number) {
+  const me = walkers[i];
+  const spots = SIGHTS.map((g) => {
+    const a = Math.atan2(me.x - g.x, me.z - g.z) + (Math.random() - 0.5) * 1.4;
+    const x = g.x + Math.sin(a) * g.r, z = g.z + Math.cos(a) * g.r;
+    return { x, z, yaw: Math.atan2(g.x - x, g.z - z) };
+  }).filter((p) => Math.hypot(p.x - me.x, p.z - me.z) > 5);
+  return spots[Math.floor(Math.random() * spots.length)] ?? { x: me.x, z: me.z, yaw: me.yaw };
 }
 
 /** Held for a chat: stand and turn to face whoever they're talking to. */

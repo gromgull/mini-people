@@ -115,6 +115,10 @@ export interface Village {
   bandPlaying(): boolean;
   /** Waiting on the green: strike up a chat with someone else there who's free for one (if anyone is). */
   chatOnGreen(i: number): void;
+  /** Stood about: a chat with someone free for one within `near` metres (if anyone is). */
+  chatNear(i: number, near: number): void;
+  /** Somewhere to stroll to and look at (one of the sights, not where they are now). */
+  sight(i: number): { x: number; z: number; yaw: number };
   /** Two people have a word: they stop where they are (if walking) and talk for a while. */
   chat(i: number, j: number, seconds: number): void;
   /** Bookkeeping for the overlay and the tests. */
@@ -147,8 +151,8 @@ export interface Worker {
   gear?: { basket: Basket; ladder: StepLadder };
 }
 
-/** Steps that aren't work: sitting about, playing, a pipe. */
-const LEISURE = new Set(['to bench', 'sitting', 'playing', 'smoking', 'getting up']);
+/** Steps that aren't work: sitting about, playing, a pipe, a stroll. */
+const LEISURE = new Set(['to bench', 'sitting', 'playing', 'smoking', 'getting up', 'strolling', 'looking about']);
 /** Steps of moving an armful from one place to a stack. */
 const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
 /** Steps of the evening: supper at the inn, music and dancing on the green, home, sleep. */
@@ -514,15 +518,22 @@ export abstract class Job {
     this.restAfter = v.time + 5 + Math.random() * 6;
     const r = Math.random();
     const me = this.w.walker;
-    // their own bench if they have one, else any free one that's nobody's
-    const mine = v.benches.filter((b) => b.owner === this.w.i);
-    const free = (mine.length ? mine : v.benches.filter((b) => b.owner < 0)).filter((b) => b.bench.claimedBy < 0);
-    if (free.length && r < 0.6) {
+    // their own bench if they have one, else any free one (someone else's will do, for a while)
+    const mine = v.benches.filter((b) => b.owner === this.w.i && b.bench.claimedBy < 0);
+    const free = mine.length ? mine : v.benches.filter((b) => b.bench.claimedBy < 0);
+    if (free.length && r < (mine.length ? 0.3 : 0.18)) {
       const b = free.reduce((a, b) => (Math.hypot(b.bench.x - me.x, b.bench.z - me.z) < Math.hypot(a.bench.x - me.x, a.bench.z - me.z) ? b : a));
       b.bench.claimedBy = this.w.i;
       const at = b.bench.sitSpot(0.22, this.w.actor.sitFit());
       this.go(at.x, at.z, at.yaw, b.obstacle, 'ahead');
       this.step = { kind: 'to bench', bench: b };
+      return true;
+    }
+    if (r < 0.55) {
+      // a stroll: off to one of the sights to stand and look about a while
+      const at = v.sight(this.w.i);
+      this.go(at.x, at.z, at.yaw);
+      this.step = { kind: 'strolling' };
       return true;
     }
     if (r < 0.85) return this.pastime(false);
@@ -559,7 +570,8 @@ export abstract class Job {
         } else if (this.arrived) {
           a.sitDown({ seatH: bench!.fit.h });
           this.nextTune = v.time + 2 + Math.random() * 4;
-          this.step = { ...s, kind: 'sitting' };
+          // a sit, not the rest of the day
+          this.step = { ...s, kind: 'sitting', until: v.time + 15 + Math.random() * 20 };
         }
         return;
       case 'sitting':
@@ -567,6 +579,15 @@ export abstract class Job {
           if (a.busy) a.stopPlaying(true);
           a.getUp();
           this.step = { ...s, kind: 'getting up' };
+          return;
+        }
+        if (v.time >= (s.until as number)) {
+          // that'll do: finish the tune (or the pipe), then up and on
+          if (a.busy) a.stopPlaying();
+          else {
+            a.getUp();
+            this.step = { ...s, kind: 'getting up' };
+          }
           return;
         }
         if (this.wasPlaying && !a.busy) {
@@ -577,6 +598,27 @@ export abstract class Job {
         if (!a.busy && a.seated && v.time >= this.nextTune) {
           if (!this.pastime(true)) this.nextTune = v.time + 10;
         }
+        return;
+      case 'strolling':
+        if (work) {
+          this.w.walker.stop();
+          this.step = { kind: 'idle' };
+        } else if (this.arrived) {
+          this.step = { kind: 'looking about', until: v.time + 5 + Math.random() * 7 };
+          if (this.w.pipe && Math.random() < 0.4) a.start('pipe', { smoke: 6 + Math.random() * 5 });
+        }
+        return;
+      case 'looking about':
+        if (work || v.time >= (s.until as number)) {
+          if (a.kind === 'pipe') a.stopPlaying(true);
+          if (!a.busy) {
+            this.restAfter = v.time + 2 + Math.random() * 4;
+            this.step = { kind: 'idle' };
+          }
+          return;
+        }
+        // anyone else stood about nearby? a word with them
+        if (Math.random() < 0.02) v.chatNear(this.w.i, 3);
         return;
       case 'playing':
       case 'smoking':

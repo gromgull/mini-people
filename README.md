@@ -235,9 +235,12 @@ So far it has one chain:
   people meeting on their way now and then stop for a chat before going on.
 - **Smoke** rises from the inn's chimney while its fire has firewood, and
   thinly from the cabins.
-- **Spare time:** with nothing to do, people now and then sit on a free
-  bench (their own first, if they have one), play their instrument or
-  smoke a pipe. Who plays what is the seed's deal, not the job's: always
+- **Spare time:** with nothing to do, people now and then sit a while on a
+  free bench (their own first, if they have one; anyone's will do), stroll
+  over to one of the sights (the pond's shore, the orchard's or the
+  forest's edge, the mill, the woodyard, the drying rack, the green) and
+  stand looking at it, stopping for a word with anyone else stood about
+  nearby, or play their instrument or smoke a pipe. Who plays what is the seed's deal, not the job's: always
   one double bass (played standing), one or two fiddles and one or two
   banjos, among any of the villagers. Some of them (about a third) smoke a
   pipe, standing or seated, with a wisp off the bowl and a breath of smoke
