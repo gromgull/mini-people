@@ -23,9 +23,10 @@
 //     picked, (given time) cider made, and the regular served
 import { open } from './harness.mjs';
 
-const [seconds = '600', seed = '1'] = process.argv.slice(2);
+// (any further arguments are added to the address: e.g. trip=40 for forty times the trips)
+const [seconds = '600', seed = '1', ...extra] = process.argv.slice(2);
 const { page, errors, url, ready, close } = await open({ viewport: { width: 320, height: 240 } });
-await page.goto(url(`paused&nogui&seed=${seed}`, 'index.html'));
+await page.goto(url(['paused&nogui', `seed=${seed}`, ...extra].join('&'), 'index.html'));
 await ready();
 
 const problems = [];
@@ -34,6 +35,7 @@ const result = await page.evaluate((secs) => {
   const bad = [];
   const since = new Map(); // job index → [step, since]
   const dogDid = new Set(); // what the dog got up to
+  const lying = new Map(); // item → since when it's been on the ground
   for (let s = 1; s <= secs; s++) {
     m.step(1);
     const d = m.debug();
@@ -55,11 +57,27 @@ const result = await page.evaluate((secs) => {
     });
     if (d.horse.log && !d.logs.includes(d.horse.log)) say('the sawhorse holds a log that no longer exists');
     // the sawhorse is claimed only by a woodworker in the middle of sawing a log
-    const sawing = ['to pile', 'lifting', 'to sawhorse', 'loading', 'sawing'];
+    const sawing = ['to pile', 'lifting', 'to sawhorse', 'loading', 'sawing', 'tripped', 'picking up'];
     if (d.horse.claimedBy >= 0 && !(d.jobs[d.horse.claimedBy]?.role === 'woodworker' && sawing.includes(d.jobs[d.horse.claimedBy].doing))) say(`the sawhorse is claimed by ${d.horse.claimedBy}, who's "${d.jobs[d.horse.claimedBy]?.doing}"`);
     if (d.horse.log && d.horse.claimedBy < 0) say('a log on the sawhorse that nobody has claimed');
     // items (firewood, fish) and the stores they're kept in
     const v = d.village;
+    // nothing dropped stays dropped: whoever tripped picks it up again
+    for (const pc of v.items) {
+      if (pc.place.at !== 'ground') {
+        lying.delete(pc);
+        continue;
+      }
+      if (!lying.has(pc)) lying.set(pc, s);
+      else if (s - lying.get(pc) > 45) {
+        say(`a ${pc.kind} (${pc.id}) has been lying on the ground for ${s - lying.get(pc)}s`);
+        lying.set(pc, s);
+      }
+    }
+    for (const l of d.logs) {
+      if (l.place.at === 'ground' && l.claimedBy >= 0 && d.jobs[l.claimedBy]?.doing !== 'tripped' && d.jobs[l.claimedBy]?.doing !== 'picking up' && d.jobs[l.claimedBy]?.doing !== 'to log')
+        say(`log ${l.id} lies claimed by ${l.claimedBy}, who's "${d.jobs[l.claimedBy]?.doing}"`);
+    }
     for (const pc of v.items) {
       const p = pc.place;
       if (p.at === 'stack' && p.stack.items[p.slot] !== pc) say(`piece ${pc.id} says ${p.stack.name} slot ${p.slot}, slot has ${p.stack.items[p.slot]?.id}`);
@@ -107,7 +125,8 @@ const result = await page.evaluate((secs) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
       else if (!d.linger.has(j.doing) && j.role !== 'regular' && s - at > 90) {
-        say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
+        const w = d.walkers[i], g = w.goal, a = d.actors[i];
+        say(`${j.role} stuck in "${j.doing}" for ${s - at}s: at (${w.x.toFixed(2)}, ${w.z.toFixed(2)})${g ? ` heading for (${g.x.toFixed(2)}, ${g.z.toFixed(2)})${g.via ? ' via' : ''}${g.ignore ? ' ignoring one' : ''}` : ''}, speed ${d.motions[i].speed.toFixed(2)}, doing ${a.kind ?? 'nothing'}${Number.isFinite(j.trippedAt) ? `, tripped ${Math.round(m.time - j.trippedAt)}s ago` : ''}`);
         since.set(i, [j.doing, s]);
       }
     });
@@ -144,6 +163,7 @@ console.log(`${seconds}s simulated (seed ${seed}): felled ${result.stats.felled}
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
 console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
+console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);
 console.log(problems.length ? `✗ ${problems.length} problem(s):\n  ${problems.join('\n  ')}` : '✓ consistent throughout');

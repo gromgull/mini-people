@@ -496,7 +496,7 @@ const village: Village = {
   items,
   newItem,
   removeItem,
-  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
+  stats: { felled: 0, sawn: 0, delivered: 0, burned: 0, caught: 0, dried: 0, fishIn: 0, eaten: 0, picked: 0, milled: 0, kegs: 0, kegsIn: 0, poured: 0, drunk: 0, shaved: 0, kegsMade: 0, kegsBack: 0, hooped: 0, trips: 0, pickedUp: 0, meals: 0, hungry: 0, slept: 0, evening: 0, lamps: 0 },
 };
 const jobs: Job[] = people.map((p, i) => {
   const pk = VILLAGERS[i].gear;
@@ -673,6 +673,26 @@ function simulateSteps(n: number, dt: number) {
   placeItems();
 }
 
+/**
+ * Now and then someone walking along trips and goes flat: about once in
+ * TRIP_EVERY seconds of brisk walking (×1/?trip=). Empty-handed, or with a log
+ * or an armful on the way somewhere (then it all goes down, to be picked up
+ * again: see Job.recoverStep). Not with the ladder or the basket, and not
+ * mid-way through picking something up or putting it down.
+ */
+const TRIP_EVERY = 1200 / num('trip', 1);
+function canTrip(i: number) {
+  const a = crowd.actors[i];
+  const j = jobs[i];
+  if (j.asleep || a.onSeat || crowd.motions[i].speed < WALK_SPEED * 0.6) return false;
+  if (a.kind === null) return !j.carrying && !j.armful.length;
+  if (a.kind === 'haul') return !!j.carrying && (j.doing === 'to pile' || j.doing === 'to sawhorse');
+  if (a.kind === 'armful') return j.armful.length > 0 && j.doing === 'delivering';
+  return false;
+}
+/** Down (the fall has the body) last step: once it lets go, they walk on from wherever they got up. */
+const wasDown = VILLAGERS.map(() => false);
+
 function simulate(dt: number) {
   simTime += dt;
   village.time = simTime;
@@ -692,7 +712,19 @@ function simulate(dt: number) {
       m.targetSpeed = 0;
       faceTalker(i, dt);
     } else m.targetSpeed = a.holdSpeed ? 0 : w.think(dt, obs, allWalkers, WALK_SPEED * crowd.styleOf(p).speedK);
+    if (canTrip(i) && Math.random() < dt / TRIP_EVERY) {
+      a.start('fall'); // (no push: a trip, pitching forward at their own pace)
+      village.stats.trips++;
+      jobs[i].trippedAt = simTime;
+    }
     crowd.advance(i, dt);
+    if (a.rootLocked) wasDown[i] = true;
+    else if (wasDown[i]) {
+      wasDown[i] = false;
+      w.x = p.root.position.x;
+      w.z = p.root.position.z;
+      w.yaw = p.root.rotation.y;
+    }
     if (!a.rootLocked) {
       w.move(m.speed, dt, obs, allWalkers);
       const yaw = w.yaw + (pose?.spin ?? 0);

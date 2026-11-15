@@ -215,6 +215,11 @@ So far it has one chain:
   raise a new keg on the block and hammer its hoops on.
 - **The regular** has no job. They sit at the inn's table, sip cider every
   so often, and wait when the tankard's empty.
+- **Trips:** now and then (about once in twenty minutes of walking each,
+  `?trip=n` for n times as often) someone walking along trips and goes flat,
+  and anyone nearby stops to stare. Whatever they were carrying goes down
+  with them: an armful scatters round their feet, a log lands beside them.
+  Once they're up they pick it up again and carry on where they left off.
 - **The day:** the village keeps its own clock on simulation time (a day is
   12 real minutes at ×1, `?daymin=` to change it; the evening runs at half
   speed). Work runs from 06:30. At 16:00 everyone finishes what they're doing
@@ -284,7 +289,7 @@ and the haul and the saw use the actual log.
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
 | `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
-| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn |
+| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none) |
 
 The panel at the bottom left (hidden at first: tick "who's doing what" in
 the menu, or `?panel=1`) shows who's doing what, the woodpile and the

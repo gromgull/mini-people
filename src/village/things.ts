@@ -411,6 +411,11 @@ export function setDry(mesh: THREE.Object3D, dried: boolean) {
 // ---------------------------------------------------------------- apples and cider
 
 export const APPLE_R = 0.065;
+
+/** How high an item's middle sits lying on the ground (dropped). */
+export function restY(kind: Item['kind']) {
+  return { wood: PIECE_R * 0.5, fish: 0.02, apple: APPLE_R, keg: KEG_R, mug: 0, meal: 0 }[kind];
+}
 export { KEG_L, KEG_R };
 
 /** An apple (item mesh). */

@@ -7,6 +7,7 @@ import type { InnTable, Seat } from './inn';
 import type { Pond } from '../pond';
 import type { ItemPose } from '../armful';
 import { PIECE_L, PIECE_R } from '../firewood';
+import { restY } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
 
 /**
@@ -28,8 +29,10 @@ import { type Obstacle, type Walker, wrap } from './walk';
  *     The miller fills only kegs the cooper has ready.
  *
  * Claims (on trees and logs) keep two people from going for the same thing.
- * If an action gets interrupted (someone falls over), whatever they were
- * carrying is dropped where they are and the claims are let go.
+ * Anyone can trip now and then while walking (see the village's trips). An
+ * armful goes down round their feet, a log beside them; once they're up
+ * they pick it up again and carry on, still holding whatever room or claim
+ * they had for it.
  */
 
 export const PILE_WANT = 4;
@@ -156,6 +159,8 @@ export interface Village {
     picked: number; milled: number; kegs: number; kegsIn: number; poured: number; drunk: number;
     /** The cooper: firewood shaved into staves, new kegs raised, empties brought back, hoops tightened. */
     shaved: number; kegsMade: number; kegsBack: number; hooped: number;
+    /** Trips (falls while walking), and things picked up again after one. */
+    trips: number; pickedUp: number;
     meals: number; hungry: number; slept: number;
     /** Tunes struck up and dances begun on the green; times the lamp was lit. */
     evening: number; lamps: number;
@@ -256,6 +261,8 @@ export type StepKind =
   | 'to the table'
   | 'to the tree'
   | 'to the water'
+  | 'tripped'
+  | 'picking up'
   | 'to the horse'
   | 'onto the horse'
   | 'shaving'
@@ -269,6 +276,7 @@ export type StepKind =
 type Step = { kind: StepKind; [k: string]: unknown };
 
 const _v = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 const facing = (fromX: number, fromZ: number, toX: number, toZ: number) => Math.atan2(toX - fromX, toZ - fromZ);
 
 /** Logs lying on the ground that nobody is fetching. */
@@ -362,6 +370,8 @@ export abstract class Job {
     return this.step.kind;
   }
 
+  /** When they last tripped (simulation seconds; −∞ = never). */
+  trippedAt = -Infinity;
   /** Asleep at home (hidden indoors). */
   asleep = false;
   /** Had supper today. */
@@ -374,6 +384,10 @@ export abstract class Job {
       if (v.phase === 'work') this.wake();
       return;
     }
+    if (this.step.kind === 'tripped' || this.step.kind === 'picking up') {
+      this.recoverStep(v);
+      return;
+    }
     if (EVENING.has(this.step.kind)) {
       this.eveningStep(v);
       return;
@@ -384,27 +398,76 @@ export abstract class Job {
     else if (DELIVERY.has(this.step.kind)) this.deliveryStep(v);
     else this.run(v);
     const a = this.w.actor;
-    // an armful interrupted the same way: down it goes, where they stand
+    // tripped with an armful (nothing else cuts one short): it all goes down
+    // round their feet, to be picked up again (the room it was going to stays theirs)
     if (this.armful.length && a.kind !== 'armful' && this.step.kind !== 'stacking') {
-      const to = this.step.to as Store | undefined;
-      if (to) this.unbook(to, 'incoming', this.armful.length);
-      for (const p of this.armful) p.place = { at: 'ground', pos: p.mesh.position.clone().setY(PIECE_R * 0.5), quat: p.mesh.quaternion.clone() };
+      const to = this.step.to as Store;
+      const at = this.w.root.position;
+      const items = this.armful;
+      for (const p of items) {
+        const ang = Math.random() * Math.PI * 2, d = 0.12 + Math.random() * 0.25;
+        const pos = new THREE.Vector3(at.x + Math.sin(ang) * d, restY(p.kind), at.z + Math.cos(ang) * d);
+        const quat = new THREE.Quaternion().setFromAxisAngle(_up, Math.random() * Math.PI * 2);
+        p.tween = { pos: p.mesh.position.clone(), quat: p.mesh.quaternion.clone(), t0: v.time, dur: 0.35 };
+        p.place = { at: 'ground', pos, quat };
+      }
       this.armful = [];
-      this.step = { kind: 'idle' };
+      this.step = { kind: 'tripped', items, to };
       this.w.walker.stop();
     }
-    // interrupted while carrying (tripped, shoved): drop it here (but a
-    // carry that just ended because it was put down is the routine's to handle)
+    // tripped with a log on the shoulder: down it goes beside them, still theirs
+    // (but a carry that just ended because it was put down is the routine's to handle)
     if (this.carrying && a.kind !== 'haul' && this.step.kind !== 'dropping' && this.step.kind !== 'loading') {
       const l = this.carrying;
       const r = this.w.root;
-      l.place = { at: 'ground', x: r.position.x + Math.sin(r.rotation.y) * 0.4, z: r.position.z + Math.cos(r.rotation.y) * 0.4, yaw: r.rotation.y + Math.PI / 2 };
-      l.claimedBy = -1;
+      l.place = { at: 'ground', x: r.position.x + Math.sin(r.rotation.y) * 0.3, z: r.position.z + Math.cos(r.rotation.y) * 0.3, yaw: r.rotation.y + Math.PI / 2 };
       this.carrying = null;
-      this.dropped(v);
-      this.step = { kind: 'idle' };
+      this.step = { kind: 'tripped', log: l };
       this.w.walker.stop();
     }
+  }
+
+  /** Back up after a trip: go to whatever they dropped, pick it up, and carry on. */
+  private recoverStep(v: Village) {
+    const s = this.step;
+    const a = this.w.actor;
+    const l = s.log as Log | undefined;
+    const items = s.items as Item[] | undefined;
+    if (s.kind === 'tripped') {
+      if (a.kind === 'fall') return; // still down, or getting up
+      const me = this.w.walker;
+      if (l) {
+        const at = besideLog(l, me.x, me.z);
+        this.go(at.x, at.z, at.yaw);
+      } else {
+        // stand by the middle of the spill, on the side they're on, facing it
+        const c = new THREE.Vector3();
+        for (const p of items!) c.add((p.place as { pos: THREE.Vector3 }).pos);
+        c.divideScalar(items!.length);
+        let dx = me.x - c.x, dz = me.z - c.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 1e-3) [dx, dz] = [Math.sin(me.yaw), Math.cos(me.yaw)];
+        else [dx, dz] = [dx / d, dz / d];
+        const x = c.x + dx * 0.42, z = c.z + dz * 0.42;
+        this.go(x, z, facing(x, z, c.x, c.z));
+      }
+      this.step = { ...s, kind: 'picking up' };
+      return;
+    }
+    // picking up
+    if (!this.arrived) return;
+    v.stats.pickedUp++;
+    if (l) {
+      const pl = l.place as { x: number; z: number; yaw: number };
+      this.lift(l, { pos: new THREE.Vector3(pl.x, LOG_R, pl.z), yaw: pl.yaw });
+      this.step = { kind: 'lifting' }; // (and on with their own routine from there)
+      return;
+    }
+    const poses = items!.map((p) => {
+      const pl = p.place as { pos: THREE.Vector3; quat: THREE.Quaternion };
+      return { pos: pl.pos.clone(), quat: pl.quat.clone() };
+    });
+    this.gather(items!, poses, s.to as Store);
   }
 
   protected abstract run(v: Village): void;
@@ -808,8 +871,6 @@ export abstract class Job {
     }
   }
   /** Undo bookkeeping after an interrupted carry. */
-  protected dropped(_v: Village) {}
-
   /**
    * Walk to (x, z) and face yaw. With `ignore`, approach from 0.55 behind
    * (or ahead, for a bench you back onto) and step in, ignoring that obstacle
@@ -843,10 +904,6 @@ export class Lumberjack extends Job {
 
   constructor(w: Worker) {
     super(w, 'lumberjack');
-  }
-
-  protected dropped(v: Village) {
-    this.unbook(v.pile, 'incoming', 1);
   }
 
   protected hasWork(v: Village) {
@@ -1037,11 +1094,6 @@ export class Woodworker extends Job {
     if (v.horse.claimedBy === this.w.i) v.horse.claimedBy = -1;
   }
 
-  protected dropped(v: Village) {
-    // tripped with the log on the way to the sawhorse: no sawing, so no room needed for what it'd make
-    this.unbook(v.yard, 'incoming', PIECES_PER_LOG);
-    this.letGo(v);
-  }
 
   /** How many pieces the inn could do with right now (and we have to bring). */
   private innWants(v: Village) {
