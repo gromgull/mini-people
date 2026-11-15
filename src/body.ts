@@ -72,7 +72,7 @@ const merge = (geos: THREE.BufferGeometry[]) => {
 };
 
 /** Tapered tube hanging down from the joint (0 → -len), with a ball at the joint. */
-function limb(len: number, rTop: number, rBot: number, segs: number, row: number, cap = true) {
+export function limb(len: number, rTop: number, rBot: number, segs: number, row: number, cap = true) {
   const cyl = new THREE.CylinderGeometry(rTop, rBot, len, segs, 1, true);
   cyl.translate(0, -len / 2, 0);
   const parts: THREE.BufferGeometry[] = [withRow(cyl, row)];
@@ -80,7 +80,7 @@ function limb(len: number, rTop: number, rBot: number, segs: number, row: number
   return merge(parts);
 }
 
-function ball(r: number, segs: number, row: number) {
+export function ball(r: number, segs: number, row: number) {
   return withRow(new THREE.SphereGeometry(r, segs, Math.max(4, segs / 2 + 1)), row);
 }
 

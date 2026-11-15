@@ -33,6 +33,8 @@ export const PALETTE = {
   roof: ['#a24a30', '#6e5a48', '#6f8442', '#7d6a55', '#86392a', '#57473a', '#5d7238'], // clay tiles, shingles, turf, weathered; then darker courses for tiles, shingles, turf
   paint: ['#3d6e8c', '#8a3a32', '#4f7a40', '#c9a542'], // shutters and doors
   pane: ['#2c3844', '#f4c86a'], // dark glass, lamplit
+  fur: ['#ead8b4', '#c99a5c', '#a5622f', '#5e3b26', '#2c2622', '#8f8a84', '#f3efe6'], // cream, tan, red-brown, chocolate, black, grey, white
+  nose: ['#1d1716'],
 } as const;
 
 export type ColorGroup = keyof typeof PALETTE;

@@ -7,6 +7,7 @@ import { PARTS_LAYER } from './skin';
 import { Trees } from './trees';
 import { Pond } from './pond';
 import { Houses } from './houses';
+import { buildDog, type Quadruped, randomDog } from './quadruped';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -70,6 +71,19 @@ const houses = new Houses(toon, outline, stage.shadowMat);
 scene.add(houses.group);
 const selectRing = new THREE.Mesh(selectGeo, selectMat);
 selectRing.position.y = 0.004;
+
+// ?dogs=n: a row of dogs (seeds 1…n, or from ?dogseed), standing, to look at the quadruped rig
+const dogs: Quadruped[] = [];
+for (let k = 0; k < num('dogs', 0); k++) {
+  const dog = buildDog(randomDog(num('dogseed', 1) + k), toon, outline, { skin: stage.skinMats });
+  dog.root.position.set((k - (num('dogs', 0) - 1) / 2) * 0.6, 0, 1.2);
+  dog.root.rotation.y = num('dogyaw', 0.9);
+  const c = stage.makeCaster(dog.dims.bodyLen * 0.9, dog.height);
+  dog.root.add(c.pivot);
+  dog.root.userData.shadow = c;
+  scene.add(dog.root);
+  dogs.push(dog);
+}
 
 function slotTransform(i: number) {
   const cols = Math.ceil(Math.sqrt(settings.count * 1.5));
@@ -686,6 +700,7 @@ function frame(frameStart: number) {
   houses.group.visible = settings.houses;
   pond.update(simTime);
   crowd.orientShadows();
+  for (const d of dogs) stage.orient(d.root.userData.shadow, d.root.rotation.y);
   if (trees.group.visible) for (const c of trees.casters) stage.orient(c, 0);
   if (houses.group.visible) houses.updateShadows(stage.lightWorld, settings.shadowLength);
   const tgt = controls.target;
