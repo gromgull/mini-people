@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Quadruped } from '../quadruped';
 import { QuadAnimator, type QuadMotion, dogSpeeds } from '../quadgait';
 import { type Obstacle, Walker } from './walk';
+import { AT_SUPPER, ON_GREEN, type StepKind } from './jobs';
 
 /**
  * The village dog. It belongs to someone, and what it does follows them:
@@ -21,7 +22,7 @@ export interface DogWorld {
   time: number;
   dt: number;
   /** Where everyone is (their walkers), and how tall (for looking at their faces). */
-  people: { walker: Walker; root: THREE.Object3D; height: number; speed: number; doing: string; asleep: boolean }[];
+  people: { walker: Walker; root: THREE.Object3D; height: number; speed: number; doing: StepKind; asleep: boolean }[];
   owner: number;
   /** The owner's front door. */
   home: { x: number; z: number; yaw: number };
@@ -35,8 +36,6 @@ export interface DogWorld {
   sound: (kind: 'woof' | 'step') => void;
 }
 
-const SUPPER = new Set(['waiting for supper', 'eating']);
-const GREEN = new Set(['to the dance', 'at the dance']);
 
 export class VillageDog {
   readonly anim: QuadAnimator;
@@ -99,7 +98,7 @@ export class VillageDog {
         this.settle('lie', null, 0, Infinity);
         this.anim.eyesShut = true;
       }
-    } else if (SUPPER.has(o.doing)) {
+    } else if (AT_SUPPER.has(o.doing)) {
       // supper: sat by the owner's place, begging
       if (this.doing !== 'begging' || (me.arrived && dOwner > 1.2)) {
         this.doing = 'begging';
@@ -111,7 +110,7 @@ export class VillageDog {
         this.task = 'sit';
         this.settle('sit', face(o), 0.6, Infinity);
       }
-    } else if (GREEN.has(o.doing)) {
+    } else if (ON_GREEN.has(o.doing)) {
       // the green: about among the dancers
       this.doing = 'on the green';
       if (w.time >= this.next && (me.arrived || !me.goal) && !this.pending) {

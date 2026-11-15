@@ -99,6 +99,8 @@ export interface Village {
   /** The inn's tables and their seats. */
   tables: InnTable[];
   seats: Seat[];
+  /** The regular's place (their tankard's spot is in front of it); diners use it at supper too, around them. */
+  regularSeat: Seat;
   /** The kitchen hatch: where the innkeeper stands to cook, and the counter. */
   hatch: { stand: { x: number; z: number; yaw: number }; counter: THREE.Vector3 };
   /** A plate of supper has just been put down at this seat. */
@@ -152,13 +154,85 @@ export interface Worker {
 }
 
 /** Steps that aren't work: sitting about, playing, a pipe, a stroll. */
-const LEISURE = new Set(['to bench', 'sitting', 'playing', 'smoking', 'getting up', 'strolling', 'looking about']);
+const LEISURE = new Set<StepKind>(['to bench', 'sitting', 'playing', 'smoking', 'getting up', 'strolling', 'looking about']);
 /** Steps of moving an armful from one place to a stack. */
-const DELIVERY = new Set(['fetching', 'gathering', 'delivering', 'stacking']);
+const DELIVERY = new Set<StepKind>(['fetching', 'gathering', 'delivering', 'stacking']);
 /** Steps of the evening: supper at the inn, music and dancing on the green, home, sleep. */
-const EVENING = new Set(['to supper', 'waiting for supper', 'eating', 'leaving the table', 'to the dance', 'at the dance', 'going home']);
+const EVENING = new Set<StepKind>(['to supper', 'waiting for supper', 'eating', 'leaving the table', 'to the dance', 'at the dance', 'going home']);
 
-type Step = { kind: string; [k: string]: unknown };
+// (named groups of steps the rest of the village asks about: the talk, the dog, the test)
+/** Sat at the inn's table for supper. */
+export const AT_SUPPER = new Set<StepKind>(['waiting for supper', 'eating']);
+/** Out on the green of an evening, or on the way. */
+export const ON_GREEN = new Set<StepKind>(['to the dance', 'at the dance']);
+/** Stood (or sat) about with nothing on: up for a word. */
+export const STOOD_ABOUT = new Set<StepKind>(['at the dance', 'looking about', 'sitting']);
+/** Steps it's normal to stay in a long while (the rest should move on: the village test checks). */
+export const LINGER = new Set<StepKind>(['idle', 'sitting', 'playing', 'smoking', 'asleep', 'waiting for supper', 'at the dance', 'waiting for a refill', 'drinking cider']);
+
+/** Everything anyone can be doing (one name per step of every routine: a typo or a rename is a compile error). */
+export type StepKind =
+  | 'asleep'
+  | 'at the dance'
+  | 'carrying the ladder'
+  | 'chopping'
+  | 'cooking'
+  | 'cranking'
+  | 'delivering'
+  | 'drawing cider'
+  | 'drinking cider'
+  | 'dropping'
+  | 'eating'
+  | 'fetching'
+  | 'fishing'
+  | 'gathering'
+  | 'getting up'
+  | 'going home'
+  | 'idle'
+  | 'leaving the table'
+  | 'letting go'
+  | 'lifting'
+  | 'lifting the basket'
+  | 'lighting the lamp'
+  | 'loading'
+  | 'looking about'
+  | 'picking'
+  | 'playing'
+  | 'putting out the lamp'
+  | 'sawing'
+  | 'setting down'
+  | 'setting up the ladder'
+  | 'sitting'
+  | 'smoking'
+  | 'stacking'
+  | 'strolling'
+  | 'taking the basket'
+  | 'taking the ladder'
+  | 'tipping'
+  | 'to apple'
+  | 'to basket'
+  | 'to bench'
+  | 'to full basket'
+  | 'to ladder'
+  | 'to log'
+  | 'to pile'
+  | 'to sawhorse'
+  | 'to supper'
+  | 'to the crank'
+  | 'to the dance'
+  | 'to the hatch'
+  | 'to the kegs'
+  | 'to the lamp'
+  | 'to the mill'
+  | 'to the spout'
+  | 'to the table'
+  | 'to the tree'
+  | 'to the water'
+  | 'to tree'
+  | 'waiting for a refill'
+  | 'waiting for supper';
+/** What they're doing, and whatever that step needs to remember. */
+type Step = { kind: StepKind; [k: string]: unknown };
 
 const _v = new THREE.Vector3();
 const facing = (fromX: number, fromZ: number, toX: number, toZ: number) => Math.atan2(toX - fromX, toZ - fromZ);
@@ -376,7 +450,7 @@ export abstract class Job {
           this.armful = [];
           this.step = { kind: 'idle' };
           v.served();
-          const regular = v.seats[0].diner;
+          const regular = v.regularSeat.diner;
           if (regular >= 0) v.chat(this.w.i, regular, 2 + Math.random());
           return;
         }
@@ -1756,7 +1830,7 @@ export class Regular extends Job {
     switch (s.kind) {
       case 'idle': {
         // their usual place, in from the end of the bench (between it and the table)
-        const seat = v.seats[0];
+        const seat = v.regularSeat;
         const at = seat.table.sitFor(seat, a);
         this.w.walker.go({ x: at.x, z: at.z, yaw: at.yaw, ignore: seat.table.obstacle, via: at.via });
         this.step = { kind: 'to the table', table: at.table };
@@ -1765,7 +1839,7 @@ export class Regular extends Job {
       case 'to the table': {
         if (!this.arrived) return;
         a.start('dine', { atTable: s.table as { top: number; edge: number; h: number } });
-        const seat = v.seats[0];
+        const seat = v.regularSeat;
         seat.state = 'claimed';
         seat.diner = this.w.i;
         // their tankard's spot is wherever it stands in front of them
@@ -1784,7 +1858,7 @@ export class Regular extends Job {
         const d = a.choreOf('dine');
         if (v.phase !== 'work' && !this.ateToday) {
           // supper time: they're already sat at their place
-          this.seat = v.seats[0];
+          this.seat = v.regularSeat;
           this.seated(this.seat);
           this.step = { kind: 'waiting for supper' };
           return;

@@ -102,7 +102,7 @@ const result = await page.evaluate((secs) => {
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
-      else if (!['idle', 'sitting', 'playing', 'smoking', 'asleep', 'waiting for supper', 'at the dance'].includes(j.doing) && j.role !== 'regular' && s - at > 90) {
+      else if (!d.linger.has(j.doing) && j.role !== 'regular' && s - at > 90) {
         say(`${j.role} stuck in "${j.doing}" for ${s - at}s`);
         since.set(i, [j.doing, s]);
       }
