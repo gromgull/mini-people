@@ -330,7 +330,7 @@ export class Sound {
     const ctx = this.ctx!;
     const t = ctx.currentTime + 0.005;
     const o = this.out('voices', w);
-    const f0 = 520 / size;
+    const f0 = 260 / size; // (an octave down from where it started: deeper, less yappy)
     const dur = 0.11 + 0.06 * size;
     const src = this.tone('sawtooth', t, f0, f0 * 0.62, dur);
     const mouth = this.filter('bandpass', 1300 / Math.sqrt(size), 1.6);
