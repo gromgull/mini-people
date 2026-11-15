@@ -1,15 +1,11 @@
 // Repro for "walking backwards after everyone trips": compare facing vs path heading.
 //   node scripts/probe-trip.mjs [t=6]
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
+import { open } from './harness.mjs';
 const T = process.argv[2] ?? '6';
-const server = await createServer({ server: { port: 5196, strictPort: true }, logLevel: 'error' });
-await server.listen();
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 400, height: 300 } });
+const { page, errors, url, ready, close } = await open({ viewport: { width: 400, height: 300 } });
 for (const t of T.split(',')) {
-  await page.goto(`http://localhost:5196/debug.html?count=24&seed=1&act=fall&actAll&actAt=0.5&t=${t}&paused&nogui`);
-  await page.waitForFunction(() => window.__mini?.ready);
+  await page.goto(url(`count=24&seed=1&act=fall&actAll&actAt=0.5&t=${t}&paused&nogui`));
+  await ready();
   const r = await page.evaluate(() => {
     const { offsets, actors, motions, baseTransform } = window.__mini.debug();
     return window.__mini.people.map((p, i) => {
@@ -24,4 +20,4 @@ for (const t of T.split(',')) {
   console.log(`t=${t}: ${bad.length}/${r.length} facing >45° off path; busy=${r.filter((x) => x.busy).length}`);
   for (const x of bad.slice(0, 8)) console.log('  ', JSON.stringify(x));
 }
-await browser.close(); await server.close();
+await close();

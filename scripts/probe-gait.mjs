@@ -1,15 +1,11 @@
 // Numeric gait check: knee angles + ankle heights of person 0 over time.
 // A good walk: stance knee < ~15°, swing knee ~60–75°, planted ankle y == footH.
 //   node scripts/probe-gait.mjs
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
-const server = await createServer({ root: process.cwd(), server: { port: 5197, strictPort: true }, logLevel: 'error' });
-await server.listen();
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 400, height: 300 } });
+import { open } from './harness.mjs';
+const { page, errors, url, ready, close } = await open({ viewport: { width: 400, height: 300 } });
 for (const t of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]) {
-  await page.goto(`http://localhost:5197/debug.html?count=6&t=${t}&paused&nogui`);
-  await page.waitForFunction(() => window.__mini?.ready);
+  await page.goto(url(`count=6&t=${t}&paused&nogui`));
+  await ready();
   const r = await page.evaluate(() => {
     const p = window.__mini.people[0];
     const J = p.joints;
@@ -22,4 +18,4 @@ for (const t of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]) {
   });
   console.log(t, JSON.stringify(r));
 }
-await browser.close(); await server.close();
+await close();

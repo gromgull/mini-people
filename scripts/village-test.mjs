@@ -20,19 +20,12 @@
 //   - by the end, trees have been felled, logs sawn, firewood delivered, fish
 //     caught, and (given time to dry) dried fish brought to the larder; apples
 //     picked, (given time) cider made, and the regular served
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
+import { open } from './harness.mjs';
 
 const [seconds = '600', seed = '1'] = process.argv.slice(2);
-const server = await createServer({ server: { port: 5197, strictPort: true }, logLevel: 'error' });
-await server.listen();
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-const page = await browser.newPage({ viewport: { width: 320, height: 240 } });
-const errors = [];
-page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-await page.goto(`http://localhost:5197/?paused&nogui&seed=${seed}`);
-await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
+const { page, errors, url, ready, close } = await open({ viewport: { width: 320, height: 240 } });
+await page.goto(url(`paused&nogui&seed=${seed}`, 'index.html'));
+await ready();
 
 const problems = [];
 const result = await page.evaluate((secs) => {
@@ -133,6 +126,5 @@ console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stat
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);
 console.log(problems.length ? `✗ ${problems.length} problem(s):\n  ${problems.join('\n  ')}` : '✓ consistent throughout');
-await browser.close();
-await server.close();
+await close();
 process.exit(problems.length ? 1 : 0);

@@ -9,6 +9,7 @@ import { Pond } from './pond';
 import { Houses } from './houses';
 import { buildDog, type Quadruped, randomDog } from './quadruped';
 import { QuadAnimator, type QuadMotion } from './quadgait';
+import { type AppHooks, runApp } from './app';
 import { BANJO, BASS, banjoChord, degToHz, makeTune } from './tune';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
@@ -737,7 +738,6 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 
 // ---------------------------------------------------------------- loop
 
-let frames = 0;
 let simAcc = 0;
 
 const FOCUS_Y = num('fy', 0.5); // focus height as a fraction of body height (0.85 ≈ face)
@@ -751,49 +751,47 @@ function focusSelected(k = 1) {
   camera.position.copy(controls.target).add(off);
 }
 
-function frame(frameStart: number) {
-  const dt = stage.delta();
-  crowd.frameTick();
-  let simulated = false;
-  if (!settings.paused) {
-    if (settings.animFps > 0) {
-      // "animating on twos": pose & position only update at a low fixed rate
-      const step = 1 / settings.animFps;
-      simAcc += dt;
-      while (simAcc >= step) {
-        simulate(step);
-        simAcc -= step;
-        simulated = true;
-      }
-    } else {
+const hooks: AppHooks = {
+  paused: () => settings.paused,
+  simulate: (dt) => {
+    if (settings.animFps <= 0) {
       simulate(dt);
-      simulated = true;
+      return true;
     }
-  }
-  // stop continuous sounds whose owner stopped reporting (mode switch, pause…)
-  if (simulated || settings.paused) crowd.sweep();
-  if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
-  controls.update();
-
-  stage.updateLight(dt, settings.paused);
-  trees.group.visible = settings.trees;
-  pond.group.visible = settings.pond;
-  houses.group.visible = settings.houses;
-  pond.update(simTime);
-  crowd.orientShadows();
-  for (const d of dogs) stage.orient(d.root.userData.shadow, d.root.rotation.y);
-  if (trees.group.visible) for (const c of trees.casters) stage.orient(c, 0);
-  if (houses.group.visible) houses.updateShadows(stage.lightWorld, settings.shadowLength);
-  const tgt = controls.target;
-  let extent = 0;
-  for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
-  stage.updateEnvironment(dt, extent);
-
-  updateLabels();
-  stage.render(frameStart, people.length);
-
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer, camera, get people() { return people; }, select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) };
-}
+    // "animating on twos": pose & position only update at a low fixed rate
+    const step = 1 / settings.animFps;
+    let stepped = false;
+    simAcc += dt;
+    while (simAcc >= step) {
+      simulate(step);
+      simAcc -= step;
+      stepped = true;
+    }
+    return stepped;
+  },
+  follow: (dt) => {
+    if (settings.follow) focusSelected(1 - Math.exp(-dt * 6));
+  },
+  scenery: () => {
+    trees.group.visible = settings.trees;
+    pond.group.visible = settings.pond;
+    houses.group.visible = settings.houses;
+    pond.update(simTime);
+  },
+  shadows: () => {
+    for (const d of dogs) stage.orient(d.root.userData.shadow, d.root.rotation.y);
+    if (trees.group.visible) for (const c of trees.casters) stage.orient(c, 0);
+    if (houses.group.visible) houses.updateShadows(stage.lightWorld, settings.shadowLength);
+  },
+  extent: () => {
+    const tgt = controls.target;
+    let extent = 0;
+    for (const p of people) extent = Math.max(extent, Math.hypot(p.root.position.x - tgt.x, p.root.position.z - tgt.z));
+    return extent;
+  },
+  beforeRender: () => updateLabels(),
+  testHook: () => ({ select, sound, voiceOf, rebuild: (i: number) => rebuildOne(i), debug: () => ({ offsets, actors, motions, baseTransform }) }),
+};
 
 resize();
 rebuildAll();
@@ -805,4 +803,4 @@ if (q.has('select')) {
   select(num('select', 0));
   if (q.has('focus')) focusSelected();
 }
-stage.run(frame);
+runApp(stage, crowd, hooks);

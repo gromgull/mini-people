@@ -1,21 +1,15 @@
 // Render every sound recipe offline (in the headless browser) to WAV files,
 // plus a spectrogram sheet, so they can be auditioned without running the app.
 //   node scripts/sounds.mjs [seed=1] [name filter]   (seed also picks the fiddle tune)    → screenshots/sounds/*.wav, screenshots/sounds.png
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { open } from './harness.mjs';
 
 const [seed = '1', only] = process.argv.slice(2);
 mkdirSync('screenshots/sounds', { recursive: true });
-const server = await createServer({ server: { port: 5192, strictPort: true }, logLevel: 'error' });
-await server.listen();
-const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
-const pg = await b.newPage();
-const errors = [];
-pg.on('pageerror', (e) => errors.push(String(e)));
-await pg.goto(`http://localhost:5192/debug.html?seed=${seed}&count=24&paused&nogui&mode=stand`);
-await pg.waitForFunction(() => window.__mini?.ready);
+const { page: pg, errors, url, ready, close } = await open({ args: ['--autoplay-policy=no-user-gesture-required'] });
+await pg.goto(url(`seed=${seed}&count=24&paused&nogui&mode=stand`));
+await ready();
 
 // name → [seconds, script run inside the page with (s, at, C, voices)]
 const RECIPES = {
@@ -101,8 +95,7 @@ for (const name of NAMES) {
   writeFileSync(`screenshots/sounds/${name}.wav`, Buffer.from(b64.data, 'base64'));
   console.log(`${name.padEnd(16)} peak ${b64.peak.toFixed(2)}  rms ${b64.rms.toFixed(3)}`);
 }
-await b.close();
-await server.close();
+await close();
 
 // spectrogram sheet
 const pics = [];

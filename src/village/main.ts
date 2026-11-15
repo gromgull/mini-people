@@ -21,6 +21,7 @@ import { type Obstacle, Walker } from './walk';
 import { Fisher, Innkeeper, type Job, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
+import { type AppHooks, runApp } from '../app';
 import { VillageDog } from './dog';
 import { buildDog, randomDog } from '../quadruped';
 
@@ -774,33 +775,42 @@ function focusOn(i: number, k: number) {
   stage.camera.position.copy(c.target).add(off);
 }
 
-let frames = 0;
-function frame(start: number) {
-  const dt = stage.delta();
-  crowd.frameTick();
-  if (!settings.paused) {
+const hooks: AppHooks = {
+  paused: () => settings.paused,
+  simulate: (dt) => {
     // fast-forward in whole steps no longer than 1/30 s, so jobs and physics behave the same at any speed
     const total = dt * settings.speed;
     const n = Math.max(1, Math.ceil(total / (1 / 30)));
     for (let k = 0; k < n; k++) simulate(total / n);
-  }
-  crowd.sweep();
-  if (follow >= 0) focusOn(follow, frames === 0 ? 1 : 1 - Math.exp(-dt * 4));
-  stage.controls.update();
-  stage.updateLight(dt, settings.paused);
-  crowd.orientShadows();
-  stage.orient(dog.dog.root.userData.shadow, dog.dog.root.rotation.y);
-  forest.orientShadows();
-  orchard.orientShadows(stage);
-  houses.updateShadows(stage.lightWorld, look.shadowLength);
-  pond.update(simTime);
-  stage.updateEnvironment(dt, 14);
-  stage.render(start, people.length);
-  if (frames % 6 === 0) updatePanel();
-  if (++frames === 2) (window as any).__mini = { ready: true, renderer: stage.renderer, camera: stage.camera, people, debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog }), follow: (i: number) => (follow = i), step: (sec: number) => { for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30); }, get time() { return simTime; } };
-}
+    return true;
+  },
+  follow: (dt, first) => {
+    if (follow >= 0) focusOn(follow, first ? 1 : 1 - Math.exp(-dt * 4));
+  },
+  scenery: () => pond.update(simTime),
+  shadows: () => {
+    stage.orient(dog.dog.root.userData.shadow, dog.dog.root.rotation.y);
+    forest.orientShadows();
+    orchard.orientShadows(stage);
+    houses.updateShadows(stage.lightWorld, look.shadowLength);
+  },
+  extent: () => 14,
+  beforeRender: (frame) => {
+    if (frame % 6 === 0) updatePanel();
+  },
+  testHook: () => ({
+    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog }),
+    follow: (i: number) => (follow = i),
+    step: (sec: number) => {
+      for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30);
+    },
+    get time() {
+      return simTime;
+    },
+  }),
+};
 
 stage.resize();
 for (let i = 0, n = Math.round(num('t', 0) * 60); i < n; i++) simulate(1 / 60);
 simulate(0);
-stage.run(frame);
+runApp(stage, crowd, hooks);

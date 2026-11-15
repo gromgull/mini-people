@@ -1,11 +1,10 @@
-// Headless smoke test: boots the Vite dev server, opens the demo in Chromium
-// (SwiftShader WebGL), fails on console/page errors, and saves screenshots.
+// Headless smoke test: boots the Vite dev server, opens the debug page in
+// Chromium (SwiftShader WebGL), fails on console/page errors, and saves screenshots.
 //
 //   npm run shot                         → default set of shots
 //   npm run shot -- "seed=7&zoom=3" name → one custom shot
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
+import { open } from './harness.mjs';
 
 const shots = process.argv[2]
   ? [[process.argv[3] ?? 'custom', process.argv[2]]]
@@ -60,32 +59,15 @@ const shots = process.argv[2]
     ];
 
 mkdirSync('screenshots', { recursive: true });
-const server = await createServer({ server: { port: 5199, strictPort: true }, logLevel: 'error' });
-await server.listen();
-
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-// seeded Math.random, so paused shots come out the same every run (and can be
-// compared before/after a refactor)
-await page.addInitScript(() => {
-  let a = 12345;
-  Math.random = () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-});
-const errors = [];
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-page.on('pageerror', (e) => errors.push(String(e)));
+// (seeded Math.random, so paused shots come out the same every run, and can be compared before/after a refactor)
+const { page, errors, url, ready, close } = await open({ viewport: { width: 1280, height: 800 }, seeded: true });
 
 let failed = false;
 for (const [name, query] of shots) {
   errors.length = 0;
-  await page.goto(`http://localhost:5199/${process.env.PAGE ?? 'debug.html'}?${query}`);
+  await page.goto(url(query, process.env.PAGE ?? 'debug.html'));
   try {
-    await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
+    await ready();
   } catch {
     errors.push('timed out waiting for __mini.ready');
   }
@@ -96,6 +78,5 @@ for (const [name, query] of shots) {
   failed ||= errors.length > 0;
 }
 
-await browser.close();
-await server.close();
+await close();
 process.exit(failed ? 1 : 0);

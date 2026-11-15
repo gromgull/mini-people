@@ -1,16 +1,12 @@
 // Wander mode health: closest pairs over time (overlaps = walk-throughs).
 //   node scripts/probe-wander.mjs [count=30] [seed=1]
-import { createServer } from 'vite';
-import { chromium } from 'playwright';
+import { open } from './harness.mjs';
 const [count = '30', seed = '1'] = process.argv.slice(2);
-const server = await createServer({ server: { port: 5194, strictPort: true }, logLevel: 'error' });
-await server.listen();
-const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const pg = await b.newPage();
+const { page: pg, errors, url, ready, close } = await open();
 let bad = 0, samples = 0;
 for (let t = 2; t <= 60; t += 2) {
-  await pg.goto(`http://localhost:5194/debug.html?mode=wander&count=${count}&seed=${seed}&t=${t}&paused&nogui`);
-  await pg.waitForFunction(() => window.__mini?.ready);
+  await pg.goto(url(`mode=wander&count=${count}&seed=${seed}&t=${t}&paused&nogui`));
+  await ready();
   const r = await pg.evaluate(() => {
     const P = window.__mini.people.map((p) => p.root.position);
     let min = 9, close = 0;
@@ -27,4 +23,4 @@ for (let t = 2; t <= 60; t += 2) {
   if (t % 10 === 0) console.log(`t=${t} min pair ${r.min.toFixed(2)} pairs<0.25: ${r.close} furthest ${r.R.toFixed(1)}`);
 }
 console.log(`overlapping pairs per sample: ${(bad / samples).toFixed(2)}`);
-await b.close(); await server.close();
+await close();
