@@ -39,6 +39,12 @@ const SEC_PER_HOUR = (num('daymin', 12) * 60) / 24;
 const secPerHour = (h: number) => (h >= SUPPER - 0.5 && h < NIGHT + 0.5 ? 2 : 1) * SEC_PER_HOUR;
 if (q.has('nogui')) document.getElementById('hint')?.remove();
 const stage = new Stage(look);
+// a village of your own: with no ?seed, draw one at random and put it in the
+// address, so a reload, a bookmark or a shared link brings back the same village
+if (!q.has('seed')) {
+  q.set('seed', String(1 + Math.floor(Math.random() * 999999)));
+  history.replaceState(history.state, '', `${location.pathname}?${q}${location.hash}`);
+}
 const settings: CrowdSettings & { seed: number; paused: boolean; speed: number; panel: boolean } = {
   gait: { ...defaultGait },
   personality: 1,
@@ -49,7 +55,7 @@ const settings: CrowdSettings & { seed: number; paused: boolean; speed: number; 
   seed: num('seed', 1),
   paused: q.has('paused'),
   speed: num('speed', 1), // simulated seconds per real second
-  panel: q.get('panel') !== '0', // who's doing what
+  panel: q.get('panel') === '1', // who's doing what (off unless asked for)
 };
 const crowd = new Crowd(stage, settings);
 
@@ -628,6 +634,7 @@ function updatePanel() {
 }
 
 const gui = new GUI({ title: 'Village' });
+gui.close(); // (folded up till someone wants it)
 if (q.has('nogui')) gui.hide();
 gui.add(settings, 'speed', { '×1': 1, '×4': 4, '×16': 16 }).name('speed');
 gui.add(settings, 'paused');

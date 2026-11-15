@@ -152,18 +152,19 @@ Handy for sharing a particular scene, e.g.
 
 `index.html` is the start of a small settlement with a working economy.
 
-The layout comes from the seed (`?seed=n`), along with the villagers. A
-woodyard sits in the middle, with four districts around it: the forest with
-the lumberjack's cabin; the pond with the fisher's cabin and bench; the inn
-with its tables, kegs, street-lamp and the green where they dance; and the
-orchard with the cider mill, the pickers' baskets and ladders and their
-cabins. Each seed shuffles their order around the yard and gives each
-district its own direction, distance and turn. Each district keeps its own
-arrangement, so everything still works. The woodworker's cabin goes in the
-widest gap between districts, the drying rack on the way from the pond to
-the inn, and a layout where anything overlaps is thrown away and redrawn.
-Building looks, the forest, the orchard and the pond's shape vary with the
-seed too.
+The layout comes from the seed (`?seed=n`), along with the villagers.
+Without one you get a village of your own: a random seed, put in the address
+so a reload or a shared link keeps it. A woodyard sits in the middle, with
+four districts around it: the forest with the lumberjack's cabin; the pond
+with the fisher's cabin and bench; the inn with its tables, kegs,
+street-lamp and the green where they dance; and the orchard with the cider
+mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
+their order around the yard and gives each district its own direction,
+distance and turn. Each district keeps its own arrangement, so everything
+still works. The woodworker's cabin goes in the widest gap between
+districts, the drying rack on the way from the pond to the inn, and a layout
+where anything overlaps is thrown away and redrawn. Building looks, the
+forest, the orchard and the pond's shape vary with the seed too.
 
 So far it has one chain:
 
@@ -259,9 +260,11 @@ and the haul and the saw use the actual log.
 | click | follow that person |
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
+| `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
 | `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, kegs at the inn |
 
-The panel at the bottom left shows who's doing what, the woodpile and the
+The panel at the bottom left (hidden at first: tick "who's doing what" in
+the menu, or `?panel=1`) shows who's doing what, the woodpile and the
 tallies. `npm run test:village` runs the village headless for ten simulated
 minutes and checks that every log stays in exactly one consistent place,
 that only one tree is felled at a time, that nobody gets stuck, and that
