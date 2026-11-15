@@ -30,11 +30,24 @@ const FOG_GLSL = /* glsl */ `
   uniform float uFogFar;
   uniform vec3 uHaze;
   varying vec3 vWorld;
+  float fogHash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+  float fogNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(fogHash(i), fogHash(i + vec2(1.0, 0.0)), f.x), mix(fogHash(i + vec2(0.0, 1.0)), fogHash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
   // 0 = clear … 1 = fully hazed; discards past the horizon
   float fogAmount() {
     float d = dot(vWorld.xz - uFogC, uFogDir);
     if (d > uFogFar) discard;
-    float k = smoothstep(uFogNear, uFogFar, d);
+    // the bands' edges ragged, not ruled lines (noise fixed to the ground, so they stay put as the view moves)
+    // (big and slow: out by the horizon the ground's so foreshortened that a few metres is a pixel)
+    float rag = (fogNoise(vWorld.xz * 0.045) - 0.5) + 0.5 * (fogNoise(vWorld.xz * 0.16 + 17.0) - 0.5);
+    float k = smoothstep(uFogNear, uFogFar, d + rag * (uFogFar - uFogNear) * 0.9);
     return floor(k * 5.0 + 0.5) / 5.0; // banded, to match the toon ramps
   }
 `;

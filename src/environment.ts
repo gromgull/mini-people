@@ -57,8 +57,12 @@ export function createSky(fog: FogUniforms) {
       }
       void main() {
         vec2 ndc = gl_FragCoord.xy / uRes * 2.0 - 1.0;
+        // where along the horizon this is, fixed to the compass (as the stars are), in steps
+        // of a few pixels: the bands' edges wobble along it instead of being ruled lines
+        float along = floor(mod(gl_FragCoord.x + uStarShift, uStarWrap) / 3.0) * 3.0 / uStarWrap * 6.2831853;
+        float wob = 0.5 * sin(along * 5.0 + 1.3) + 0.3 * sin(along * 17.0 + 0.4) + 0.2 * sin(along * 43.0 + 2.1);
         // a quick haze band at the horizon, then the sky colour
-        float t = clamp((ndc.y - uHorizon) / 0.3, 0.0, 1.0);
+        float t = clamp((ndc.y - uHorizon) / 0.3 + wob * 0.07, 0.0, 1.0);
         t = floor(t * 4.0 + 0.5) / 4.0; // a few flat bands, pixel-art style
         vec3 c = mix(uHaze, uTop, t);
 

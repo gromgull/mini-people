@@ -60,6 +60,8 @@ const crowd = new Crowd(stage, settings);
 
 // where everything goes: the seed lays out the whole village (see layout.ts)
 const L = makeLayout(settings.seed);
+// and the land round about, its hills and mountains, from the same seed
+stage.backdrop.build(settings.seed);
 // the lumberjack's cabin (by the forest), the woodworker's, the fisher's (up from
 // the pond), the inn (the innkeeper lives in, the regular has a room), the
 // picker's and the miller's (past the mill), the other picker's (the far side of the orchard)

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
 import { createFog, createGroundMaterial, createLampUniforms, createOutlineMaterial, createToonMaterial, defaultGrass, skinnedVariant } from './materials';
+import { Backdrop } from './backdrop';
 import { Clouds, Sun, createSky } from './environment';
 import type { Caster } from './trees';
 import { daylight, sunAt } from './daylight';
@@ -87,6 +88,8 @@ export class Stage {
   readonly cloudOutline = createOutlineMaterial();
   readonly sky = createSky(this.fog);
   readonly clouds: Clouds;
+  /** The land round about past the horizon: mountains, hills, the open valley (see backdrop.ts). */
+  readonly backdrop: Backdrop;
   readonly sun = new Sun();
   readonly moon = new Sun('moon');
   // stencil: each pixel takes shadow once, so overlapping shadows don't stack darker
@@ -131,6 +134,9 @@ export class Stage {
     this.scene.add(this.sky);
     this.clouds = new Clouds(this.cloudToon, this.cloudOutline);
     this.scene.add(this.clouds.group);
+    const tu = this.toon.uniforms;
+    this.backdrop = new Backdrop(this.atlas, { uLightView: tu.uLightView, uTint: tu.uTint, uWrap: tu.uWrap, uHaze: this.fog.uHaze });
+    this.scene.add(this.backdrop.group);
     this.scene.add(this.sun.group, this.moon.group);
 
     // ground: toon-lit like everything else, plus grass patches (falls back to plain toon)
@@ -282,6 +288,7 @@ export class Stage {
     fog.uFogFar.value = horizonFar;
     fog.uFogNear.value = horizonFar * 0.8;
     this.clouds.update(camera, tgt, horizonFar, dt);
+    this.backdrop.update(camera, tgt, horizonFar);
     this.sun.update(camera, tgt, horizonFar, this.sunWorld);
     this.moon.update(camera, tgt, horizonFar, this.moonWorld);
     this.sun.setColor(this.day.sun);
