@@ -47,8 +47,11 @@ export class Woodpile {
   readonly group = new THREE.Group();
   readonly slots: THREE.Vector3[] = [];
   readonly logs: (Log | null)[];
+  readonly name = 'woodpile';
   /** Logs promised to the pile (on their way). */
   incoming = 0;
+  /** (Nothing's ever taken off it by booking: the woodworker lifts the top log.) */
+  reserved = 0;
 
   constructor(stage: Stage, readonly x: number, readonly z: number, readonly yaw: number) {
     const d = LOG_R * 2.05;

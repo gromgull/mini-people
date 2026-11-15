@@ -7,7 +7,8 @@
 // Invariants:
 //   - every log and piece of firewood is in exactly one place, and the
 //     containers agree with it (pile, stacks, sawhorse, whoever carries it);
-//     stacks' promised room and pieces add up
+//     every store's booked room and spoken-for things are exactly what
+//     people hold against it, and nobody leaks a booking
 //   - at most one tree is being felled; claimed trees are claimed by a lumberjack
 //   - nobody stays in the same step for more than 90 s (waiting about,
 //     sitting on a bench, playing, smoking, waiting for supper, at the dance and sleeping don't
@@ -68,6 +69,16 @@ const result = await page.evaluate((secs) => {
       });
       if (st.incoming < 0 || st.reserved < 0 || st.reserved > st.count) say(`${st.name} stack books off: incoming ${st.incoming}, reserved ${st.reserved}, count ${st.count}`);
     }
+    // bookings: every store's booked room and spoken-for things are exactly what people hold against it
+    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, d.pile, ...v.seats.map((x) => x.plate)]) {
+      for (const kind of ['incoming', 'reserved']) {
+        const held = d.jobs.reduce((n, j) => n + j.bookings.filter((b) => b.store === st && b.kind === kind).reduce((m, b) => m + b.n, 0), 0);
+        if (st[kind] !== held) say(`the ${st.name}'s ${kind} is ${st[kind]}, but people hold ${held}`);
+      }
+    }
+    d.jobs.forEach((j) => {
+      for (const l of j.leaked.splice(0)) say(`booking leak: ${l}`);
+    });
     d.jobs.forEach((j, i) => {
       if (j.carrying && !(j.carrying.place.at === 'carried' && j.carrying.place.by === i)) {
         // (handing over: put down on the sawhorse this very step)

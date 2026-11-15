@@ -181,8 +181,66 @@ function besideLog(l: Log, fromX: number, fromZ: number) {
 }
 
 /** A person's routine and what they're up to (for the overlay). */
+/** Somewhere room can be booked in (`incoming`) and things spoken for from (`reserved`): a store, the woodpile. */
+export interface Bookable {
+  readonly name: string;
+  incoming: number;
+  reserved: number;
+}
+/** What one person has booked on one store (all their bookings there, one kind, added up). */
+export interface Booking {
+  store: Bookable;
+  kind: 'incoming' | 'reserved';
+  n: number;
+}
+
 export abstract class Job {
-  step: Step = { kind: 'idle' };
+  private current: Step = { kind: 'idle' };
+  /**
+   * What they're doing. Going idle hands back anything they still had
+   * booked (room on its way somewhere, things spoken for): an errand
+   * should have settled its bookings by then, so any left over are a
+   * leak, noted in `leaked` (the village test checks there are none).
+   */
+  get step() {
+    return this.current;
+  }
+  set step(s: Step) {
+    if (s.kind === 'idle' && this.bookings.length) {
+      for (const b of [...this.bookings]) {
+        this.leaked.push(`${this.role} went idle from "${this.current.kind}" still holding ${b.n} ${b.kind} on the ${b.store.name}`);
+        this.unbook(b.store, b.kind, b.n);
+      }
+    }
+    this.current = s;
+  }
+  /** Everything they've booked and not yet settled. */
+  readonly bookings: Booking[] = [];
+  /** Bookings that went wrong (left over when they went idle, or handed back twice). */
+  readonly leaked: string[] = [];
+
+  /** Book room in a store (`incoming`) or speak for things in it (`reserved`). */
+  protected book(store: Bookable, kind: Booking['kind'], n: number) {
+    if (n <= 0) return;
+    store[kind] += n;
+    const b = this.bookings.find((x) => x.store === store && x.kind === kind);
+    if (b) b.n += n;
+    else this.bookings.push({ store, kind, n });
+  }
+
+  /** Hand back (some of) a booking: the room's filled, the things are taken, or the errand's off. */
+  protected unbook(store: Bookable, kind: Booking['kind'], n: number) {
+    if (n <= 0) return;
+    const i = this.bookings.findIndex((x) => x.store === store && x.kind === kind);
+    const held = i >= 0 ? this.bookings[i].n : 0;
+    if (n > held) this.leaked.push(`${this.role} handed back ${n} ${kind} on the ${store.name} but held ${held}`);
+    const k = Math.min(n, held);
+    if (k <= 0) return;
+    store[kind] -= k;
+    this.bookings[i].n -= k;
+    if (this.bookings[i].n === 0) this.bookings.splice(i, 1);
+  }
+
   carrying: Log | null = null;
   /** What's in their arms. */
   armful: Item[] = [];
@@ -221,7 +279,7 @@ export abstract class Job {
     // an armful interrupted the same way: down it goes, where they stand
     if (this.armful.length && a.kind !== 'armful' && this.step.kind !== 'stacking') {
       const to = this.step.to as Store | undefined;
-      if (to) to.incoming = Math.max(0, to.incoming - this.armful.length);
+      if (to) this.unbook(to, 'incoming', this.armful.length);
       for (const p of this.armful) p.place = { at: 'ground', pos: p.mesh.position.clone().setY(PIECE_R * 0.5), quat: p.mesh.quaternion.clone() };
       this.armful = [];
       this.step = { kind: 'idle' };
@@ -253,8 +311,8 @@ export abstract class Job {
    * pieces are spoken for, the destination's room is taken).
    */
   protected fetch(from: Store, to: Store, n: number, ok: (it: Item) => boolean = () => true) {
-    from.reserved += n;
-    to.incoming += n;
+    this.book(from, 'reserved', n);
+    this.book(to, 'incoming', n);
     const at = from.workSpot();
     this.go(at.x, at.z, at.yaw);
     this.step = { kind: 'fetching', from, to, n, ok };
@@ -278,8 +336,8 @@ export abstract class Job {
         const from = s.from as Store;
         const n = s.n as number;
         const slots = from.top(n, s.ok as (it: Item) => boolean);
-        from.reserved = Math.max(0, from.reserved - n);
-        if (slots.length < n) to.incoming = Math.max(0, to.incoming - (n - slots.length));
+        this.unbook(from, 'reserved', n);
+        this.unbook(to, 'incoming', n - slots.length);
         if (!slots.length) {
           this.step = { kind: 'idle' };
           return;
@@ -310,7 +368,7 @@ export abstract class Job {
         if (a.kind === 'armful') return;
         const slots = s.slots as number[];
         this.armful.forEach((p, k) => (p.place = { at: 'stack', stack: to, slot: slots[k] }));
-        to.incoming = Math.max(0, to.incoming - this.armful.length);
+        this.unbook(to, 'incoming', this.armful.length);
         if (to === v.inn) v.stats.delivered += this.armful.length;
         if (to === v.larder) v.stats.fishIn += this.armful.length;
         if (to === v.innKegs) v.stats.kegsIn += this.armful.length;
@@ -679,7 +737,7 @@ export class Lumberjack extends Job {
   }
 
   protected dropped(v: Village) {
-    v.pile.incoming = Math.max(0, v.pile.incoming - 1);
+    this.unbook(v.pile, 'incoming', 1);
   }
 
   protected hasWork(v: Village) {
@@ -702,7 +760,7 @@ export class Lumberjack extends Job {
         if (room && loose.length) {
           const l = loose.reduce((b, l) => (dist(l, me) < dist(b, me) ? l : b));
           l.claimedBy = this.w.i;
-          v.pile.incoming++;
+          this.book(v.pile, 'incoming', 1);
           const at = besideLog(l, me.x, me.z);
           this.go(at.x, at.z, at.yaw);
           this.step = { kind: 'to log', log: l };
@@ -796,7 +854,7 @@ export class Lumberjack extends Job {
         }
         l.claimedBy = -1;
         this.carrying = null;
-        v.pile.incoming = Math.max(0, v.pile.incoming - 1);
+        this.unbook(v.pile, 'incoming', 1);
         this.step = { kind: 'idle' };
         return;
       }
@@ -891,7 +949,7 @@ export class Woodworker extends Job {
           return;
         }
         if (this.canSaw(v)) {
-          v.yard.incoming += PIECES_PER_LOG; // room for what it'll make
+          this.book(v.yard, 'incoming', PIECES_PER_LOG); // room for what it'll make
           const spot = v.pile.workSpot(_v, 0.3);
           this.go(spot.x, spot.z, facing(spot.x, spot.z, v.pile.x, v.pile.z));
           this.step = { kind: 'to pile' };
@@ -914,7 +972,7 @@ export class Woodworker extends Job {
         if (!this.arrived) return;
         const slot = v.pile.topSlot();
         if (slot < 0) {
-          v.yard.incoming = Math.max(0, v.yard.incoming - PIECES_PER_LOG);
+          this.unbook(v.yard, 'incoming', PIECES_PER_LOG);
           this.step = { kind: 'idle' };
           return;
         }
@@ -1009,7 +1067,7 @@ export class Fisher extends Job {
       case 'idle': {
         if (v.time < this.waitUntil) return;
         if (this.hasWork(v)) {
-          v.rack.incoming += CATCH; // room on the rack for this catch
+          this.book(v.rack, 'incoming', CATCH); // room on the rack for this catch
           const at = this.waterSpot(v);
           this.go(at.x, at.z, at.yaw);
           this.step = { kind: 'to the water' };
@@ -1198,7 +1256,7 @@ export class Innkeeper extends Job {
         const slot = v.larder.top(1)[0];
         if (slot === undefined) {
           // no fish after all
-          seat.plate.incoming = 0;
+          this.unbook(seat.plate, 'incoming', 1);
           this.step = { kind: 'idle' };
           return;
         }
@@ -1230,7 +1288,7 @@ export class Innkeeper extends Job {
         // draw a tankard from the top keg: hands at its tap a moment
         const slot = v.innKegs.top(1)[0];
         if (slot === undefined) {
-          v.tankardSpot.incoming = 0;
+          this.unbook(v.tankardSpot, 'incoming', 1);
           this.step = { kind: 'idle' };
           return;
         }
@@ -1276,7 +1334,7 @@ export class Innkeeper extends Job {
     if (v.phase !== 'work') {
       const seat = this.seatWaiting(v);
       if (seat && v.larder.available > 0) {
-        seat.plate.incoming += 1;
+        this.book(seat.plate, 'incoming', 1);
         const at = v.hatch.stand;
         this.go(at.x, at.z, at.yaw);
         this.step = { kind: 'to the hatch', seat };
@@ -1284,7 +1342,7 @@ export class Innkeeper extends Job {
       }
     }
     if (this.refill(v)) {
-      v.tankardSpot.incoming += 1;
+      this.book(v.tankardSpot, 'incoming', 1);
       const at = v.innKegs.workSpot();
       this.go(at.x, at.z, at.yaw);
       this.step = { kind: 'to the kegs' };
@@ -1391,7 +1449,7 @@ export class Picker extends Job {
       case 'idle': {
         if (v.time < this.waitUntil) return;
         if (this.hasWork(v)) {
-          v.mill.hopper.incoming += BASKET; // room in the hopper for this basketful
+          this.book(v.mill.hopper, 'incoming', BASKET); // room in the hopper for this basketful
           const at = basket.workSpot();
           this.go(at.x, at.z, at.yaw);
           this.step = { kind: 'to basket' };
@@ -1516,7 +1574,7 @@ export class Picker extends Job {
           it.place = { at: 'stack', stack: hop, slot: slots[k] };
           it.tween = { pos: w.pos, quat: w.quat, t0: v.time + k * 0.22, dur: 0.45 };
         });
-        hop.incoming = Math.max(0, hop.incoming - BASKET);
+        this.unbook(hop, 'incoming', BASKET);
         a.events.push('thunk');
         this.waitUntil = v.time + 1.5;
         this.step = { kind: 'idle' };
@@ -1531,7 +1589,7 @@ export class Picker extends Job {
     if (!ap) {
       // nothing in reach after all: put the basket down and call it a day
       this.setDownBasket();
-      v.mill.hopper.incoming = Math.max(0, v.mill.hopper.incoming - BASKET);
+      this.unbook(v.mill.hopper, 'incoming', BASKET);
       this.step = { kind: 'setting down', then: 'idle' };
       return;
     }
@@ -1552,7 +1610,7 @@ export class Picker extends Job {
         this.go(at.x, at.z, at.yaw);
         this.step = { kind: 'to full basket' };
       } else {
-        v.mill.hopper.incoming = Math.max(0, v.mill.hopper.incoming - BASKET);
+        this.unbook(v.mill.hopper, 'incoming', BASKET);
         this.step = { kind: 'idle' };
       }
       return;
@@ -1611,7 +1669,7 @@ export class Miller extends Job {
       case 'idle': {
         if (v.time < this.waitUntil) return;
         if (this.hasWork(v)) {
-          v.millKegs.incoming += 1;
+          this.book(v.millKegs, 'incoming', 1);
           const at = mill.crankSpot();
           this.go(at.x, at.z, at.yaw, null);
           this.step = { kind: 'to the crank' };
