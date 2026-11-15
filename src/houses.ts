@@ -444,7 +444,9 @@ export class Houses {
    * capped like the people's blob shadows.
    */
   updateShadows(light: THREE.Vector3, lengthK: number) {
-    if (light.distanceToSquared(this.lastLight) < 1e-8 && lengthK === this.lastLen) return;
+    // (the sun creeps: re-cast once it's turned a milliradian, ~8 times a second on a 12-minute day,
+    // rather than every frame; the tip of a long shadow moves a couple of cm between)
+    if (light.distanceToSquared(this.lastLight) < 1e-6 && lengthK === this.lastLen) return;
     this.lastLight.copy(light);
     this.lastLen = lengthK;
     const h = Math.hypot(light.x, light.z);

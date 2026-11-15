@@ -109,5 +109,5 @@ export function reachFist(p: Person, side: 'L' | 'R', fist: THREE.Vector3, w: nu
   twoBoneIK(sh.position, tgt, _pole, d.upperArmLen, d.foreArmLen, _qU, _qM);
   sh.quaternion.slerp(_qU, w);
   el.quaternion.slerp(_qM, w);
-  p.root.updateMatrixWorld(true);
+  sh.updateMatrixWorld(true); // just this arm (the spine it hangs from is current: it was read above)
 }

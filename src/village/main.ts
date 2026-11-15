@@ -630,6 +630,16 @@ function faceTalker(i: number, dt: number) {
 let simTime = 0;
 /** Lamps: each house's are lit until then (simulation seconds). */
 const litUntil = houses.buildings.map(() => 0);
+/**
+ * Run the world on n steps of dt, then draw the stores' contents (once:
+ * nothing in a step reads the items' and logs' meshes, only their places).
+ */
+function simulateSteps(n: number, dt: number) {
+  for (let i = 0; i < n; i++) simulate(dt);
+  placeLogs();
+  placeItems();
+}
+
 function simulate(dt: number) {
   simTime += dt;
   village.time = simTime;
@@ -701,8 +711,6 @@ function simulate(dt: number) {
       village.stats.dried++;
     }
   }
-  placeLogs();
-  placeItems();
   // lamps: lit for a while when someone gets home after dark; the inn's while it's open
   const dark = village.hours >= 17.5 || village.hours < 6.5;
   const innOpen = !jobs[INNKEEPER].asleep || seats.some((st) => st.state !== 'free');
@@ -802,7 +810,7 @@ const hooks: AppHooks = {
     // fast-forward in whole steps no longer than 1/30 s, so jobs and physics behave the same at any speed
     const total = dt * settings.speed;
     const n = Math.max(1, Math.ceil(total / (1 / 30)));
-    for (let k = 0; k < n; k++) simulate(total / n);
+    simulateSteps(n, total / n);
     return true;
   },
   follow: (dt, first) => {
@@ -823,7 +831,7 @@ const hooks: AppHooks = {
     debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER }),
     follow: (i: number) => (follow = i),
     step: (sec: number) => {
-      for (let i = 0, n = Math.round(sec * 30); i < n; i++) simulate(1 / 30);
+      simulateSteps(Math.round(sec * 30), 1 / 30);
     },
     get time() {
       return simTime;
@@ -832,6 +840,6 @@ const hooks: AppHooks = {
 };
 
 stage.resize();
-for (let i = 0, n = Math.round(num('t', 0) * 60); i < n; i++) simulate(1 / 60);
-simulate(0);
+simulateSteps(Math.round(num('t', 0) * 60), 1 / 60);
+simulateSteps(1, 0);
 runApp(stage, crowd, hooks);

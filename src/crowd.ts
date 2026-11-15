@@ -3,7 +3,7 @@ import { type Person, buildPerson, setMouth } from './body';
 import type { Genome, MouthShape } from './genome';
 import { type GaitParams, type Motion, advance } from './gait';
 import { Animator } from './animate';
-import { styleFor } from './persona';
+import { type Style, styleFor } from './persona';
 import { type ActionPose, Actor, BPM, kindIs } from './actions';
 import { Smoke } from './smoke';
 import { Sparks } from './fx';
@@ -96,9 +96,17 @@ export class Crowd {
     }, 100);
   }
 
+  /**
+   * How this person moves (their persona applied to the shared gait). Asked
+   * for several times a step, so it's kept for the frame: the panel only
+   * changes what it's made from between frames.
+   */
   styleOf(p: Person) {
-    return styleFor(this.settings.gait, p.genome.persona, this.settings.personality);
+    let st = this.styles.get(p);
+    if (!st) this.styles.set(p, (st = styleFor(this.settings.gait, p.genome.persona, this.settings.personality)));
+    return st;
   }
+  private styles = new Map<Person, Style>();
 
   /** Build a body (plus its drop shadow) and add it to the scene. */
   spawn(genome: Genome, index: number) {
@@ -153,6 +161,7 @@ export class Crowd {
   /** Once per frame, before simulating: wakes the sound back up after a stall. */
   frameTick() {
     this.lastFrameAt = performance.now();
+    this.styles.clear();
     if (this.stalled) {
       this.stalled = false;
       if (!document.hidden) this.sound.setHidden(false);

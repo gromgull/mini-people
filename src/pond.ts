@@ -109,11 +109,31 @@ export class Pond {
     this.waterScale = 1 - 0.03 + 0.03 * Math.sin((t * Math.PI * 2) / 7);
     this.deepScale = 0.55 + 0.06 * Math.sin((t * Math.PI * 2) / 9 + 1.3);
     for (const l of this.layers) {
-      const fresh = this.shapeGeo(l.outer, l.hole);
       const dst = l.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-      dst.copyArray(fresh.getAttribute('position').array as Float32Array);
+      outlinePositions(l.outer(), l.hole?.() ?? null, dst.array as Float32Array);
       dst.needsUpdate = true;
-      fresh.dispose();
+    }
+  }
+}
+
+/**
+ * The vertices a ShapeGeometry of this outline (and hole) has, in its order
+ * (the outline clockwise, the hole anticlockwise, no repeated end point), laid
+ * flat as shapeGeo lays it: written into `out` without triangulating again.
+ */
+function outlinePositions(outer: THREE.Vector2[], hole: THREE.Vector2[] | null, out: Float32Array) {
+  const tidy = (pts: THREE.Vector2[], clockwise: boolean) => {
+    if (pts.length > 2 && pts[pts.length - 1].equals(pts[0])) pts.pop();
+    if (THREE.ShapeUtils.isClockWise(pts) !== clockwise) pts.reverse();
+    return pts;
+  };
+  let i = 0;
+  for (const pts of hole ? [tidy(outer, true), tidy(hole, false)] : [tidy(outer, true)]) {
+    for (const v of pts) {
+      // (x, y, 0) turned −90° about x
+      out[i++] = v.x;
+      out[i++] = 0;
+      out[i++] = -v.y;
     }
   }
 }
