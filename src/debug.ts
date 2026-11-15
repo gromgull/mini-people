@@ -9,6 +9,7 @@ import { Pond } from './pond';
 import { Houses } from './houses';
 import { buildDog, type Quadruped, randomDog } from './quadruped';
 import { QuadAnimator, type QuadMotion } from './quadgait';
+import { BANJO, BASS, banjoChord, degToHz, makeTune } from './tune';
 import { mulberry32 } from './rng';
 import { type Motion, WALK_SPEED, defaultGait, newMotion } from './gait';
 import { Animator } from './animate';
@@ -532,7 +533,7 @@ sndF.add(sound.settings, 'steps', 0, 1.5, 0.01).name('footsteps').onChange(apply
 sndF.add(sound.settings, 'voices', 0, 1.5, 0.01).onChange(applySound);
 sndF.add(sound.settings, 'tools', 0, 1.5, 0.01).name('tools & props').onChange(applySound);
 sndF.add(sound.settings, 'music', 0, 1.5, 0.01).onChange(applySound);
-// sound lab: audition each recipe on its own, with the selected person's voice
+// sound lab: audition each recipe on its own (voices: the selected person's)
 const lab = sndF.addFolder('Sound lab').close();
 const labV = () => (people[selected] ? voiceOf(people[selected]) : { f0: 150, formant: 1, rate: 1, weight: 0.5 });
 const C: Where = { pan: 0, gain: 1 };
@@ -540,16 +541,24 @@ const labWalk = (weight: number) => {
   const v = { ...labV(), weight };
   for (let k = 0; k < 6; k++) setTimeout(() => sound.step(v, { pan: k % 2 ? 0.15 : -0.15, gain: 1 }), k * 330);
 };
-const labBtn = (name: string, fn: () => void) => lab.add({ go: () => { sound.start(); setTimeout(fn, 30); } }, 'go').name(name);
-labBtn('one step', () => sound.step(labV(), C));
-labBtn('steps: light', () => labWalk(0.1)); // (a six-step walk)
-labBtn('steps: heavy', () => labWalk(0.95));
-labBtn('steps: selected person', () => labWalk(labV().weight));
-labBtn('talk: selected person', () => sound.phrase(-1, labV(), C));
-labBtn('talk: deep voice', () => sound.phrase(-1, { f0: 100, formant: 0.9, rate: 0.85, weight: 0.8 }, C));
-labBtn('talk: high voice', () => sound.phrase(-1, { f0: 235, formant: 1.22, rate: 1.2, weight: 0.2 }, C));
-labBtn('hammer blow', () => sound.hammer(C));
-labBtn('saw (3 strokes)', () => {
+const labBtn = (f: GUI, name: string, fn: () => void) => f.add({ go: () => { sound.start(); setTimeout(fn, 30); } }, 'go').name(name);
+/** Run `fn(k)` at each of these times (seconds from now). */
+const labAt = (times: number[], fn: (k: number) => void) => times.forEach((t, k) => setTimeout(() => fn(k), t * 1000));
+const eighth = 30 / BPM;
+
+const labPeople = lab.addFolder('People').close();
+labBtn(labPeople, 'one step', () => sound.step(labV(), C));
+labBtn(labPeople, 'steps: light', () => labWalk(0.1)); // (a six-step walk)
+labBtn(labPeople, 'steps: heavy', () => labWalk(0.95));
+labBtn(labPeople, 'steps: selected person', () => labWalk(labV().weight));
+labBtn(labPeople, 'talk: selected person', () => sound.phrase(-1, labV(), C));
+labBtn(labPeople, 'talk: deep voice', () => sound.phrase(-1, { f0: 100, formant: 0.9, rate: 0.85, weight: 0.8 }, C));
+labBtn(labPeople, 'talk: high voice', () => sound.phrase(-1, { f0: 235, formant: 1.22, rate: 1.2, weight: 0.2 }, C));
+for (const k of ['oof', 'hup', 'grunt', 'gasp', 'hey', 'ahh', 'mmm'] as const) labBtn(labPeople, k, () => sound.exclaim(k, labV(), C));
+
+const labTools = lab.addFolder('Tools & chores').close();
+labBtn(labTools, 'hammer blow', () => sound.hammer(C));
+labBtn(labTools, 'saw (3 strokes)', () => {
   const t0 = performance.now();
   const tick = () => {
     const u = (performance.now() - t0) / 620;
@@ -559,14 +568,59 @@ labBtn('saw (3 strokes)', () => {
   };
   tick();
 });
-for (const k of ['oof', 'hup', 'grunt', 'gasp', 'hey'] as const) labBtn(k, () => sound.exclaim(k, labV(), C));
-labBtn('box down (thunk)', () => sound.thunk(C, 1));
-labBtn('bench creak', () => sound.creak(C));
-labBtn('clap', () => sound.clap(C));
-labBtn('fiddle tune', () => {
-  const eighth = 30 / BPM;
-  [0, 2, 4, 7, 9, 7, 4, 2, 0, 4, 7, 12, 9, 7, 4, 0].forEach((s, k) => setTimeout(() => sound.fiddleNote(293.66 * 2 ** (s / 12), eighth * (k === 15 ? 2 : 1), C), k * eighth * 1000));
+labBtn(labTools, 'box down (thunk)', () => sound.thunk(C, 1));
+labBtn(labTools, 'log down (thunk)', () => sound.thunk(C, 0.8));
+labBtn(labTools, 'bench creak', () => sound.creak(C));
+labBtn(labTools, 'clap', () => sound.clap(C));
+for (const k of ['chop', 'crack', 'whump', 'rustle', 'snap', 'crunch', 'whoosh', 'plop', 'splash', 'tick', 'munch', 'gulp', 'clunk', 'scrape'] as const) labBtn(labTools, k, () => sound.chore(k, C));
+
+const labMusic = lab.addFolder('Music').close();
+labBtn(labMusic, 'fiddle tune', () => {
+  const tune = [7, 8, 9, 11, 12, 11, 9, 8, 7, 9, 11, 14, 12, 11, 9, 7]; // (degrees in G, from G3)
+  labAt(tune.map((_, k) => k * eighth), (k) => sound.fiddleNote(degToHz(tune[k]), eighth * (k === 15 ? 2 : 1), C));
 });
+// G D C D, a bar each
+const BARS = [0, 4, 3, 4];
+labBtn(labMusic, 'banjo: bum-ditty', () => {
+  const times: number[] = [];
+  const plucks: (() => void)[] = [];
+  BARS.forEach((root, b) => {
+    for (let q = 0; q < 2; q++) {
+      const t0 = (b * 8 + q * 4) * eighth;
+      const melody = root + (q ? 2 : 0);
+      times.push(t0, t0 + 2 * eighth, t0 + 3 * eighth);
+      plucks.push(() => sound.banjoNote([degToHz(melody)], 'bum', C), () => sound.banjoNote(banjoChord(root).map(degToHz), 'brush', C), () => sound.banjoNote([degToHz(7)], 'thumb', C));
+    }
+  });
+  labAt(times, (k) => plucks[k]());
+});
+labBtn(labMusic, 'double bass: root & fifth', () => {
+  const notes = BARS.flatMap((root) => [root - 7, root - 10, root - 7, root - 10]);
+  labAt(notes.map((_, k) => k * 2 * eighth), (k) => sound.bassNote(degToHz(notes[k]), C));
+});
+labBtn(labMusic, 'the band: a tune', () => {
+  // a fresh tune's A part (8 bars), every part at once: two fiddles and their bass line, banjo, double bass
+  const t = makeTune(Math.random);
+  for (let s = 0; s < 64; s++) {
+    setTimeout(() => {
+      t.parts.forEach((part, v) => {
+        const n = part[s];
+        if (!n.hold) return;
+        if (v === BANJO) sound.banjoNote((n.chord ?? [n.deg]).map(degToHz), n.chord ? 'brush' : n.hold === 1 ? 'thumb' : 'bum', C);
+        else if (v === BASS) sound.bassNote(degToHz(n.deg), C);
+        else sound.fiddleNote(degToHz(n.deg), eighth * n.hold, { pan: (v - 1) * 0.3, gain: v === 0 ? 1 : 0.7 });
+      });
+    }, s * eighth * 1000);
+  }
+});
+
+const labDog = lab.addFolder('Dog').close();
+labBtn(labDog, 'bark: big dog', () => sound.woof(1.15, C));
+labBtn(labDog, 'bark: small dog', () => sound.woof(0.72, C));
+labBtn(labDog, 'bark bark', () => labAt([0, 0.3], () => sound.woof(0.95, C)));
+const PAWS = { f0: 300, formant: 1.6, rate: 1, weight: 0 };
+labBtn(labDog, 'paws: walking', () => labAt([0, 1, 2, 3, 4, 5, 6, 7].map((k) => k * 0.22), (k) => sound.step(PAWS, { pan: k % 2 ? 0.1 : -0.1, gain: 0.7 })));
+labBtn(labDog, 'paws: trotting', () => labAt([0, 1, 2, 3, 4, 5, 6, 7].map((k) => k * 0.12), (k) => sound.step(PAWS, { pan: k % 2 ? 0.1 : -0.1, gain: 0.7 })));
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];

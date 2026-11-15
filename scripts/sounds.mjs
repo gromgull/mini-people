@@ -14,7 +14,7 @@ const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-un
 const pg = await b.newPage();
 const errors = [];
 pg.on('pageerror', (e) => errors.push(String(e)));
-await pg.goto(`http://localhost:5192/demo.html?seed=${seed}&count=24&paused&nogui&mode=stand`);
+await pg.goto(`http://localhost:5192/debug.html?seed=${seed}&count=24&paused&nogui&mode=stand`);
 await pg.waitForFunction(() => window.__mini?.ready);
 
 // name → [seconds, script run inside the page with (s, at, C, voices)]

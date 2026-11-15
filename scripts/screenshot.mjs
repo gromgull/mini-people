@@ -83,7 +83,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 let failed = false;
 for (const [name, query] of shots) {
   errors.length = 0;
-  await page.goto(`http://localhost:5199/${process.env.PAGE ?? 'demo.html'}?${query}`);
+  await page.goto(`http://localhost:5199/${process.env.PAGE ?? 'debug.html'}?${query}`);
   try {
     await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
   } catch {

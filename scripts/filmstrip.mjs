@@ -30,7 +30,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 const files = [];
 for (let i = 0; i < Number(frames); i++) {
   const t = (Number(t0) + i * Number(dt)).toFixed(3);
-  await page.goto(`http://localhost:5198/${process.env.PAGE ?? 'demo.html'}?${query}&t=${t}&paused&nogui`);
+  await page.goto(`http://localhost:5198/${process.env.PAGE ?? 'debug.html'}?${query}&t=${t}&paused&nogui`);
   await page.waitForFunction(() => window.__mini?.ready, null, { timeout: 20000 });
   const f = `screenshots/frames/${name}-${String(i).padStart(2, '0')}.png`;
   await page.screenshot({ path: f });

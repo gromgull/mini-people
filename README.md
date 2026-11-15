@@ -2,9 +2,9 @@
 
 Tiny generative people that walk, work, chat, fiddle and dance in the browser.
 
-**▶ [The demo](https://gromgull.github.io/mini-people/demo.html)** · [the village (in progress)](https://gromgull.github.io/mini-people/)
+**▶ [The village (in progress)](https://gromgull.github.io/mini-people/)** · [the debug page](https://gromgull.github.io/mini-people/debug.html)
 
-There are two apps on the same code. The **demo** (`demo.html`) is the
+There are two apps on the same code. The **debug** page (`debug.html`) is the
 playground: crowds in different modes, every action on a key, and a GUI for
 all the knobs. The **village** (`index.html`) is where this is heading: a
 little settlement whose people do jobs that feed each other, such as chopping
@@ -264,7 +264,7 @@ So far it has one chain:
   full tree over about two more.
 
 Everything is a real object with a place. Trees and logs are claimed so
-nobody goes for the same thing twice. The actions from the demo work on
+nobody goes for the same thing twice. The actions from the debug page work on
 the real things: the chop rebuilds exactly the tree that's standing there,
 and the haul and the saw use the actual log.
 
@@ -287,7 +287,7 @@ work gets done.
 
 ```sh
 npm install
-npm run dev        # http://localhost:5173 (village), /demo.html (demo)
+npm run dev        # http://localhost:5173 (village), /debug.html (debug)
 npm run build      # type-check + production build into dist/
 ```
 
@@ -298,7 +298,7 @@ The `scripts/` folder holds the headless test and inspection tools, driven by
 Playwright with software WebGL. They need `npx playwright install chromium`
 once.
 
-- `npm run shot`: boots the demo, renders about 40 scenes into `screenshots/`,
+- `npm run shot`: boots the debug page, renders about 45 scenes into `screenshots/`,
   and fails on any console error. `Math.random` is seeded, so paused scenes
   come out identical run to run, which makes it a before/after check for
   refactors.
@@ -330,7 +330,7 @@ once.
 | `src/materials.ts`, `src/palette.ts`, `src/environment.ts` | toon shading, colours, haze, sky, clouds |
 | `src/stage.ts` | shared by both apps: renderer, pixel target, camera, materials, sky, time of day, light, drop shadows, fps overlay, the capped main loop |
 | `src/crowd.ts` | shared by both apps: spawning people and running them each frame (action, animation, gaze, sound, effects) |
-| `src/demo.ts` | the demo: modes, GUI, input |
+| `src/debug.ts` | the debug page: modes, GUI, the sound lab, input |
 | `src/village/` | the village: `layout.ts` (where everything goes, from the seed), `inn.ts` (the tables and their seats), `orchard.ts` (pickable, regrowing apples), `forest.ts` (choppable, regrowing pines), `things.ts` (logs, woodpile, sawhorse, bench, cider mill, step-ladder; items and the stores that hold them: firewood stacks, the drying rack, the larder crate, the baskets, keg racks, the tankard's spot), `walk.ts` (getting somewhere around obstacles), `jobs.ts` (each role's routine, delivery, spare time), `dog.ts` (the village dog and its owner), `main.ts` |
 | `src/haul.ts` | carrying a log on the shoulder |
 | `src/firewood.ts`, `src/armful.ts` | a piece of split firewood; carrying an armful of things against the chest |
