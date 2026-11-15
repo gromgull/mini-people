@@ -172,9 +172,11 @@ So far it has one chain:
   four, they claim the nearest free pine and walk up to it side-on. They
   stand exactly where *their* axe meets the trunk, fell it (it leaves two
   logs and a stump), then carry each log to the pile on their shoulder.
-- **The woodworker** carries logs from the pile to the sawhorse and saws
-  each into four pieces of firewood. They
-  gather the pieces in their arms and stack them in the yard.
+- **The woodworkers** (two: one lives in, one lodges with the lumberjack)
+  carry logs from the pile to the sawhorse and saw each into four pieces of
+  firewood, gathering the pieces in their arms and stacking them in the
+  yard. One saws at a time: while one has the sawhorse, the other carries
+  firewood to the inn or waits by the yard's stack.
 - **Firewood to the inn:** the inn keeps a stack by its kitchen end and its
   fire burns a piece every so often. When it's below eight, the woodworker
   carries an armful over, before sawing more if the inn is nearly out.
@@ -247,7 +249,7 @@ So far it has one chain:
   at its owner's door till morning, eyes shut. Its googly eyes are on
   whatever it's minding (ahead on the move, the ground when sniffing, its
   owner, whoever it's greeting), or glancing about at people nearby and
-  now and then at you; it blinks, and its paws patter. (`?follow=9`
+  now and then at you; it blinks, and its paws patter. (`?follow=10`
   follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes

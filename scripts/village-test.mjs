@@ -54,6 +54,10 @@ const result = await page.evaluate((secs) => {
       else if (!(l.place.at === 'pile' && l.place.slot === i) && !(l.place.at === 'carried' && d.jobs[l.place.by]?.doing === 'dropping')) say(`pile slot ${i} holds log ${l.id}, which says ${JSON.stringify(l.place)}`);
     });
     if (d.horse.log && !d.logs.includes(d.horse.log)) say('the sawhorse holds a log that no longer exists');
+    // the sawhorse is claimed only by a woodworker in the middle of sawing a log
+    const sawing = ['to pile', 'lifting', 'to sawhorse', 'loading', 'sawing'];
+    if (d.horse.claimedBy >= 0 && !(d.jobs[d.horse.claimedBy]?.role === 'woodworker' && sawing.includes(d.jobs[d.horse.claimedBy].doing))) say(`the sawhorse is claimed by ${d.horse.claimedBy}, who's "${d.jobs[d.horse.claimedBy]?.doing}"`);
+    if (d.horse.log && d.horse.claimedBy < 0) say('a log on the sawhorse that nobody has claimed');
     // items (firewood, fish) and the stores they're kept in
     const v = d.village;
     for (const pc of v.items) {

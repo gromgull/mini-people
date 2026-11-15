@@ -18,8 +18,10 @@ import { type Obstacle, type Walker, wrap } from './walk';
  *     in the forest) is short of PILE_WANT, claim the nearest standing tree,
  *     walk up to it side-on, fell it (it leaves two logs), then carry each
  *     log to the pile on the shoulder.
- *   woodworker: if there's a log in the pile, carry it to the sawhorse, put
- *     it on, and saw it. Otherwise wait by the sawhorse.
+ *   woodworker (two of them): if there's a log in the pile and the sawhorse
+ *     is free, claim it, carry the log over, put it on, and saw it. Between
+ *     logs, take firewood to the inn. Otherwise wait by the sawhorse (or,
+ *     while the other one's at it, by the yard's stack).
  *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
  *     there aren't enough empties to go round, takes firewood from the yard
  *     (if the inn can spare it), shaves it into staves and raises a new keg.
@@ -1024,9 +1026,21 @@ export class Woodworker extends Job {
     return this.w.actor.sawFit({ r: LOG_R, len: LOG_L / 2.05 });
   }
 
-  /** A log to saw, and room on the yard stack for what it makes. */
+  /** The sawhorse free (no log on it, nobody else's), a log to saw, and room on the yard stack for what it makes. */
   private canSaw(v: Village) {
-    return !v.horse.log && !v.horse.pieces.length && v.pile.ready > 0 && v.yard.room >= PIECES_PER_LOG;
+    const h = v.horse;
+    return h.claimedBy < 0 && !h.log && !h.pieces.length && v.pile.ready > 0 && v.yard.room >= PIECES_PER_LOG;
+  }
+
+  /** Done with the sawhorse (sawn, or the log's gone or dropped): the other woodworker may have it. */
+  private letGo(v: Village) {
+    if (v.horse.claimedBy === this.w.i) v.horse.claimedBy = -1;
+  }
+
+  protected dropped(v: Village) {
+    // tripped with the log on the way to the sawhorse: no sawing, so no room needed for what it'd make
+    this.unbook(v.yard, 'incoming', PIECES_PER_LOG);
+    this.letGo(v);
   }
 
   /** How many pieces the inn could do with right now (and we have to bring). */
@@ -1056,6 +1070,7 @@ export class Woodworker extends Job {
           return;
         }
         if (this.canSaw(v)) {
+          v.horse.claimedBy = this.w.i;
           this.book(v.yard, 'incoming', PIECES_PER_LOG); // room for what it'll make
           const spot = v.pile.workSpot(_v, 0.3);
           this.go(spot.x, spot.z, facing(spot.x, spot.z, v.pile.x, v.pile.z));
@@ -1068,8 +1083,8 @@ export class Woodworker extends Job {
           return;
         }
         if (this.leisure(v)) return;
-        // otherwise wait at the sawhorse
-        const at = horse.sawSpot(this.sawFit());
+        // otherwise wait at the sawhorse (by the yard's stack if the other's sawing)
+        const at = horse.claimedBy >= 0 && horse.claimedBy !== this.w.i ? v.yard.workSpot() : horse.sawSpot(this.sawFit());
         const w = this.w.walker;
         if (Math.hypot(w.x - at.x, w.z - at.z) > 0.3 && (!w.goal || w.arrived)) this.go(at.x, at.z, at.yaw, v.horseObstacle);
         this.waitUntil = v.time + 1;
@@ -1080,6 +1095,7 @@ export class Woodworker extends Job {
         const slot = v.pile.topSlot();
         if (slot < 0) {
           this.unbook(v.yard, 'incoming', PIECES_PER_LOG);
+          this.letGo(v);
           this.step = { kind: 'idle' };
           return;
         }
@@ -1138,6 +1154,7 @@ export class Woodworker extends Job {
         horse.pieces = pieces;
         this.gather(pieces, poses, v.yard);
         horse.pieces = [];
+        this.letGo(v);
         return;
       }
     }

@@ -87,6 +87,7 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'regular', home: 3, name: 'regular' },
   { role: 'picker', home: 5, name: 'picker 2', gear: 1 }, // (two pickers, to keep the mill busy)
   { role: 'cooper', home: 1, name: 'cooper' }, // (lives with the woodworker)
+  { role: 'woodworker', home: 0, name: 'woodworker 2' }, // (lodges with the lumberjack: one woodworker couldn't saw all the logs)
 ];
 const ROLES = VILLAGERS.map((v) => v.role);
 /** Which building each person lives in (index into SITES). */
@@ -241,7 +242,7 @@ stock(innKegs, num('emptykegs', 1), 'keg', 0);
 const DRY_TIME = 120;
 
 /** The inn's kitchen fire burns a piece every so often (game hours: the slow evening burns no faster per hour). */
-const BURN_EVERY = 1.5;
+const BURN_EVERY = 1.25;
 let burnClock = 0;
 // the cooperage, between the woodworker's and the yard (its local +z toward the yard):
 // the shaving horse and the block side by side, firewood for staves and the empty kegs behind
