@@ -171,6 +171,9 @@ export class Stage {
     this.controls.target.set(num('tx', 0), 0.5, num('tz', 0)); // ?tx=&tz= look somewhere else (screenshots)
     camera.position.add(new THREE.Vector3(num('tx', 0), 0.5, num('tz', 0)));
     this.controls.enableDamping = true;
+    // pan across the ground, not the screen: panning in the screen's plane (the default) lifts the pivot
+    // into the air or sinks it underground the further you go, and then orbiting swings round a far-off point
+    this.controls.screenSpacePanning = false;
     this.controls.maxPolarAngle = Math.PI * 0.49; // down to ~2° above the ground
 
     this.blitMat = gradeMaterial(this.rt.texture);

@@ -39,6 +39,8 @@ export interface TestHookBase {
   ready: true;
   renderer: THREE.WebGLRenderer;
   camera: THREE.OrthographicCamera;
+  /** The orbit controls (the camera's pivot is controls.target). */
+  controls: Stage['controls'];
   people: Person[];
 }
 
@@ -66,6 +68,7 @@ export function runApp(stage: Stage, crowd: Crowd, h: AppHooks) {
         ready: true,
         renderer: stage.renderer,
         camera: stage.camera,
+        controls: stage.controls,
         get people() {
           return crowd.people;
         },
