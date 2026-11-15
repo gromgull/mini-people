@@ -9,10 +9,10 @@ import type { Site } from '../houses';
  * little arrangement that works together:
  *   forest  – the pines, the lumberjack's cabin
  *   pond    – the pond, the fisher's cabin, the fisher's bench
- *   inn     – the inn (facing the yard), its two tables, its kegs, the
- *             street-lamp, and the green in front where they dance of an evening
+ *   inn     – the inn (facing the yard), its three tables, its kegs, the
+ *             street-lamp, two flags, and the green in front where they dance of an evening
  *   orchard – the apple trees, the cider mill and its kegs, the pickers'
- *             baskets and ladders, the picker/miller cabin and the other picker's
+ *             baskets and ladders, the picker's and cider maker's cabin and the other picker's
  *
  * Each district is laid out once (TEMPLATE, in the village's original
  * hand-placed coordinates) and carried rigidly to wherever the seed puts it:
@@ -38,7 +38,7 @@ export interface Round {
 }
 
 export interface Layout {
-  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker/miller cabin, the other picker's. */
+  /** Lumberjack's, woodworker's, fisher's cabins, the inn, the picker's and cider maker's cabin, the other picker's. */
   sites: Site[];
   forest: Round;
   orchard: Round;
@@ -56,12 +56,16 @@ export interface Layout {
   innKegs: Pose;
   /** The cooperage: its shaving horse, block, staves and empty kegs are laid out round it (local +z toward the yard). */
   cooperage: Pose;
-  /** The inn's two tables (the first is the regular's). */
+  /** The inn's three tables (the first is the regular's). */
   tables: Pose[];
+  /** Two flagpoles by the inn. */
+  flags: Pose[];
   /** The street-lamp by the tables (its arm and lantern out along its yaw). */
   lamp: Pose;
   /** The green, where the band plays and everyone dances after supper; the band stands toward `yaw`. */
   green: Round & { yaw: number };
+  /** No layout of this seed worked out, so this is the original hand-placed village (the test fails on it). */
+  fromTemplate: boolean;
   /** Seeds for the things that grow their own shapes. */
   seeds: { houses: number; forest: number; orchard: number; pond: number };
 }
@@ -95,6 +99,9 @@ const TEMPLATE: Record<string, Piece> = {
   site3: P('inn', 1, -14, 0, 3.4),
   table0: P('inn', 3.0, -10.75, 0, 1.4),
   table1: P('inn', 2.8, -8.25, 0, 1.4),
+  table2: P('inn', 5.6, -8.4, 0, 1.4),
+  flag0: P('inn', -1.9, -9.3, 0, 0.3),
+  flag1: P('inn', 7.0, -10.7, 0, 0.3),
   innKegs: P('inn', 4.9, -11.2, -Math.PI / 2, 0.6),
   innFront: P('inn', -0.7, -11.7, 0, 0.9), // (the inn's bench and the door step: room to come and go)
   lamp: P('inn', 1.0, -6.6, Math.atan2(2.0, -2.5), 0.4),
@@ -109,7 +116,7 @@ const TEMPLATE: Record<string, Piece> = {
   site4: P('orchard', 7.4, 9.6, 2.7, 2.3),
   site5: P('orchard', -8.6, 9.4, 1.9, 2.3),
   site1: P('yard', 7.6, -7.6, -0.5, 2.3), // the woodworker's: placed on its own, in the widest gap
-  cooperage: P('yard', 5.3, -4.4, Math.atan2(-5.3, 4.4), 1.5), // placed on its own, between the woodworker's and the yard
+  cooperage: P('yard', 4.6, -4.9, Math.atan2(-4.6, 4.9), 1.3), // placed on its own, beside the woodworker's on the yard side
 };
 /** Each district's anchor: where it's carried from. */
 const ANCHOR: Record<Exclude<District, 'yard'>, { x: number; z: number }> = {
@@ -132,7 +139,9 @@ export function makeLayout(seed: number): Layout {
   const rr = (a: number, b: number) => a + (b - a) * r();
   let placed: Record<string, Piece> | null = null;
   for (let attempt = 0; attempt < 2000 && !placed; attempt++) placed = tryLayout(rr);
-  // (never yet needed: the original village, as it was)
+  // (shouldn't happen: the original village, as it was; said out loud, as it means something's crowding the layout)
+  const fromTemplate = !placed;
+  if (fromTemplate) console.warn(`village layout: nothing fitted for seed ${seed}, using the template`);
   placed ??= TEMPLATE;
   const g = (k: string) => placed![k];
   const pose = (k: string): Pose => ({ x: g(k).x, z: g(k).z, yaw: g(k).yaw });
@@ -154,9 +163,11 @@ export function makeLayout(seed: number): Layout {
     rack: pose('rack'),
     innKegs: pose('innKegs'),
     cooperage: pose('cooperage'),
-    tables: [pose('table0'), pose('table1')],
+    tables: [pose('table0'), pose('table1'), pose('table2')],
+    flags: [pose('flag0'), pose('flag1')],
     lamp: pose('lamp'),
     green: { ...round('green'), yaw: g('green').yaw },
+    fromTemplate,
     seeds: { houses: Math.floor(r() * 1e6), forest: Math.floor(r() * 1e6), orchard: Math.floor(r() * 1e6), pond: Math.floor(r() * 1e6) },
   };
 }
@@ -221,15 +232,14 @@ function tryLayout(rr: (a: number, b: number) => number): Record<string, Piece> 
   return null;
 }
 
-/** The cooperage: out from the woodworker's door toward the yard, a little to one side, facing the yard. */
+/** The cooperage: beside the woodworker's cabin, somewhere on the side toward the yard, facing the yard. */
 function placeCooperage(out: Record<string, Piece>, rr: (a: number, b: number) => number) {
   const w = out.site1;
-  const d = Math.hypot(w.x, w.z);
-  const ix = -w.x / d, iz = -w.z / d; // in toward the yard
-  for (let k = 0; k < 16; k++) {
-    const f = rr(3.2, 4.4), side = rr(-2.2, 2.2);
-    const x = w.x + ix * f - iz * side;
-    const z = w.z + iz * f + ix * side;
+  const inward = Math.atan2(-w.x, -w.z); // from the cabin toward the yard
+  const near = w.r + TEMPLATE.cooperage.r + MARGIN; // as close as the overlap check allows
+  for (let k = 0; k < 24; k++) {
+    const a = inward + rr(-1.9, 1.9), f = near + rr(0.05, 1.2);
+    const x = w.x + Math.sin(a) * f, z = w.z + Math.cos(a) * f;
     out.cooperage = { ...TEMPLATE.cooperage, x, z, yaw: Math.atan2(-x, -z) };
     if (clear(out)) return out;
   }

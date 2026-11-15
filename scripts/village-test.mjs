@@ -47,6 +47,7 @@ const result = await page.evaluate(([secs, rng]) => {
   const since = new Map(); // job index → [step, since]
   const dogDid = new Set(); // what the dog got up to
   const lying = new Map(); // item → since when it's been on the ground
+  const winds = new Set(); // how windy it got, in words
   for (let s = 1; s <= secs; s++) {
     m.step(1);
     const d = m.debug();
@@ -94,7 +95,7 @@ const result = await page.evaluate(([secs, rng]) => {
       if (p.at === 'stack' && p.stack.items[p.slot] !== pc) say(`piece ${pc.id} says ${p.stack.name} slot ${p.slot}, slot has ${p.stack.items[p.slot]?.id}`);
       if (p.at === 'carried' && !d.jobs[p.by]?.armful.includes(pc)) say(`piece ${pc.id} says carried by ${p.by}, who doesn't have it`);
     }
-    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, v.spout, v.cooperage.block, v.cooperage.staves, v.cooperage.empties]) {
+    for (const st of d.stores) {
       st.items.forEach((pc, i) => {
         if (!pc) return;
         if (!v.items.includes(pc)) say(`${st.name} slot ${i} holds a piece that no longer exists`);
@@ -103,7 +104,7 @@ const result = await page.evaluate(([secs, rng]) => {
       if (st.incoming < 0 || st.reserved < 0 || st.reserved > st.count) say(`${st.name} stack books off: incoming ${st.incoming}, reserved ${st.reserved}, count ${st.count}`);
     }
     // bookings: every store's booked room and spoken-for things are exactly what people hold against it
-    for (const st of [v.yard, v.inn, v.rack, v.larder, ...v.baskets, v.mill.hopper, v.millKegs, v.innKegs, v.tankardSpot, v.spout, v.cooperage.block, v.cooperage.staves, v.cooperage.empties, d.pile, ...v.seats.map((x) => x.plate)]) {
+    for (const st of [...d.stores, d.pile]) {
       for (const kind of ['incoming', 'reserved']) {
         const held = d.jobs.reduce((n, j) => n + j.bookings.filter((b) => b.store === st && b.kind === kind).reduce((m, b) => m + b.n, 0), 0);
         if (st[kind] !== held) say(`the ${st.name}'s ${kind} is ${st[kind]}, but people hold ${held}`);
@@ -132,6 +133,7 @@ const result = await page.evaluate(([secs, rng]) => {
     if (!Number.isFinite(dw.x) || !Number.isFinite(dw.z)) say('the dog at NaN');
     if (Math.hypot(dw.x, dw.z) > 40) say(`the dog wandered off to (${dw.x.toFixed(1)}, ${dw.z.toFixed(1)})`);
     dogDid.add(d.dog.doing);
+    winds.add(d.village.wind.words);
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
       if (step !== j.doing) since.set(i, [j.doing, s]);
@@ -143,10 +145,11 @@ const result = await page.evaluate(([secs, rng]) => {
     });
   }
   const d = m.debug();
-  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax };
+  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax, day: d.village.day, winds: [...winds], fromTemplate: d.fromTemplate };
 }, [Number(seconds), rng]);
 
 problems.push(...result.bad);
+if (result.fromTemplate) problems.push(`no layout fitted for seed ${seed}: this is the template village`);
 if (result.stats.felled < 1) problems.push('no tree was felled');
 if (result.stats.sawn < 1) problems.push('no log was sawn');
 if (result.stats.delivered < 1) problems.push('no firewood reached the inn');
@@ -162,6 +165,7 @@ if (result.kegs > result.kegsMax) problems.push(`${result.kegs} kegs in the vill
 if (result.kegs !== result.stats.kegsMade + 2) problems.push(`${result.kegs} kegs, but 2 to start with and ${result.stats.kegsMade} made`);
 if (Number(seconds) >= 900) {
   // a whole day: supper, bed, and up again
+  if (result.day !== 2) problems.push(`it's day ${result.day} after a day and a night (should be 2)`);
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
   if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
   for (const s of ['with its owner', 'begging', 'asleep']) if (!result.dogDid.includes(s)) problems.push(`the dog was never ${s}`);
@@ -174,6 +178,7 @@ console.log(`${seconds}s simulated (seed ${seed}, rng ${rng}): felled ${result.s
 console.log(`  firewood: delivered ${result.stats.delivered}, burned ${result.stats.burned}, yard ${result.wood.yard}, inn ${result.wood.inn}`);
 console.log(`  evening: suppers ${result.stats.meals}, went hungry ${result.stats.hungry}, tunes and dances ${result.stats.evening}, lamp lit ${result.stats.lamps}, went to bed ${result.stats.slept}; it's ${Math.floor(result.hours)}:${String(Math.floor((result.hours % 1) * 60)).padStart(2, '0')}`);
 console.log(`  cider: picked ${result.stats.picked}, milled ${result.stats.milled}, kegs ${result.stats.kegs}, to the inn ${result.stats.kegsIn}, poured ${result.stats.poured}, sips ${result.stats.drunk}`);
+console.log(`  day ${result.day} now; the wind was ${result.winds.join(', ')}`);
 console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);

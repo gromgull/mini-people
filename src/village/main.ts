@@ -12,13 +12,15 @@ import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
 import { buildPerson } from '../body';
 import { Forest } from './forest';
-import { Basket, Bench, CiderMill, Crate, HoopBlock, type Item, KegRack, ShavingHorse, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
+import { Basket, Bench, CiderMill, Crate, Flag, HoopBlock, type Item, KegRack, ShavingHorse, LOG_L, LOG_R, type Log, Rack, Sawhorse, Spot, Stack, StepLadder, type Store, StreetLamp, Woodpile, makeApple, makeFish, makeKeg, makeLog, makeMeal, makeMug, setDry } from './things';
+import { Wind } from './wind';
+import { ROWS } from '../palette';
 import { Orchard } from './orchard';
 import { Pond } from '../pond';
 import { type Chimney, Smoke } from '../smoke';
 import { makePiece } from '../firewood';
 import { nearest, type Obstacle, Walker } from './walk';
-import { Cooper, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, Miller, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
+import { Cooper, Fisher, Innkeeper, type Job, KEGS_MAX, Lumberjack, CiderMaker, NIGHT, Picker, Regular, SERVINGS, SUPPER, type Village, Woodworker, phaseAt, LINGER, STOOD_ABOUT, type StepKind } from './jobs';
 import { InnTable } from './inn';
 import { makeLayout } from './layout';
 import { type AppHooks, runApp } from '../app';
@@ -67,10 +69,10 @@ const L = makeLayout(settings.seed);
 stage.backdrop.build(settings.seed);
 // the lumberjack's cabin (by the forest), the woodworker's, the fisher's (up from
 // the pond), the inn (the innkeeper lives in, the regular has a room), the
-// picker's and the miller's (past the mill), the other picker's (the far side of the orchard)
+// picker's and the cider maker's (past the cider mill), the other picker's (the far side of the orchard)
 const SITES: Site[] = L.sites;
 
-type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'miller' | 'regular' | 'cooper';
+type Role = 'lumberjack' | 'woodworker' | 'fisher' | 'innkeeper' | 'picker' | 'cidermaker' | 'regular' | 'cooper';
 /**
  * Who lives here: each one's job, which building is their home (index into
  * SITES), which picker's basket and ladder are theirs, and what they're
@@ -83,7 +85,7 @@ const VILLAGERS: { role: Role; home: number; name: string; gear?: number }[] = [
   { role: 'fisher', home: 2, name: 'fisher' },
   { role: 'innkeeper', home: 3, name: 'innkeeper' }, // (the innkeeper lives in, and the regular has a room)
   { role: 'picker', home: 4, name: 'picker', gear: 0 },
-  { role: 'miller', home: 4, name: 'miller' },
+  { role: 'cidermaker', home: 4, name: 'cider maker' },
   { role: 'regular', home: 3, name: 'regular' },
   { role: 'picker', home: 5, name: 'picker 2', gear: 1 }, // (two pickers, to keep the mill busy)
   { role: 'cooper', home: 1, name: 'cooper' }, // (lives with the woodworker)
@@ -282,12 +284,15 @@ const table = regularDine.worldFurniture();
 // and a second one just like it in front, so everyone fits at supper
 const tables = [
   new InnTable(stage, table.group, table.dims, SEAT.x, SEAT.z, SEAT.yaw, table.box, 0),
-  (() => {
+  ...[1, 2].map((k) => {
     const t2 = regularDine.worldFurniture();
-    const T2 = L.tables[1];
-    return new InnTable(stage, t2.group, t2.dims, T2.x, T2.z, T2.yaw, t2.box, 4);
-  })(),
+    const T = L.tables[k];
+    return new InnTable(stage, t2.group, t2.dims, T.x, T.z, T.yaw, t2.box, 4 * k);
+  }),
 ];
+// the wind, and two flags by the inn to show it
+const wind = new Wind(settings.seed, q.has('wind') ? num('wind', 0.5) : null);
+const flags = L.flags.map((f, k) => new Flag(stage, f.x, f.z, k ? [ROWS.shirt[1], ROWS.shirt[3]] : [ROWS.shirt[0], ROWS.shirt[6]]));
 const seats = tables.flatMap((t) => t.seats);
 // the street-lamp by the tables, which the innkeeper lights at dusk
 const lamp = new StreetLamp(stage, L.lamp.x, L.lamp.z, L.lamp.yaw);
@@ -340,7 +345,7 @@ function placeLogs() {
 
 // ---------------------------------------------------------------- getting about
 
-// everyone starts the day at their own door (the miller and the picker by the mill, the regular by the inn)
+// everyone starts the day at their own door (the cider maker and the picker by the mill, the regular by the inn)
 const doorOf = (i: number) => {
   const b = houses.buildings[HOME[i]];
   // (two living in one house come and go side by side)
@@ -443,6 +448,8 @@ const village: Village = {
   dt: 0,
   hours: look.time,
   phase: phaseAt(look.time),
+  day: 1,
+  wind,
   tables,
   seats,
   // (the first table's first place: the tankard's spot was laid out in front of it)
@@ -502,7 +509,7 @@ const jobs: Job[] = people.map((p, i) => {
   const pk = VILLAGERS[i].gear;
   const gear = pk !== undefined ? { basket: baskets[pk], ladder: ladders[pk] } : undefined;
   const w = { i, actor: crowd.actors[i], walker: walkers[i], root: p.root, instrument: INSTRUMENT[i], pipe: PIPE[i], home: homes[i], gear };
-  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, miller: Miller, regular: Regular, cooper: Cooper }[ROLES[i]];
+  const J = { lumberjack: Lumberjack, woodworker: Woodworker, fisher: Fisher, innkeeper: Innkeeper, picker: Picker, cidermaker: CiderMaker, regular: Regular, cooper: Cooper }[ROLES[i]];
   return new J(w);
 });
 
@@ -697,7 +704,10 @@ function simulate(dt: number) {
   simTime += dt;
   village.time = simTime;
   village.dt = dt;
+  const was = village.hours;
   village.hours = look.time = (village.hours + dt / secPerHour(village.hours)) % 24;
+  if (village.hours < was) village.day++;
+  wind.update(village.day, village.hours, simTime);
   village.phase = phaseAt(village.hours);
   crowd.beginStep(simTime, null, -1);
   const obs = obstacles();
@@ -803,7 +813,7 @@ if (!q.has('zoom')) {
 
 // ---------------------------------------------------------------- watching it
 
-const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', miller: '⚙', regular: '🍻', cooper: '🛢' };
+const ROLE_ICON: Record<Role, string> = { lumberjack: '🪓', woodworker: '🪚', fisher: '🎣', innkeeper: '🍺', picker: '🍎', cidermaker: '⚙', regular: '🍻', cooper: '🛢' };
 const panel = document.createElement('div');
 panel.style.cssText = 'position:fixed;left:8px;bottom:30px;padding:6px 9px;background:#000a;color:#e8f4d8;font:12px/1.45 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;';
 document.body.appendChild(panel);
@@ -818,6 +828,7 @@ function updatePanel() {
   panel.textContent = [
     ...rows,
     `  🐕 dog        ${dog.doing} (${VILLAGERS[DOG_OWNER].name}'s)`,
+    `day ${village.day} · the wind: ${wind.words} (${wind.strength.toFixed(2)})`,
     `woodpile ${pile.count}/${pile.slots.length}${pile.incoming ? ` (+${pile.incoming} coming)` : ''} · logs lying about ${loose}`,
     `trees standing ${standing}/${forest.trees.length} · felled ${village.stats.felled} · sawn ${village.stats.sawn}`,
     `firewood: yard ${yard.count}/${yard.slots.length} · inn ${innStack.count}/${innStack.slots.length}${innStack.incoming ? ` (+${innStack.incoming} coming)` : ''} · delivered ${village.stats.delivered} · burned ${village.stats.burned}`,
@@ -870,6 +881,9 @@ function focusOn(i: number, k: number) {
   stage.camera.position.copy(c.target).add(off);
 }
 
+let flagTime = 0;
+/** Every store (and the woodpile), for the test's book-keeping checks: anything new that holds things goes here. */
+const allStores = () => [yard, innStack, rack, larder, ...baskets, mill.hopper, millKegs, innKegs, tankardSpot, spout, cooperage.block, cooperage.staves, cooperage.empties, ...seats.map((s) => s.plate)];
 const hooks: AppHooks = {
   paused: () => settings.paused,
   simulate: (dt) => {
@@ -882,7 +896,12 @@ const hooks: AppHooks = {
   follow: (dt, first) => {
     if (follow >= 0) focusOn(follow, first ? 1 : 1 - Math.exp(-dt * 4));
   },
-  scenery: () => pond.update(simTime),
+  scenery: () => {
+    pond.update(simTime);
+    // (the flags fly on simulation time: paused, they hold still)
+    for (const f of flags) f.update(wind.strength, wind.toward, wind.gust, simTime, simTime - flagTime);
+    flagTime = simTime;
+  },
   shadows: () => {
     stage.orient(dog.dog.root.userData.shadow, dog.dog.root.rotation.y);
     forest.orientShadows();
@@ -894,7 +913,7 @@ const hooks: AppHooks = {
     if (frame % 6 === 0) updatePanel();
   },
   testHook: () => ({
-    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX, obstacles: obstacles(), nearest, dogOwner: DOG_OWNER }),
+    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX, obstacles: obstacles(), nearest, dogOwner: DOG_OWNER, stores: allStores(), flags, fromTemplate: L.fromTemplate }),
     follow: (i: number) => (follow = i),
     step: (sec: number) => {
       simulateSteps(Math.round(sec * 30), 1 / 30);

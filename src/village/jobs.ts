@@ -9,6 +9,7 @@ import type { ItemPose } from '../armful';
 import { PIECE_L, PIECE_R } from '../firewood';
 import { restY } from './things';
 import { type Obstacle, type Walker, wrap } from './walk';
+import type { Wind } from './wind';
 
 /**
  * The jobs. Each person runs a small routine of steps (walk somewhere, do
@@ -26,7 +27,7 @@ import { type Obstacle, type Walker, wrap } from './walk';
  *   cooper: kegs. Collects the inn's empties and tightens their hoops; when
  *     there aren't enough empties to go round, takes firewood from the yard
  *     (if the inn can spare it), shaves it into staves and raises a new keg.
- *     The miller fills only kegs the cooper has ready.
+ *     The cider maker fills only kegs the cooper has ready.
  *
  * Claims (on trees and logs) keep two people from going for the same thing.
  * Anyone can trip now and then while walking (see the village's trips). An
@@ -122,9 +123,12 @@ export interface Village {
   wantsRefill(): boolean;
   /** This simulation step's length. */
   dt: number;
-  /** The time of day (hours) and what that means for everyone. */
+  /** The time of day (hours) and what that means for everyone; which day it is (the first is 1). */
   hours: number;
   phase: Phase;
+  day: number;
+  /** The wind (today's: see wind.ts). */
+  wind: Wind;
   /** The inn's tables and their seats. */
   tables: InnTable[];
   seats: Seat[];
@@ -1827,12 +1831,12 @@ export class Picker extends Job {
   }
 }
 
-export class Miller extends Job {
+export class CiderMaker extends Job {
   private fed = 0;
   private turned = 0;
 
   constructor(w: Worker) {
-    super(w, 'miller');
+    super(w, 'cider maker');
   }
 
   private ready(v: Village) {

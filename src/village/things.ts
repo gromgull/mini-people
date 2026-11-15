@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ROWS } from '../palette';
+import { withRow } from '../body';
 import type { Stage } from '../stage';
 import { type Part, bake } from '../trees';
 import { PIECE_L, PIECE_R } from '../firewood';
@@ -790,5 +791,89 @@ export class HoopBlock extends Store {
     this.slots.push({ pos: new THREE.Vector3(0, BLOCK_H + KEG_L / 2, 0), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2) });
     this.reach = 0.42;
     this.place(stage, [{ geo: new THREE.CylinderGeometry(0.13, 0.15, BLOCK_H, 9).translate(0, BLOCK_H / 2, 0), row: ROWS.log[2] }]);
+  }
+}
+
+// ---------------------------------------------------------------- flags
+
+/** A flag's cloth: how long it flies out (m), how deep, and the grid it bends on. */
+const FLAG_W = 0.8, FLAG_H = 0.5, FLAG_NU = 10, FLAG_NV = 4;
+
+/**
+ * A flagpole with a two-striped flag that flies with the wind: out downwind
+ * and rippling when it blows, drooping down the pole when it's calm. The
+ * cloth's vertices are worked out afresh every frame (update); it's drawn
+ * both sides (two meshes, so each face is lit the right way).
+ */
+export class Flag {
+  readonly group = new THREE.Group();
+  private cloth = new THREE.Group();
+  private sides: THREE.BufferGeometry[] = [];
+  /** How far out it's flying (0 limp … 1 straight out), eased so it doesn't jump with the gusts. */
+  private lift = 0;
+  private yaw = 0;
+  private readonly top: number;
+
+  constructor(stage: Stage, readonly x: number, readonly z: number, colors: [number, number], height = 2.3) {
+    this.top = height - 0.06;
+    const parts: Part[] = [
+      { geo: new THREE.CylinderGeometry(0.022, 0.03, height, 6).translate(0, height / 2, 0), row: ROWS.timber[0] },
+      { geo: new THREE.SphereGeometry(0.04, 6, 4).translate(0, height + 0.02, 0), row: ROWS.paint[3] },
+      { geo: new THREE.BoxGeometry(0.16, 0.06, 0.16).translate(0, 0.03, 0), row: ROWS.timber[1] },
+    ];
+    this.group.add(outlined(bake(parts), stage));
+    // the cloth: two stripes, each a grid in (u along the fly, v down the hoist), front and back
+    for (let stripe = 0; stripe < 2; stripe++) {
+      for (const back of [false, true]) {
+        const g = new THREE.PlaneGeometry(1, 1, FLAG_NU, FLAG_NV / 2);
+        if (back) g.index!.array.reverse(); // the other way round: lit from the other side
+        withRow(g, colors[stripe]);
+        const m = new THREE.Mesh(g, stage.toon);
+        m.raycast = () => {};
+        m.userData.stripe = stripe;
+        m.frustumCulled = false;
+        this.sides.push(g);
+        this.cloth.add(m);
+      }
+    }
+    this.cloth.position.set(0, this.top, 0);
+    this.group.add(this.cloth);
+    this.group.position.set(x, 0, z);
+    stage.scene.add(this.group);
+  }
+
+  /** Fly it: wind strength (0…1+), which way it blows (yaw sense), the gusts, the time (s) and how long since last (s). */
+  update(strength: number, toward: number, gust: number, t: number, dt: number) {
+    const want = Math.min(1, Math.max(0, (strength - 0.05) / 0.55));
+    this.lift += (want - this.lift) * Math.min(1, dt * 1.5);
+    // turn to the wind (slowly, the short way round)
+    const err = Math.atan2(Math.sin(toward - this.yaw), Math.cos(toward - this.yaw));
+    this.yaw += err * Math.min(1, dt * 1.2);
+    // the cloth's local +x is downwind
+    this.cloth.rotation.y = this.yaw - Math.PI / 2;
+    const droop = (1 - this.lift) * 1.35 + Math.max(0, -gust) * 0.1 * this.lift; // limp: hanging down the pole
+    const fx = Math.cos(droop), fy = -Math.sin(droop);
+    const amp = (0.03 + 0.06 * this.lift) * FLAG_W;
+    const w = 3 + 9 * this.lift + 3 * Math.max(0, gust);
+    for (let si = 0; si < this.sides.length; si++) {
+      const g = this.sides[si];
+      const stripe = this.cloth.children[si].userData.stripe as number;
+      const pos = g.getAttribute('position') as THREE.BufferAttribute;
+      for (let k = 0; k <= FLAG_NV / 2; k++)
+        for (let i = 0; i <= FLAG_NU; i++) {
+          const u = i / FLAG_NU;
+          const v = (stripe * FLAG_NV) / 2 / FLAG_NV + k / FLAG_NV; // 0 at the top edge … 1 at the bottom
+          const along = u * FLAG_W;
+          // ripples run out along the fly, bigger toward the free end
+          const wave = Math.sin(u * 7 - t * w + v * 0.8) * amp * u;
+          const x = along * fx;
+          const y = -v * FLAG_H + along * fy;
+          const zz = wave;
+          // (PlaneGeometry's vertex order: rows from the top, each left to right)
+          pos.setXYZ(k * (FLAG_NU + 1) + i, x, y, zz);
+        }
+      pos.needsUpdate = true;
+      g.computeVertexNormals();
+    }
   }
 }

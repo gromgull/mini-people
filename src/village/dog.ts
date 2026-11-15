@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Quadruped } from '../quadruped';
 import { QuadAnimator, type QuadMotion, dogSpeeds } from '../quadgait';
-import { type Obstacle, Walker } from './walk';
+import { BODY, type Obstacle, Walker, nearest } from './walk';
 import { AT_SUPPER, ON_GREEN, type StepKind } from './jobs';
 
 /**
@@ -12,7 +12,8 @@ import { AT_SUPPER, ON_GREEN, type StepKind } from './jobs';
  *                   sits looking up at them, lies down once they've been at it
  *                   a while, sniffs about, goes to say hello to whoever's
  *                   near (a wag, sometimes a bark)
- *   begging         at supper: sat by its owner at the table, looking up, wagging
+ *   begging         at supper: sat by its owner at the table (or the kitchen hatch, an
+ *                   innkeeper's dog), looking up, wagging
  *   on the green    of an evening: trotting about among the dancers, now and
  *                   then sitting at the edge, the odd bark
  *   asleep          at night: lying at its owner's door till they come out
@@ -87,9 +88,9 @@ export class VillageDog {
     if (o.speed > 0.05) this.stillSince = w.time;
 
     if (o.asleep) {
-      // night: to the door, and down for the night
+      // night: to the door, and down for the night (beside it, wherever there's room to lie)
       const side = new THREE.Vector3(Math.cos(w.home.yaw), 0, -Math.sin(w.home.yaw)).multiplyScalar(0.7);
-      const at = { x: w.home.x + side.x + Math.sin(w.home.yaw) * 0.3, z: w.home.z + side.z + Math.cos(w.home.yaw) * 0.3 };
+      const at = clearSpot(w.home.x + side.x + Math.sin(w.home.yaw) * 0.3, w.home.z + side.z + Math.cos(w.home.yaw) * 0.3, w.obstacles);
       if (this.doing !== 'asleep' && this.doing !== 'going home') {
         this.doing = 'going home';
         this.go(at.x, at.z, w.home.yaw, Math.hypot(at.x - me.x, at.z - me.z) > 4);
@@ -98,8 +99,8 @@ export class VillageDog {
         this.settle('lie', null, 0, Infinity);
         this.anim.eyesShut = true;
       }
-    } else if (AT_SUPPER.has(o.doing)) {
-      // supper: sat by the owner's place, begging
+    } else if (AT_SUPPER.has(o.doing) || o.doing === 'cooking') {
+      // supper: sat by the owner's place begging (or by the hatch, if they're the one cooking it)
       if (this.doing !== 'begging' || (me.arrived && dOwner > 1.2)) {
         this.doing = 'begging';
         // (out past the end of their bit of bench, a little behind them)
@@ -240,4 +241,17 @@ export class VillageDog {
     }
     a.gazeAt = this.glance?.() ?? null;
   }
+}
+
+/** (x, z) if there's room there for a dog to lie, else the nearest spot round about that has it. */
+function clearSpot(x: number, z: number, obstacles: Obstacle[]) {
+  const roomy = (px: number, pz: number) => obstacles.every((o) => nearest(o, px, pz).gap >= BODY + 0.05);
+  if (roomy(x, z)) return { x, z };
+  for (let r = 0.25; r <= 1.5; r += 0.25)
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      const px = x + Math.sin(a) * r, pz = z + Math.cos(a) * r;
+      if (roomy(px, pz)) return { x: px, z: pz };
+    }
+  return { x, z };
 }

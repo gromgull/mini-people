@@ -154,7 +154,7 @@ The layout comes from the seed (`?seed=n`), along with the villagers.
 Without one you get a village of your own: a random seed, put in the address
 so a reload or a shared link keeps it. A woodyard sits in the middle, with
 four districts around it: the forest with the lumberjack's cabin; the pond
-with the fisher's cabin and bench; the inn with its tables, kegs,
+with the fisher's cabin and bench; the inn with its three tables, kegs, flags,
 street-lamp and the green where they dance; and the orchard with the cider
 mill, the pickers' baskets and ladders and their cabins. Each seed shuffles
 their order around the yard and gives each district its own direction,
@@ -200,7 +200,7 @@ So far it has one chain:
   it down under the apple, step up, pick, and step down again. The ladder
   stays where it was left. With five apples they carry the basket to the
   cider mill and tip them into its hopper. Picked apples grow back.
-- **The miller** fetches an empty keg from the cooper's and stands it under
+- **The cider maker** fetches an empty keg from the cooper's and stands it under
   the mill's spout, then turns the crank once the hopper holds twelve
   apples; the apples go down one by one, the keg fills, and they carry it
   to the keg rack. No empty keg, no cider.
@@ -215,6 +215,12 @@ So far it has one chain:
   raise a new keg on the block and hammer its hoops on.
 - **The regular** has no job. They sit at the inn's table, sip cider every
   so often, and wait when the tankard's empty.
+- **The wind:** every day has its own: about a quarter are calm, half
+  breezy, a quarter windy, drifting through the day with gusts on top, from
+  a prevailing direction that wanders a little. The two flags by the inn
+  fly out downwind and ripple when it blows, and hang limp down the pole
+  when it's calm. The panel shows the day and the wind (`?wind=0…1` holds it
+  at one strength).
 - **Trips:** now and then (about once in twenty minutes of walking each,
   `?trip=n` for n times as often) someone walking along trips and goes flat,
   and anyone nearby stops to stare. Whatever they were carrying goes down
@@ -289,7 +295,7 @@ and the haul and the saw use the actual log.
 | space | pause |
 | `F` | speed ×1 / ×4 / ×16 |
 | `?seed=n` | which village (left out, you get a random one, written into the address so it stays yours) |
-| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none) |
+| `?follow=i`, `?speed=n`, `?logs=n`, `?wood=n`, `?innwood=n`, `?fish=n`, `?rackfish=n`, `?apples=n`, `?kegs=n`, `?emptykegs=n`, `?trip=n`, `?wind=s` | follow someone, run faster, start with logs in the pile, firewood in the yard / at the inn, dried fish in the larder, fish on the rack, apples in the hopper, full and empty kegs at the inn, n times the trips (0: none), the wind held at s (0 still … 1 windy) |
 
 The panel at the bottom left (hidden at first: tick "who's doing what" in
 the menu, or `?panel=1`) shows who's doing what, the woodpile and the
