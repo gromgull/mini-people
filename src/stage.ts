@@ -1,3 +1,4 @@
+import { type Grade, gradeFromQuery, gradeMaterial, setGrade } from './grade';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ROWS, createAtlas, defaultRamp, fillAtlas } from './palette';
@@ -37,6 +38,8 @@ export interface Look {
   maxFps: number;
   stats: boolean;
   grass: typeof defaultGrass;
+  /** The colour grade over the finished frame (see grade.ts). */
+  grade: Grade;
 }
 
 export const q = new URLSearchParams(location.search);
@@ -57,6 +60,7 @@ export function lookFromQuery(defaults: { time?: number } = {}): Look {
     maxFps: num('maxfps', 30), // render cap; 0 = every display refresh (60/120 Hz)
     stats: q.has('stats'), // fps / frame time / draw calls overlay
     grass: { ...defaultGrass, flowers: num('flowers', defaultGrass.flowers) },
+    grade: gradeFromQuery(q),
   };
 }
 
@@ -107,6 +111,7 @@ export class Stage {
   readonly rt = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true, stencilBuffer: true });
   private blitScene = new THREE.Scene();
   private blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private blitMat!: THREE.ShaderMaterial;
   private horizonFar = 30;
   /** Seconds the world has run (not wall time): the stars' twinkle. */
   private skyClock = 0;
@@ -168,7 +173,8 @@ export class Stage {
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI * 0.49; // down to ~2° above the ground
 
-    this.blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.rt.texture })));
+    this.blitMat = gradeMaterial(this.rt.texture);
+    this.blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMat));
     window.addEventListener('resize', () => this.resize());
 
     this.statsEl.style.cssText = 'position:fixed;left:8px;top:8px;padding:4px 7px;background:#000a;color:#e8f4d8;font:12px/1.35 ui-monospace,monospace;white-space:pre;pointer-events:none;border-radius:3px;z-index:10;';
@@ -328,6 +334,7 @@ export class Stage {
     const calls = r.info.render.calls;
     const tris = r.info.render.triangles;
     r.setRenderTarget(null);
+    setGrade(this.blitMat, this.look.grade, this.rt.width, this.rt.height);
     r.render(this.blitScene, this.blitCam);
     this.stats(frameStart, calls, tris, peopleCount);
   }

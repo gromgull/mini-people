@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import GUI from 'lil-gui';
+import { gradeGui } from './grade';
 import type { Person } from './body';
 import { BEARD_STYLES, type Genome, HAIR_STYLES, SHAPE_GENES, randomGenome } from './genome';
 import { PALETTE } from './palette';
@@ -697,6 +698,7 @@ look.add(settings, 'outline');
 look.add(settings, 'outlinePx', 0.5, 3, 0.25).name('outline px');
 look.addColor(settings, 'outlineColor').name('outline color');
 
+gradeGui(look, settings.grade).close();
 const grassF = look.addFolder('Ground').close();
 grassF.add(settings.grass, 'scale', 1, 20, 0.1).name('patch size');
 grassF.add(settings.grass, 'ragged', 0, 0.4, 0.005).name('edge raggedness');

@@ -7,6 +7,7 @@ import { Animator } from '../animate';
 import { Actor, kindIs } from '../actions';
 import { Gaze } from '../gaze';
 import GUI from 'lil-gui';
+import { gradeGui } from '../grade';
 import { PARTS_LAYER } from '../skin';
 import { mulberry32 } from '../rng';
 import { SHAPE_GENES, randomGenome } from '../genome';
@@ -969,6 +970,7 @@ gui.add(settings, 'panel').name("who's doing what");
 gui.add(look, 'time', 0, 24, 0.05).name('time of day (h)').decimals(2).listen().onChange((h: number) => (village.hours = h));
 gui.add(look, 'stats').name('show fps');
 gui.add({ none: () => (follow = -1) }, 'none').name('stop following');
+gradeGui(gui, look.grade).close();
 
 // click someone to follow them
 const ray = new THREE.Raycaster();
