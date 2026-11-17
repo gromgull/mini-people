@@ -7,7 +7,7 @@ import { PARTS_LAYER } from './skin';
 import { Trees } from './trees';
 import { Pond } from './pond';
 import { Houses } from './houses';
-import { buildDog, type Quadruped, randomDog } from './quadruped';
+import { buildDog, type Quadruped, randomCat, randomDog } from './quadruped';
 import { QuadAnimator, type QuadMotion } from './quadgait';
 import { type AppHooks, runApp } from './app';
 import { BANJO, BASS, banjoChord, degToHz, makeTune } from './tune';
@@ -94,6 +94,23 @@ for (let k = 0; k < num('dogs', 0); k++) {
   if (pose === 'sit' || pose === 'lie' || pose === 'sniff') anim.setPose(pose);
   anim.wag = num('dogwag', 0);
   dogGait.push({ anim, m: { phase: (k * 0.37) % 1, speed: num('dogspeed', 0) }, home: dog.root.position.clone(), a: 0 });
+}
+// ?cats=n: the same with cats (?catseed, ?catyaw); ?catpose=sit|lie|loaf|curl|groom|stretch|sniff,
+// ?catspeed=v walks them round, ?catprowl=0…1 low and stalking
+for (let k = 0; k < num('cats', 0); k++) {
+  const cat = buildDog(randomCat(num('catseed', 1) + k), toon, outline, { skin: stage.skinMats });
+  cat.root.position.set((k - (num('cats', 0) - 1) / 2) * 0.5, 0, num('dogs', 0) ? 2.0 : 1.2);
+  cat.root.rotation.y = num('catyaw', 0.9);
+  const c = stage.makeCaster(cat.dims.bodyLen * 0.9, cat.height);
+  cat.root.add(c.pivot);
+  cat.root.userData.shadow = c;
+  scene.add(cat.root);
+  dogs.push(cat);
+  const anim = new QuadAnimator(cat);
+  const pose = q.get('catpose');
+  if (pose) anim.setPose(pose as 'sit');
+  anim.prowlTo = num('catprowl', 0);
+  dogGait.push({ anim, m: { phase: (k * 0.37) % 1, speed: num('catspeed', 0) }, home: cat.root.position.clone(), a: 0 });
 }
 function stepDogs(dt: number) {
   dogGait.forEach((g, k) => {

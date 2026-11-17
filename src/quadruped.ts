@@ -6,8 +6,11 @@ import { type Skin, bakeSkin } from './skin';
 
 /**
  * A four-legged rig in the same style as the people: tapered cylinders and
- * balls, toon-shaded and outlined, merged into one draw call. For now a dog;
- * the same skeleton with other proportions makes sheep, goats or a cow.
+ * balls, toon-shaded and outlined, merged into one draw call. A dog, or (the
+ * genome's `kind`) a cat: smaller and slimmer, a round head with a flat face,
+ * whiskers and a pink nose, upright triangular ears, slit pupils in amber or
+ * green eyes, and a long thin tail. The same skeleton with other proportions
+ * would make sheep, goats or a cow.
  *
  * Facing +z. The spine is two joints (hips and chest) so the back can flex;
  * a neck and head; ears; a tail of three segments; and four legs of two
@@ -27,8 +30,12 @@ export type QuadJoint = (typeof QUAD_JOINTS)[number];
 
 export const EAR_STYLES = ['pointed', 'floppy', 'round'] as const;
 
-/** What makes this dog this dog: size and build, and its coat. */
+/** What makes this dog (or cat) this one: size and build, and its coat. */
 export interface DogGenome {
+  /** A dog unless it says cat. */
+  kind?: 'dog' | 'cat';
+  /** A cat's eyes: amber (0) or green (1). */
+  eyeColour?: number;
   size: number; // overall scale, ~0.8 … 1.2
   length: number; // body length, 0 … 1
   legs: number; // leg length, 0 … 1
@@ -64,10 +71,52 @@ export function randomDog(seed: number): DogGenome {
   };
 }
 
+/** A cat: ginger, black, grey, white, brown or cream, often with white points; a long tail held up. */
+export function randomCat(seed: number): DogGenome {
+  const r = mulberry32(seed * 5303 + 29);
+  // fur rows: cream, tan (ginger), red-brown, choco, black, grey, white
+  const coat = [1, 1, 2, 4, 4, 5, 5, 6, 0, 3][Math.floor(r() * 10)];
+  return {
+    kind: 'cat',
+    size: 0.78 + r() * 0.2,
+    length: r(),
+    legs: r(),
+    girth: r(),
+    head: r(),
+    snout: r(),
+    ears: 0,
+    tail: r(),
+    curl: 0,
+    coat,
+    points: coat !== 6 && r() < 0.5 ? r() : 0,
+    darkEars: false,
+    eyeColour: r() < 0.55 ? 0 : 1,
+  };
+}
+
 /** Lengths and sizes, in metres, from the genome. */
 export function dogDims(g: DogGenome) {
   const s = g.size;
   const L = (a: number, b: number, t: number) => (a + (b - a) * t) * s;
+  if (g.kind === 'cat') {
+    const upper = L(0.07, 0.082, g.legs);
+    const lower = L(0.066, 0.078, g.legs);
+    return {
+      s,
+      bodyLen: L(0.22, 0.28, g.length),
+      girth: L(0.058, 0.07, g.girth),
+      upper,
+      lower,
+      thigh: upper * 1.1,
+      shank: lower * 1.05,
+      meta: lower * 0.45,
+      pawR: L(0.018, 0.021, g.girth),
+      neckLen: L(0.05, 0.065, g.length),
+      headR: L(0.07, 0.078, g.head),
+      snoutLen: L(0.008, 0.015, g.snout),
+      tailLen: L(0.26, 0.32, g.tail),
+    };
+  }
   const upper = L(0.11, 0.16, g.legs);
   const lower = L(0.1, 0.15, g.legs);
   const pawR = L(0.028, 0.034, g.girth);
@@ -157,11 +206,12 @@ export function buildDog(
   const head = joint('head', neck, 0, d.neckLen, 0);
   head.rotation.x = -0.55; // face forward again
 
-  // --- body: a ball at the hips, a bigger one at the chest, a belly between
-  part(hips, egg(G * 0.92, G * 0.9, G * 1.15, coat));
-  part(chest, egg(G * 1.05, G * 1.08, G * 1.25, coat));
+  // --- body: a ball at the hips, a bigger one at the chest, a belly between (a cat: a deeper chest, a slim waist)
+  const isCat = g.kind === 'cat';
+  part(hips, egg(G * (isCat ? 0.85 : 0.92), G * (isCat ? 0.88 : 0.9), G * 1.15, coat));
+  part(chest, egg(G * 1.05, G * (isCat ? 1.15 : 1.08), G * 1.25, coat));
   {
-    const belly = new THREE.CylinderGeometry(G * 0.95, G * 0.88, d.bodyLen, segs + 2, 1, true).rotateX(Math.PI / 2).translate(0, -G * 0.02, d.bodyLen / 2);
+    const belly = new THREE.CylinderGeometry(G * (isCat ? 0.8 : 0.95), G * (isCat ? 0.72 : 0.88), d.bodyLen, segs + 2, 1, true).rotateX(Math.PI / 2).translate(0, -G * 0.02, d.bodyLen / 2);
     part(hips, withRow(belly, coat));
   }
   // a pale bib on the chest
@@ -171,8 +221,19 @@ export function buildDog(
   part(neck, limb(d.neckLen * 1.1, G * 0.55, G * 0.62, segs, coat).rotateX(Math.PI).translate(0, 0, 0));
   const hr = d.headR;
   part(head, egg(hr, hr * 0.95, hr * 1.05, coat));
+  const cat = g.kind === 'cat';
   // the snout: a tapered tube out of the lower front of the face, the nose at its tip
-  {
+  // (a cat: just whisker pads under a small pink nose, and whiskers)
+  if (cat) {
+    for (const sx of [-1, 1]) part(head, egg(hr * 0.2, hr * 0.16, hr * 0.15, g.points > 0.15 ? white : coat).translate(sx * hr * 0.14, -hr * 0.3, hr * 0.84), false);
+    part(head, egg(hr * 0.1, hr * 0.07, hr * 0.06, ROWS.lips[6]).translate(0, -hr * 0.15, hr * 0.98), false);
+    part(head, egg(hr * 0.16, hr * 0.025, hr * 0.03, ROWS.nose[0]).translate(0, -hr * 0.46, hr * 0.84), false);
+    for (const sx of [-1, 1])
+      for (let k = 0; k < 3; k++) {
+        const w = new THREE.BoxGeometry(hr * 0.75, 0.0025, 0.0025).translate(sx * hr * 0.37, 0, 0).rotateZ(sx * (k - 1) * 0.18).translate(sx * hr * 0.22, -hr * 0.3 + (k - 1) * hr * 0.05, hr * 0.92);
+        part(head, withRow(w, ROWS.cloud[0]), false);
+      }
+  } else {
     const sn = d.snoutLen;
     const tube = new THREE.CylinderGeometry(hr * 0.36, hr * 0.5, sn, segs + 2, 1, false).rotateX(Math.PI / 2).translate(0, -hr * 0.28, hr * 0.72 + sn / 2);
     part(head, withRow(tube, g.points > 0.15 ? white : coat));
@@ -184,13 +245,14 @@ export function buildDog(
   const eyes: Eye[] = [];
   for (const sgn of [1, -1]) {
     const pivot = new THREE.Object3D();
-    pivot.position.set(sgn * hr * 0.42, hr * 0.28, hr * 0.78);
+    pivot.position.set(sgn * hr * (cat ? 0.38 : 0.42), hr * (cat ? 0.12 : 0.28), hr * (cat ? 0.8 : 0.78));
     pivot.rotation.y = sgn * 0.3;
     head.add(pivot);
-    const er = hr * 0.24;
-    part(pivot, ball(er, segs + 2, ROWS.eyeWhite[0]));
+    const er = hr * (cat ? 0.27 : 0.24);
+    // (a cat's eyes are amber or green all over, with a slit of a pupil)
+    part(pivot, ball(er, segs + 2, cat ? (g.eyeColour ? ROWS.leaf[2] : ROWS.food[2]) : ROWS.eyeWhite[0]));
     const pg = ball(er * 0.58, segs, ROWS.eye[0]);
-    pg.scale(1, 1, 0.6);
+    pg.scale(cat ? 0.32 : 1, cat ? 1.25 : 1, 0.6);
     const pupil = part(pivot, pg, false);
     pupil.position.z = er * 0.7;
     eyes.push({ pivot, pupil, r: er });
@@ -198,7 +260,13 @@ export function buildDog(
   // ears
   for (const [sgn, name] of [[1, 'earL'], [-1, 'earR']] as const) {
     const style = EAR_STYLES[g.ears];
-    if (style === 'pointed') {
+    if (cat) {
+      // upright triangles, wide at the base, pink inside
+      const ear = joint(name, head, sgn * hr * 0.5, hr * 0.62, -hr * 0.02);
+      ear.rotation.z = -sgn * 0.28;
+      part(ear, withRow(new THREE.ConeGeometry(hr * 0.36, hr * 0.62, 3).rotateY(Math.PI).scale(1, 1, 0.5).translate(0, hr * 0.25, 0), earRow));
+      part(ear, withRow(new THREE.ConeGeometry(hr * 0.22, hr * 0.4, 3).rotateY(Math.PI).scale(1, 1, 0.3).translate(0, hr * 0.2, hr * 0.06), ROWS.lips[6]), false);
+    } else if (style === 'pointed') {
       const ear = joint(name, head, sgn * hr * 0.5, hr * 0.7, -hr * 0.1);
       ear.rotation.z = -sgn * 0.3;
       part(ear, withRow(new THREE.ConeGeometry(hr * 0.3, hr * 0.75, 4).rotateY(Math.PI / 4).scale(1, 1, 0.55).translate(0, hr * 0.3, 0), earRow));
@@ -222,14 +290,15 @@ export function buildDog(
     const t2 = joint('tail2', t1, 0, -seg, 0);
     t1.rotation.x = -0.25 - g.curl * 0.6;
     t2.rotation.x = -0.2 - g.curl * 0.7;
-    const r0 = G * 0.22;
+    const r0 = G * (cat ? 0.17 : 0.22);
     part(t0, limb(seg, r0, r0 * 0.8, segs, coat));
     part(t1, limb(seg, r0 * 0.8, r0 * 0.6, segs, coat));
     part(t2, limb(seg, r0 * 0.6, r0 * 0.3, segs, g.points > 0.5 ? white : coat));
   }
 
   // --- legs
-  const pawGeo = (row: number) => egg(d.pawR * 1.15, d.pawR * 0.75, d.pawR * 1.5, row).translate(0, 0, d.pawR * 0.45);
+  const pawGeo = (row: number) => egg(d.pawR * 1.15, d.pawR * 0.75, d.pawR * (cat ? 1.25 : 1.5), row).translate(0, 0, d.pawR * 0.45);
+  const lw = cat ? 0.92 : 1; // (a cat's legs are a touch slimmer)
   for (const [sgn, L] of [[1, 'L'], [-1, 'R']] as const) {
     // front: shoulder → elbow → wrist (the paw), straight down and a touch back
     const sh = joint(`shoulder${L}`, chest, sgn * G * 0.6, -G * 0.3, G * 0.3);
@@ -237,8 +306,8 @@ export function buildDog(
     const wr = joint(`wrist${L}`, el, 0, -d.lower, 0);
     sh.rotation.x = A.shoulder;
     el.rotation.x = A.elbow;
-    part(sh, limb(d.upper, G * 0.36, G * 0.26, segs, coat));
-    part(el, limb(d.lower, G * 0.26, G * 0.22, segs, accent === white && g.points > 0.65 ? white : coat));
+    part(sh, limb(d.upper, G * 0.36 * lw, G * 0.26 * lw, segs, coat));
+    part(el, limb(d.lower, G * 0.26 * lw, G * 0.22 * lw, segs, accent === white && g.points > 0.65 ? white : coat));
     wr.rotation.x = -(A.shoulder + A.elbow); // paw flat on the ground
     part(wr, pawGeo(accent));
     // hind: hip → stifle (forward) → hock (back) → the raised segment → the paw
@@ -250,9 +319,9 @@ export function buildDog(
     st.rotation.x = A.stifle;
     hk.rotation.x = A.hock;
     pw.rotation.x = -(A.hip + A.stifle + A.hock);
-    part(hp, limb(d.thigh, G * 0.48, G * 0.3, segs, coat)); // a meaty thigh
-    part(st, limb(d.shank, G * 0.27, G * 0.2, segs, coat));
-    part(hk, limb(d.meta, G * 0.2, G * 0.19, segs, accent === white && g.points > 0.65 ? white : coat));
+    part(hp, limb(d.thigh, G * 0.48 * lw, G * 0.3 * lw, segs, coat)); // a meaty thigh
+    part(st, limb(d.shank, G * 0.27 * lw, G * 0.2 * lw, segs, coat));
+    part(hk, limb(d.meta, G * 0.2 * lw, G * 0.19 * lw, segs, accent === white && g.points > 0.65 ? white : coat));
     part(pw, pawGeo(accent));
   }
 

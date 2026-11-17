@@ -168,8 +168,9 @@ export class Stage {
       camera.position.set(Math.sin(az) * Math.cos(el) * R, Math.sin(el) * R, Math.cos(az) * Math.cos(el) * R);
     }
     this.controls = new OrbitControls(camera, r.domElement);
-    this.controls.target.set(num('tx', 0), 0.5, num('tz', 0)); // ?tx=&tz= look somewhere else (screenshots)
-    camera.position.add(new THREE.Vector3(num('tx', 0), 0.5, num('tz', 0)));
+    // ?tx=&tz= look somewhere else (screenshots); ?ty= how high (0.5 m: lower for something small, a cat)
+    this.controls.target.set(num('tx', 0), num('ty', 0.5), num('tz', 0));
+    camera.position.add(new THREE.Vector3(num('tx', 0), num('ty', 0.5), num('tz', 0)));
     this.controls.enableDamping = true;
     // pan across the ground, not the screen: panning in the screen's plane (the default) lifts the pivot
     // into the air or sinks it underground the further you go, and then orbiting swings round a far-off point

@@ -130,6 +130,8 @@ Handy for sharing a particular scene, e.g.
 | `maxfps` | render frame-rate cap (default 30; 0 = uncapped) |
 | `stats` | start with the fps / frame time / draw call overlay on |
 | `dogs=n` (`dogseed`, `dogyaw`, `dogspeed`, `dogtread`, `dogpose=sit\|lie\|sniff`, `dogwag`) | a row of dogs: which ones, which way they face, walking or trotting round (or on the spot), sitting, lying or sniffing, wagging |
+| `cats=n` (`catseed`, `catyaw`, `catspeed`, `catprowl=0…1`, `catpose=sit\|loaf\|curl\|groom\|stretch\|lie\|sniff`) | a row of cats: the same rig, smaller and slimmer, a flat face with whiskers, slit pupils, a tail held up with the tip curled over; prowling low, sitting up, loafing, curled up, grooming, stretching |
+| `ty=h` | how high the camera looks (0.5 m; lower for something small) |
 | `smooth=1` | smooth shading instead of bands |
 | `outline=0` | no outlines |
 | `time` | time of day in hours, 0–24 (default 10; 18 ≈ sunset, 0 = midnight) |

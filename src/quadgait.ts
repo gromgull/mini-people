@@ -18,6 +18,13 @@ import type { Quadruped } from './quadruped';
  * stifle forward), the hind leg's short raised segment tilting back as the
  * paw comes up; paws land flat. The head keeps steady against the bob and
  * the tail swings with the stride.
+ *
+ * A cat (the genome's kind) walks the same way, slower, and also prowls
+ * (`prowlTo`: body and head low, short low steps, tail low with a twitching
+ * tip), carries its tail up with the tip curled over when it's not, wraps it
+ * round its paws sitting or lying, and has poses of its own: curled up
+ * asleep, the loaf (paws tucked under), grooming (a paw up to the face) and
+ * the stretch (front paws out, chest down).
  */
 
 export interface QuadMotion {
@@ -43,8 +50,12 @@ interface Gait {
 const WALK: Gait = { off: [0.25, 0.75, 0, 0.5], duty: 0.64, stride: 1.6, lift: 0.16 };
 const TROT: Gait = { off: [0.5, 1.0, 0, 0.5], duty: 0.42, stride: 2.2, lift: 0.22 };
 
-/** A dog's walking and trotting speeds (m/s, scaled by its size). */
-export const dogSpeeds = (dog: Quadruped) => ({ walk: 0.45 * dog.dims.s, trot: 1.1 * dog.dims.s });
+/** A dog's walking and trotting speeds (m/s, scaled by its size); a cat's are slower. */
+export const dogSpeeds = (dog: Quadruped) => (dog.genome.kind === 'cat' ? { walk: 0.32 * dog.dims.s, trot: 0.85 * dog.dims.s } : { walk: 0.45 * dog.dims.s, trot: 1.1 * dog.dims.s });
+
+/** The poses, all of them (curl, groom, stretch and loaf are a cat's). */
+export type QuadPose = 'stand' | 'sit' | 'lie' | 'sniff' | 'curl' | 'groom' | 'stretch' | 'loaf';
+const POSES = ['sit', 'lie', 'sniff', 'curl', 'groom', 'stretch', 'loaf'] as const;
 
 const smooth = (t: number) => {
   const c = Math.min(1, Math.max(0, t));
@@ -60,6 +71,7 @@ const _qRoot = new THREE.Quaternion();
 const _qParent = new THREE.Quaternion();
 const _qPitch = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
 
 interface Leg {
   front: boolean;
@@ -101,8 +113,12 @@ export class QuadAnimator {
   /** Extra tail wag (0 … 1), set by whoever's driving. */
   wag = 0;
   /** How far into each pose it is now (0 … 1), and where it's heading. */
-  readonly pose = { sit: 0, lie: 0, sniff: 0 };
-  private want = { sit: 0, lie: 0, sniff: 0 };
+  readonly pose = { sit: 0, lie: 0, sniff: 0, curl: 0, groom: 0, stretch: 0, loaf: 0 };
+  private want = { sit: 0, lie: 0, sniff: 0, curl: 0, groom: 0, stretch: 0, loaf: 0 };
+  /** A cat: how low and stalking (0 … 1), and what it's easing toward. */
+  prowl = 0;
+  prowlTo = 0;
+  private readonly cat: boolean;
   /** Where it's looking, head and all (world), or nowhere in particular. */
   look: THREE.Vector3 | null = null;
   /** Where its eyes are on (world): a glance; the head turns part of the way. (`look` wins.) */
@@ -120,15 +136,14 @@ export class QuadAnimator {
   events: string[] = [];
 
   /** Settle into a pose (the gait carries on underneath: stand still for sit and lie). */
-  setPose(kind: 'stand' | 'sit' | 'lie' | 'sniff') {
-    this.want.sit = kind === 'sit' ? 1 : 0;
-    this.want.lie = kind === 'lie' ? 1 : 0;
-    this.want.sniff = kind === 'sniff' ? 1 : 0;
+  setPose(kind: QuadPose) {
+    for (const k of POSES) this.want[k] = kind === k ? 1 : 0;
   }
 
-  /** Down (sitting or lying) or on the way: not for walking off just yet. */
+  /** Down (sitting or lying, or a cat's sitting and lying poses) or on the way: not for walking off just yet. */
   get down() {
-    return this.pose.sit + this.pose.lie > 0.05;
+    const P = this.pose;
+    return P.sit + P.lie + P.curl + P.groom + P.loaf + P.stretch > 0.05;
   }
 
   bark() {
@@ -148,6 +163,7 @@ export class QuadAnimator {
     this.chestUp = J.chest.position.y;
     this.chestRestY = J.hips.position.y + J.chest.position.y;
     this.G = d.girth;
+    this.cat = dog.genome.kind === 'cat';
     this.pupils = dog.eyes.map(() => [new Spring(), new Spring()]);
     this.tailRest = [J.tail0.rotation.x, J.tail1.rotation.x, J.tail2.rotation.x];
     dog.root.updateMatrixWorld(true);
@@ -180,7 +196,7 @@ export class QuadAnimator {
   cycle(speed: number) {
     const g = this.gait(speed);
     const w = Math.min(1, speed / dogSpeeds(this.dog).walk);
-    return this.legLen * g.stride * (0.35 + 0.65 * Math.sqrt(w));
+    return this.legLen * g.stride * (0.35 + 0.65 * Math.sqrt(w)) * (1 - 0.35 * this.prowl); // (stalking: short steps)
   }
 
   /** Move the stride on for the distance covered. */
@@ -203,14 +219,20 @@ export class QuadAnimator {
     const w = Math.min(1.2, m.speed / sp.walk); // 0 standing … 1 walking
     const C = this.cycle(m.speed) * Math.min(1, w * 4); // (collapses to nothing standing still)
     const D = g.duty * C; // how far a planted paw slides back
-    const lift = this.legLen * g.lift * Math.min(1, w);
+    const lift = this.legLen * g.lift * Math.min(1, w) * (1 - 0.4 * this.prowl);
     // poses ease in and out (lying goes via a sit: the back end goes down first)
     const P = this.pose;
     const ease = Math.min(1, dt / 0.55);
-    for (const k of ['sit', 'lie', 'sniff'] as const) P[k] += (this.want[k] - P[k]) * ease;
-    const sit = Math.min(1, P.sit + P.lie * 0.6); // the back end's down
-    const lie = P.lie;
+    for (const k of POSES) P[k] += (this.want[k] - P[k]) * ease;
+    this.prowl += (this.prowlTo - this.prowl) * Math.min(1, dt * 2);
+    const prowl = this.prowl;
+    // (a cat's: grooming is sat; curled up and the loaf are lying down)
+    const lying = Math.min(1, P.lie + P.curl + P.loaf);
+    const sit = Math.min(1, P.sit + P.groom + lying * 0.6); // the back end's down
+    const lie = lying;
     const fold = Math.max(sit, lie);
+    // lying, the front paws out ahead; the loaf and curled up, tucked in under
+    const frontOut = Math.max(0, P.lie - 0.5 * P.curl);
 
     // --- where each paw is
     let landed = false;
@@ -230,9 +252,11 @@ export class QuadAnimator {
       }
       // sitting and lying: hind paws tucked forward under the hips; lying, the front paws reach out ahead
       if (!leg.front) leg.at.z += fold * d.thigh * 0.45;
-      else leg.at.z += lie * this.legLen * 0.8;
+      else leg.at.z += frontOut * this.legLen * 0.8 + P.stretch * this.legLen * 0.95;
       leg.fold = leg.front ? 0 : fold;
     });
+    // grooming: the left front paw up to the face
+    if (P.groom > 0.01) this.legs[0].at.add(_w.set(0, this.legLen * 0.85 * P.groom, this.legLen * 0.35 * P.groom));
 
     // --- hips and chest: walking, each as high as its legs can reach; sitting, the hips
     // down on the haunches and the chest kept up; lying, both down on the belly
@@ -242,7 +266,7 @@ export class QuadAnimator {
         if (leg.front !== front) continue;
         const dz = front ? leg.at.z - leg.rest.z : 0;
         const dzh = front ? 0 : leg.at.z - leg.rest.z - fold * d.thigh * 0.45;
-        const z = front ? dz - lie * this.legLen * 0.8 : dzh;
+        const z = front ? dz - frontOut * this.legLen * 0.8 - P.stretch * this.legLen * 0.95 : dzh;
         drop = Math.max(drop, leg.reach - Math.sqrt(Math.max(1e-6, leg.reach * leg.reach - z * z)));
       }
       return drop;
@@ -251,7 +275,8 @@ export class QuadAnimator {
     if (landed) this.events.push('step');
     const walkH = this.hipsRest.y - sink(false);
     const walkC = this.chestRestY - sink(true);
-    const sitH = G * 1.15, sitC = this.chestRestY + G * 0.1;
+    // (a cat sits up straighter: the chest well up over the front paws)
+    const sitH = G * 1.15, sitC = this.chestRestY + G * (this.cat ? 1.4 : 0.1);
     const lieH = G * 0.95, lieC = G * 1.05;
     let Yh = walkH + (sitH - walkH) * sit;
     let Yc = walkC + (sitC - walkC) * sit;
@@ -259,6 +284,10 @@ export class QuadAnimator {
     Yc += (lieC - Yc) * lie;
     // sniffing: the front end dips toward the ground
     Yc -= P.sniff * (this.chestRestY - this.hipsRest.y + G * 0.6) * 0.3;
+    // prowling: everything low; the stretch: the chest right down, the hips up
+    Yh -= prowl * this.legLen * 0.28;
+    Yc -= prowl * this.legLen * 0.33 + P.stretch * this.legLen * 0.55;
+    Yh += P.stretch * this.legLen * 0.05;
     // a bark: a jolt up through the chest
     let barkK = 0;
     if (this.barkT >= 0) {
@@ -290,15 +319,22 @@ export class QuadAnimator {
     this.lookYaw += (wantYaw - this.lookYaw) * Math.min(1, dt * 5);
     this.lookPitch += (wantPitch - this.lookPitch) * Math.min(1, dt * 5);
     const sniffBob = P.sniff * 0.06 * Math.sin(this.t * 15);
-    J.neck.rotation.set(this.neckRest - pitch * 0.85 + 0.05 * Math.min(1, w) * Math.sin(4 * Math.PI * m.phase) + P.sniff * 1.15 + lie * 0.35 + this.lookPitch * 0.5, this.lookYaw * 0.55, 0, 'YXZ');
-    J.head.rotation.set(this.headRest + P.sniff * 0.45 + sniffBob - barkK * 0.35 + this.lookPitch * 0.5 - lie * 0.1, this.lookYaw * 0.45, 0, 'YXZ');
+    // (a cat: prowling, head down and forward; grooming, bowed to the paw with a lick's bob; curled up, tucked round to the tail; stretching, up)
+    const lick = P.groom * (0.35 + 0.1 * Math.sin(this.t * 9));
+    J.neck.rotation.set(this.neckRest - pitch * 0.85 + 0.05 * Math.min(1, w) * Math.sin(4 * Math.PI * m.phase) + P.sniff * 1.15 + lie * 0.35 + this.lookPitch * 0.5 + prowl * 0.45 + lick * 0.6 + P.curl * 0.4 - P.stretch * 0.5, this.lookYaw * 0.55 * (1 - P.curl) + P.groom * 0.25 + P.curl * 1.0, 0, 'YXZ');
+    J.head.rotation.set(this.headRest + P.sniff * 0.45 + sniffBob - barkK * 0.35 + this.lookPitch * 0.5 - lie * 0.1 - prowl * 0.35 + lick * 0.5 + P.curl * 0.25 + P.stretch * 0.3, this.lookYaw * 0.45 * (1 - P.curl) + P.curl * 0.35, P.groom * 0.25 + P.curl * 0.3, 'YXZ');
+    // curled up: the body bent round too
+    J.chest.rotation.y = P.curl * 1.0;
 
     // --- tail: swinging with the stride, wagging; down behind on the ground sitting or lying
     const wag = this.wag * Math.sin(this.t * 14);
-    const tailDown = fold * 0.9;
-    J.tail0.rotation.set(this.tailRest[0] - 0.1 * Math.min(1, w) - tailDown, 0.25 * Math.min(1, w) * Math.sin(2 * Math.PI * m.phase) + 0.6 * wag, 0, 'YXZ');
-    J.tail1.rotation.set(this.tailRest[1] * (1 - fold * 0.8), 0.15 * wag, 0, 'YXZ');
-    J.tail2.rotation.set(this.tailRest[2] * (1 - fold * 0.8), 0.2 * wag, 0, 'YXZ');
+    if (this.cat) this.catTail(w, m.phase, prowl, fold, P.curl);
+    else {
+      const tailDown = fold * 0.9;
+      J.tail0.rotation.set(this.tailRest[0] - 0.1 * Math.min(1, w) - tailDown, 0.25 * Math.min(1, w) * Math.sin(2 * Math.PI * m.phase) + 0.6 * wag, 0, 'YXZ');
+      J.tail1.rotation.set(this.tailRest[1] * (1 - fold * 0.8), 0.15 * wag, 0, 'YXZ');
+      J.tail2.rotation.set(this.tailRest[2] * (1 - fold * 0.8), 0.2 * wag, 0, 'YXZ');
+    }
 
     // --- legs
     dog.root.updateMatrixWorld(true);
@@ -347,6 +383,51 @@ export class QuadAnimator {
     }
     dog.root.updateMatrixWorld(true);
     placePupils(dog.eyes, this.gazeAt ?? this.look, this.pupils, dt, lid);
+  }
+
+  /**
+   * A cat's tail: up, the tip curled over (a question mark), swaying a
+   * little as it goes; low and straight out behind prowling, the tip
+   * twitching; wrapped round to the front sitting or lying (further round
+   * curled up). `wag` swishes it.
+   */
+  private catTail(w: number, phase: number, prowl: number, fold: number, curl: number) {
+    const J = this.dog.joints;
+    const t = this.t;
+    const wrap = Math.min(1, fold + curl);
+    const low = prowl * (1 - wrap);
+    const up = 1 - low; // (of what's not wrapped)
+    const swish = this.wag * Math.sin(this.t * 5);
+    const sway = 0.12 * Math.sin(t * 1.3) + 0.1 * Math.min(1, w) * Math.sin(2 * Math.PI * phase);
+    const twitch = 0.45 * Math.sin(t * 6.5) * Math.max(0, Math.sin(t * 1.7));
+    // up (the tip curled over) or low behind (the tip twitching): angles in each segment's parent
+    const mix = (u: number, l: number) => up * u + low * l;
+    J.tail0.rotation.set(mix(2.8, 1.55), up * sway + 0.5 * swish, 0, 'YXZ');
+    J.tail1.rotation.set(mix(-0.2, 0.12), 0.3 * swish, 0, 'YXZ');
+    J.tail2.rotation.set(mix(-1.5, -0.25), 0.4 * swish + twitch * low, 0, 'YXZ');
+    if (wrap < 0.01) return;
+    // wrapped: each segment turned to point a set way in the cat's own frame (so the hips' tilt
+    // doesn't matter): down to the ground behind, out to the left (where a curled-up head comes
+    // round to), and on round toward the front; further round curled up
+    const r = curl;
+    const ways = [
+      _w.set(0.45 + 0.3 * r, -0.65, -1),
+      new THREE.Vector3(1, -0.08, 0.1 + 0.6 * r),
+      new THREE.Vector3(0.35 - 0.6 * r, -0.03, 1),
+    ].map((v) => v.clone().normalize());
+    this.dog.root.updateMatrixWorld(true);
+    this.dog.root.getWorldQuaternion(_qRoot);
+    ['tail0', 'tail1', 'tail2'].forEach((name, k) => {
+      const j = J[name as 'tail0'];
+      j.updateMatrix();
+      j.parent!.updateMatrixWorld(true);
+      j.parent!.getWorldQuaternion(_qParent);
+      const dir = ways[k].applyQuaternion(_qRoot);
+      _qa.setFromUnitVectors(DOWN, dir); // (a segment hangs along its own −y)
+      _qb.copy(_qParent).invert().multiply(_qa);
+      j.quaternion.slerp(_qb, wrap);
+      j.updateMatrixWorld(true);
+    });
   }
 
   /** The hind leg's raised segment (hock above the paw) now: tilted back as the paw comes up, down flat behind it sitting. */
