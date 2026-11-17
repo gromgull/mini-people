@@ -208,8 +208,14 @@ export class Stage {
   }
 
   /** Seconds since the last call, capped (a stalled tab shouldn't teleport anyone). */
+  /**
+   * This frame's time step: what really passed, capped so a stall (a hidden
+   * tab, a hitch) doesn't lurch the world on. The cap allows two frames' worth
+   * at a low ?maxfps, so the world keeps real time at 4 fps as at 60.
+   */
   delta() {
-    return Math.min(this.clock.getDelta(), 0.1);
+    const cap = Math.max(0.1, this.look.maxFps > 0 ? 2 / this.look.maxFps : 0);
+    return Math.min(this.clock.getDelta(), cap);
   }
 
   /**
