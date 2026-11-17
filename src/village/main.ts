@@ -29,6 +29,7 @@ import { type AppHooks, runApp } from '../app';
 import { VillageDog } from './dog';
 import { buildDog, randomCat, randomDog } from '../quadruped';
 import { type CatSpot, VillageCat } from './cat';
+import { Director, type Interest } from './ambient';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -941,12 +942,8 @@ function simulate(dt: number) {
  * the view is centred on all that and zoomed to fit it with a margin, for
  * whatever shape the window is. (?tx/?tz and ?zoom still win.)
  */
-function frameVillage() {
-  const cam = stage.camera;
-  stage.resize();
-  cam.updateMatrixWorld();
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+/** The village's outline: points round every house and district, at the ground and at the tops of things. */
+function villagePoints() {
   const pts: THREE.Vector3[] = [];
   const round = (x: number, z: number, r: number, h: number) => {
     for (let k = 0; k < 8; k++) {
@@ -961,6 +958,16 @@ function frameVillage() {
   round(L.field.x, L.field.z, 3.6, 0.5);
   round(L.windmill.x, L.windmill.z, 2, 4.5);
   round(L.green.x, L.green.z, L.green.R, 1.5);
+  return pts;
+}
+
+function frameVillage() {
+  const cam = stage.camera;
+  stage.resize();
+  cam.updateMatrixWorld();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+  const pts = villagePoints();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const p of pts) {
     const sx = p.dot(right), sy = p.dot(up);
@@ -982,6 +989,65 @@ function frameVillage() {
   }
 }
 frameVillage();
+
+/**
+ * ?ambient=1: the village as a moving picture (a desktop background): no
+ * menu, hint, panel or pointer, no taking input; the camera looks after
+ * itself (ambient.ts): slowly round the whole village, now and then down
+ * close on something going on.
+ */
+const ambient = q.has('ambient');
+const director = ambient
+  ? (() => {
+      // the wide view: round the middle of the village, close enough to see it all from any side
+      const pts = villagePoints();
+      const xs = pts.map((p) => p.x), zs = pts.map((p) => p.z);
+      const c = new THREE.Vector3((Math.min(...xs) + Math.max(...xs)) / 2, 0.5, (Math.min(...zs) + Math.max(...zs)) / 2);
+      const cam = stage.camera;
+      let zoom = Infinity;
+      for (let k = 0; k < 12; k++) {
+        const az = (k / 12) * Math.PI * 2, el = THREE.MathUtils.degToRad(40);
+        const back = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+        const right = new THREE.Vector3(0, 1, 0).cross(back).normalize();
+        const up = back.clone().cross(right);
+        let sx = 0, sy = 0;
+        for (const p of pts) {
+          const d = p.clone().sub(c);
+          sx = Math.max(sx, Math.abs(d.dot(right)));
+          sy = Math.max(sy, Math.abs(d.dot(up)));
+        }
+        zoom = Math.min(zoom, (cam.right - cam.left) / (2 * sx * 1.04), (cam.top - cam.bottom) / (2 * sy * 1.04));
+      }
+      // (a touch closer than fits every last corner from every side: less empty grass)
+      return new Director(cam, stage.controls, { x: c.x, z: c.z, zoom: zoom * 1.15 }, interests, () => village.hours >= 23 || village.hours < 6.5);
+    })()
+  : null;
+if (ambient) {
+  document.getElementById('hint')?.remove();
+  settings.panel = false;
+  document.body.style.cursor = 'none';
+}
+
+/**
+ * What's going on, for the ambient camera: people at their work (more for
+ * something to watch: felling, the saw, fishing, a trip; the band; dancing;
+ * supper), the windmill turning, the oven fired, the cat about something.
+ */
+function interests(): Interest[] {
+  const out: Interest[] = [];
+  people.forEach((p, i) => {
+    const j = jobs[i];
+    if (j.asleep || !p.root.visible) return;
+    const k = crowd.actors[i].kind;
+    const s = !k ? (crowd.motions[i].speed > 0.1 ? 0.2 : 0) : kindIs(k, 'dramatic') || kindIs(k, 'music') ? 3 : k === 'dance' ? 2.5 : kindIs(k, 'working') ? 2 : kindIs(k, 'meal') ? 1.2 : 0.6;
+    if (s > 0) out.push({ x: walkers[i].x, z: walkers[i].z, score: s });
+  });
+  if (windmill.turning) out.push({ x: windmill.x, z: windmill.z, score: 2.5, zoom: 1.5, height: 1.3 });
+  if (bakery.oven.firing) out.push({ x: bakery.oven.x, z: bakery.oven.z, score: 1.5, zoom: 2.6, height: 0.6 });
+  if (village.bandPlaying()) out.push({ x: L.green.x, z: L.green.z, score: 3, zoom: 1.9 });
+  if (['stalking', 'napping', 'grooming', 'begging'].includes(cat.doing)) out.push({ x: cat.walker.x, z: cat.walker.z, score: 1.5, zoom: 4, height: 0.15 });
+  return out;
+}
 
 // ---------------------------------------------------------------- watching it
 
@@ -1017,7 +1083,7 @@ function updatePanel() {
 
 const gui = new GUI({ title: 'Village' });
 gui.close(); // (folded up till someone wants it)
-if (q.has('nogui')) gui.hide();
+if (q.has('nogui') || ambient) gui.hide();
 gui.add(settings, 'speed', { '×1': 1, '×4': 4, '×16': 16 }).name('speed');
 gui.add(settings, 'paused');
 gui.add(settings, 'panel').name("who's doing what");
@@ -1031,6 +1097,7 @@ ray.layers.enable(PARTS_LAYER);
 let downAt: [number, number] | null = null;
 stage.renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
 stage.renderer.domElement.addEventListener('pointerup', (e) => {
+  if (ambient) return;
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
   ray.setFromCamera(new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1), stage.camera);
   const hit = ray.intersectObjects(people.map((p) => p.root), true)[0];
@@ -1039,6 +1106,7 @@ stage.renderer.domElement.addEventListener('pointerup', (e) => {
   follow = o ? o.userData.index : -1;
 });
 window.addEventListener('keydown', (e) => {
+  if (ambient) return;
   if (e.key === ' ') settings.paused = !settings.paused;
   if (e.key === 'f' || e.key === 'F') settings.speed = settings.speed === 1 ? 4 : settings.speed === 4 ? 16 : 1;
   if (e.key === 'Escape') follow = -1;
@@ -1083,7 +1151,8 @@ const hooks: AppHooks = {
     return true;
   },
   follow: (dt, first) => {
-    if (follow >= 0) focusOn(follow, first ? 1 : 1 - Math.exp(-dt * 4));
+    if (director) director.update(dt);
+    else if (follow >= 0) focusOn(follow, first ? 1 : 1 - Math.exp(-dt * 4));
   },
   scenery: () => {
     pond.update(simTime);
