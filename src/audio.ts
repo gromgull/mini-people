@@ -343,6 +343,52 @@ export class Sound {
   }
 
   /**
+   * A cat's meow: "mi-aow", the pitch up and then down (smaller cats
+   * higher), through a mouth that opens to an "ee" and rounds to an "ow".
+   */
+  meow(size: number, w: Where) {
+    if (!this.live || !this.allow('voices')) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005;
+    const o = this.out('voices', w);
+    const dur = 0.42 + Math.random() * 0.3;
+    const f0 = (520 + Math.random() * 120) / size;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(f0 * 0.85, t);
+    osc.frequency.linearRampToValueAtTime(f0 * 1.35, t + dur * 0.3);
+    osc.frequency.linearRampToValueAtTime(f0 * 0.8, t + dur);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+    const mouth = this.filter('bandpass', 1100, 2.2);
+    mouth.frequency.setValueAtTime(1100, t);
+    mouth.frequency.linearRampToValueAtTime(2300, t + dur * 0.3);
+    mouth.frequency.linearRampToValueAtTime(850, t + dur);
+    osc.connect(mouth).connect(this.filter('lowpass', 3500, 0.7)).connect(this.env(t, 0.32, 0.04, dur)).connect(o);
+  }
+
+  /** A purr: a low rumble pulsing about 25 times a second, over two slow breaths (in, out). */
+  purr(w: Where) {
+    if (!this.live || !this.allow('voices')) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime + 0.005;
+    const o = this.out('voices', w);
+    for (const [start, len] of [[0, 0.75], [0.85, 0.9]]) {
+      const ts = t + start;
+      const pulse = ctx.createGain();
+      pulse.gain.value = 0.5;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 24 + Math.random() * 4;
+      const depth = ctx.createGain();
+      depth.gain.value = 0.5;
+      lfo.connect(depth).connect(pulse.gain);
+      lfo.start(ts);
+      lfo.stop(ts + len + 0.05);
+      this.noiseSrc(ts, len).connect(this.filter('lowpass', 260, 1)).connect(pulse).connect(this.env(ts, 0.5, 0.15, len)).connect(o);
+    }
+  }
+
+  /**
    * Double bass, plucked: a round, woody low note (the fundamental with a
    * couple of harmonics so small speakers still carry it), a soft thump at
    * the start, a long-ish fade.

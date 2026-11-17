@@ -641,6 +641,10 @@ labBtn(labDog, 'bark bark', () => labAt([0, 0.3], () => sound.woof(0.95, C)));
 const PAWS = { f0: 300, formant: 1.6, rate: 1, weight: 0 };
 labBtn(labDog, 'paws: walking', () => labAt([0, 1, 2, 3, 4, 5, 6, 7].map((k) => k * 0.22), (k) => sound.step(PAWS, { pan: k % 2 ? 0.1 : -0.1, gain: 0.7 })));
 labBtn(labDog, 'paws: trotting', () => labAt([0, 1, 2, 3, 4, 5, 6, 7].map((k) => k * 0.12), (k) => sound.step(PAWS, { pan: k % 2 ? 0.1 : -0.1, gain: 0.7 })));
+const labCat = lab.addFolder('Cat').close();
+labBtn(labCat, 'meow', () => sound.meow(0.85, C));
+labBtn(labCat, 'meow: small cat', () => sound.meow(0.7, C));
+labBtn(labCat, 'purr', () => sound.purr(C));
 
 window.addEventListener('keydown', (e) => {
   const k = ({ '1': 'wave', '2': 'hammer', '3': 'jump', '4': 'fall', '5': 'carry', '6': 'sit', '7': 'talk', '8': 'saw', '9': 'fiddle', '0': 'dance' } as const)[e.key as '1'];

@@ -27,7 +27,8 @@ import { InnTable } from './inn';
 import { makeLayout } from './layout';
 import { type AppHooks, runApp } from '../app';
 import { VillageDog } from './dog';
-import { buildDog, randomDog } from '../quadruped';
+import { buildDog, randomCat, randomDog } from '../quadruped';
+import { type CatSpot, VillageCat } from './cat';
 
 /**
  * The village: a little settlement where people do jobs that feed each
@@ -412,8 +413,39 @@ const dog = (() => {
 })();
 /** The dog's footfalls: a person's step, as light as it gets. */
 const DOG_PAWS = { f0: 300, formant: 1.6, rate: 1, weight: 0 };
-/** Everyone's walkers, the dog's too: so they keep out of each other's way. */
-const allWalkers = [...walkers, dog.walker];
+/** The village cat: nobody's; it sleeps by the inn's door (the side the dog doesn't). */
+const catBed = (() => {
+  const h = homes[INNKEEPER];
+  return { x: h.x - Math.cos(h.yaw) * 0.7 + Math.sin(h.yaw) * 0.3, z: h.z + Math.sin(h.yaw) * 0.7 + Math.cos(h.yaw) * 0.3, yaw: h.yaw };
+})();
+const cat = (() => {
+  const body = buildDog(randomCat(settings.seed), stage.toon, stage.outline, { skin: stage.skinMats });
+  const c = stage.makeCaster(body.dims.bodyLen * 0.8, body.height);
+  body.root.add(c.pivot);
+  body.root.userData.shadow = c;
+  stage.scene.add(body.root);
+  return new VillageCat(body, catBed.x, catBed.z, catBed.yaw);
+})();
+const CAT_PAWS = { f0: 340, formant: 1.7, rate: 1, weight: 0 };
+/** Its favourite spots: where it sits, grooms, loafs and naps; where it stalks (the pond's edge, the fish rack); the oven when it's warm. */
+const catSpots: CatSpot[] = (() => {
+  const toward = (x: number, z: number, d: number) => {
+    const l = Math.hypot(x, z) || 1;
+    return { x: x - (x / l) * d, z: z - (z / l) * d };
+  };
+  return [
+    { x: L.pile.x, z: L.pile.z },
+    { x: L.green.x, z: L.green.z },
+    { x: L.bench.x, z: L.bench.z },
+    { x: L.pondBench.x, z: L.pondBench.z },
+    { x: L.stook.x, z: L.stook.z },
+    { ...toward(L.pond.x, L.pond.z, L.pond.R + 0.5), hunt: true },
+    { x: L.rack.x, z: L.rack.z, hunt: true },
+    { x: L.bakery.x, z: L.bakery.z, warm: () => bakery.oven.heat > 0.3 },
+  ];
+})();
+/** Everyone's walkers, the dog's and the cat's too: so they keep out of each other's way. */
+const allWalkers = [...walkers, dog.walker, cat.walker];
 const houseObstacles: Obstacle[] = houses.buildings.map((b) => ({ kind: 'box', x: b.x, z: b.z, yaw: b.yaw, hx: b.half.x, hz: b.half.z }));
 const pileObstacle: Obstacle = { kind: 'box', x: pile.x, z: pile.z, yaw: pile.yaw, hx: LOG_L / 2 + 0.04, hz: 0.22 };
 const horseObstacle: Obstacle = (() => {
@@ -843,6 +875,28 @@ function simulate(dt: number) {
       else crowd.sound.step(DOG_PAWS, { pan: w.pan, gain: w.gain * 0.7 });
     },
   });
+  cat.step({
+    time: simTime,
+    dt,
+    hours: village.hours,
+    phase: village.phase,
+    people: people.map((p, i) => ({ walker: walkers[i], root: p.root, height: p.dims.height, doing: jobs[i].doing, asleep: jobs[i].asleep })),
+    dog: { x: dog.walker.x, z: dog.walker.z, speed: dog.m.speed },
+    spots: catSpots,
+    bed: catBed,
+    hatch: village.hatch.stand,
+    green: L.green,
+    obstacles: obs,
+    walkers: about,
+    camera: stage.camera.position,
+    sound: (kind) => {
+      const w = crowd.whereAt(cat.cat.root, cat.cat.height);
+      if (!w || !crowd.sound.live) return;
+      if (kind === 'meow') crowd.sound.meow(cat.cat.genome.size, w);
+      else if (kind === 'purr') crowd.sound.purr({ ...w, gain: w.gain * 0.7 });
+      else crowd.sound.step(CAT_PAWS, { pan: w.pan, gain: w.gain * 0.45 });
+    },
+  });
   crowd.endStep(dt);
   talk();
   forest.update(simTime);
@@ -946,6 +1000,7 @@ function updatePanel() {
   panel.textContent = [
     ...rows,
     `  🐕 dog        ${dog.doing} (${VILLAGERS[DOG_OWNER].name}'s)`,
+    `  🐈 cat        ${cat.doing || '…'}`,
     `day ${village.day} · the wind: ${wind.words} (${wind.strength.toFixed(2)})`,
     `wheat: ${(['ripe', 'cut', 'growing', 'stubble'] as const).map((k) => `${k} ${field.strips.filter((s) => s.state === k).length}`).join(' · ')} · strips mown ${village.stats.mown} · stook ${stook.count}/${stook.slots.length}`,
     `bakery: oven ${bakery.oven.firing ? 'firing' : bakery.oven.hot ? 'hot' : bakery.oven.heat > 0.2 ? 'cooling' : 'cold'} · flour ${bakery.flour.count} · wood ${bakery.wood.count} · batches baked ${village.stats.baked} · on the shelf ${bakery.shelf.count} · at the inn ${innBread.count} (taken ${village.stats.breadIn})`,
@@ -999,13 +1054,15 @@ let follow = (() => {
   const f = q.get('follow');
   if (f === null) return -1;
   if (f === 'dog') return VILLAGERS.length;
+  if (f === 'cat') return VILLAGERS.length + 1;
   if (/^\d+$/.test(f)) return Number(f);
   const byName = VILLAGERS.findIndex((v) => v.name === f);
   return byName >= 0 ? byName : VILLAGERS.findIndex((v) => v.role === f);
 })();
 function focusOn(i: number, k: number) {
   // (one past the villagers: the dog)
-  const it = people[i] ? { root: people[i].root, h: people[i].dims.height } : i === people.length ? { root: dog.dog.root, h: dog.dog.height * 2 } : null;
+  // (one past them, the dog; two past, the cat)
+  const it = people[i] ? { root: people[i].root, h: people[i].dims.height } : i === people.length ? { root: dog.dog.root, h: dog.dog.height * 2 } : i === people.length + 1 ? { root: cat.cat.root, h: cat.cat.height * 2 } : null;
   if (!it) return;
   const c = stage.controls;
   const off = stage.camera.position.clone().sub(c.target);
@@ -1036,6 +1093,7 @@ const hooks: AppHooks = {
   },
   shadows: () => {
     stage.orient(dog.dog.root.userData.shadow, dog.dog.root.rotation.y);
+    stage.orient(cat.cat.root.userData.shadow, cat.cat.root.rotation.y);
     forest.orientShadows();
     orchard.orientShadows(stage);
     houses.updateShadows(stage.lightWorld, look.shadowLength);
@@ -1046,7 +1104,7 @@ const hooks: AppHooks = {
     if (frame % 6 === 0) updatePanel();
   },
   testHook: () => ({
-    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX, obstacles: obstacles(), nearest, dogOwner: DOG_OWNER, stores: allStores(), flags, fromTemplate: L.fromTemplate }),
+    debug: () => ({ actors: crowd.actors, motions: crowd.motions, walkers, logs, pile, horse, forest, jobs, village, dog, linger: LINGER, kegsMax: KEGS_MAX, obstacles: obstacles(), nearest, dogOwner: DOG_OWNER, cat, stores: allStores(), flags, fromTemplate: L.fromTemplate }),
     follow: (i: number) => (follow = i),
     step: (sec: number) => {
       simulateSteps(Math.round(sec * 30), 1 / 30);

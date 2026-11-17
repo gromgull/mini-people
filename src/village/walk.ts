@@ -91,6 +91,8 @@ export class Walker {
   private path: Waypoint[] | null = null;
   private pathTo: Waypoint | null = null;
   private replans = 0;
+  /** Squeezing through a crowd till then (clock): people don't push them off or steer them round. */
+  private squeezeUntil = -1;
 
   constructor(public x: number, public z: number, public yaw: number) {}
 
@@ -162,8 +164,10 @@ export class Walker {
       this.best = Infinity;
       this.bestAt = this.clock;
     } else if (dist >= 0.7 && this.clock - this.bestAt > 3) {
-      // stuck in a pocket on a long walk: step well off to one side (alternating), then try again
+      // stuck in a pocket on a long walk: step well off to one side (alternating), then try again;
+      // and for a few seconds squeeze past people (hemmed in by a crowd, nothing else will do)
       this.detours++;
+      this.squeezeUntil = this.clock + 4;
       const side = this.detours % 2 ? 1 : -1;
       const ux = (tx - this.x) / dist, uz = (tz - this.z) / dist;
       g.via = { x: this.x - uz * side * 1.6 - ux * 0.4, z: this.z + ux * side * 1.6 - uz * 0.4 };
@@ -217,7 +221,8 @@ export class Walker {
       sx += -dz * Math.sign(side) * w;
       sz += dx * Math.sign(side) * w;
     }
-    // and keep out of each other's way
+    // and keep out of each other's way (unless squeezing past)
+    if (this.clock < this.squeezeUntil) others = [];
     for (const o of others) {
       if (o === this) continue;
       const ox = this.x - o.x, oz = this.z - o.z;
@@ -253,7 +258,7 @@ export class Walker {
         this.z += n.nz * (BODY - n.gap);
       }
     }
-    for (const o of others) {
+    for (const o of this.clock < this.squeezeUntil ? [] : others) {
       if (o === this) continue;
       const ox = this.x - o.x, oz = this.z - o.z;
       const d = Math.hypot(ox, oz);

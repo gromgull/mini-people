@@ -47,6 +47,7 @@ const result = await page.evaluate(([secs, rng]) => {
   const since = new Map(); // job index → [step, since]
   const trails = new Map(); // job index → where they've been, the last half-minute
   const dogDid = new Set(); // what the dog got up to
+  const catDid = new Set(); // and the cat
   const lying = new Map(); // item → since when it's been on the ground
   const winds = new Set(); // how windy it got, in words
   for (let s = 1; s <= secs; s++) {
@@ -134,6 +135,11 @@ const result = await page.evaluate(([secs, rng]) => {
     if (!Number.isFinite(dw.x) || !Number.isFinite(dw.z)) say('the dog at NaN');
     if (Math.hypot(dw.x, dw.z) > 40) say(`the dog wandered off to (${dw.x.toFixed(1)}, ${dw.z.toFixed(1)})`);
     dogDid.add(d.dog.doing);
+    // the cat
+    const cw = d.cat.walker;
+    if (!Number.isFinite(cw.x) || !Number.isFinite(cw.z)) say('the cat at NaN');
+    if (Math.hypot(cw.x, cw.z) > 40) say(`the cat wandered off to (${cw.x.toFixed(1)}, ${cw.z.toFixed(1)})`);
+    catDid.add(d.cat.doing);
     winds.add(d.village.wind.words);
     d.jobs.forEach((j, i) => {
       const [step, at] = since.get(i) ?? ['', 0];
@@ -154,7 +160,7 @@ const result = await page.evaluate(([secs, rng]) => {
     });
   }
   const d = m.debug();
-  return { bad, dogDid: [...dogDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax, day: d.village.day, winds: [...winds], fromTemplate: d.fromTemplate };
+  return { bad, dogDid: [...dogDid], catDid: [...catDid], asleep: d.jobs.filter((j) => j.asleep).length, hours: d.village.hours, stats: d.village.stats, wood: { yard: d.village.yard.count, inn: d.village.inn.count, rack: d.village.rack.count, larder: d.village.larder.count }, logs: d.logs.length, pile: d.pile.count, standing: d.forest.trees.filter((t) => t.state === 'standing').length, trees: d.forest.trees.length, kegs: d.village.items.filter((it) => it.kind === 'keg').length, kegsMax: d.kegsMax, day: d.village.day, winds: [...winds], fromTemplate: d.fromTemplate };
 }, [Number(seconds), rng]);
 
 problems.push(...result.bad);
@@ -191,6 +197,8 @@ if (Number(seconds) >= 900) {
   if (result.stats.meals < 4) problems.push(`only ${result.stats.meals} suppers served`);
   if (result.stats.slept < 8) problems.push(`only ${result.stats.slept} went to bed`);
   for (const s of ['with its owner', 'begging', 'asleep']) if (!result.dogDid.includes(s)) problems.push(`the dog was never ${s}`);
+  for (const s of ['wandering', 'asleep']) if (!result.catDid.includes(s)) problems.push(`the cat was never ${s}`);
+  if (!result.catDid.includes('begging') && !result.catDid.includes('by the hatch')) problems.push('the cat was never at supper (begging, or by the hatch)');
   if (result.stats.lamps < 1) problems.push('nobody lit the lamp');
   if (result.stats.evening < 6) problems.push(`only ${result.stats.evening} tunes and dances on the green`);
   // (up again, if it ended after they wake: a run ending in the small hours finds them abed, as it should)
@@ -205,6 +213,7 @@ console.log(`  day ${result.day} now; the wind was ${result.winds.join(', ')}`);
 console.log(`  wheat: strips mown ${result.stats.mown}, sheaves stooked ${result.stats.sheaves}`);
 console.log(`  windmill: threshed ${result.stats.threshed}, sails turned ${Math.round(result.stats.sailing)}s, flour ${result.stats.flour}`);
 console.log(`  bakery: batches ${result.stats.baked}, bread to the inn ${result.stats.breadIn}; suppers of fish ${result.stats.eaten}, of bread ${result.stats.breadEaten}`);
+console.log(`  the cat: ${result.catDid.filter(Boolean).join(', ')}`);
 console.log(`  trips: ${result.stats.trips}, picked up again ${result.stats.pickedUp}`);
 console.log(`  cooper: shaved ${result.stats.shaved}, kegs made ${result.stats.kegsMade}, brought back ${result.stats.kegsBack}, hooped ${result.stats.hooped}; ${result.kegs} kegs in all`);
 console.log(`  fish: caught ${result.stats.caught}, dried ${result.stats.dried}, to the larder ${result.stats.fishIn}, eaten ${result.stats.eaten}, rack ${result.wood.rack}, larder ${result.wood.larder}`);

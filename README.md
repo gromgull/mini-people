@@ -297,6 +297,17 @@ So far it has one chain:
   owner, whoever it's greeting), or glancing about at people nearby and
   now and then at you; it blinks, and its paws patter. (`?follow=dog`
   follows it.)
+- **The cat:** every village has one too, and it's nobody's. By day it
+  wanders between its favourite spots (the woodpile, the green, a bench,
+  the stook, the pond's edge, the bakery's oven when it's warm) and at each
+  sits and looks about, grooms, loafs, or naps curled up, getting up again
+  with a stretch. At the pond's edge or under the drying rack it now and
+  then stalks something: creeps up low, holds a moment, pounces, then sits
+  and grooms as if nothing happened. It keeps off the dog (trotting away if
+  it comes close, staring it out with its tail swishing if not). At supper
+  it begs at the tables, then loafs by the kitchen hatch; after dark it's
+  about the green a while, then sleeps curled up by the inn's door,
+  purring now and then. It meows. (`?follow=cat` follows it.)
 - **Talk:** people chat over whatever else they're doing, with gestures of
   a free hand, nods and head-shakes, gibberish voices taking turns, and eyes
   on each other. Diners at a table talk in pairs while they wait for supper,
